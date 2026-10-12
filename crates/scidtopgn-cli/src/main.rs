@@ -56,10 +56,17 @@ fn export_command(args: &ExportArgs) -> Result<()> {
     };
 
     let total = db.num_games();
+    let mut exported = 0u32;
     for i in 0..total {
+        // Skip logically deleted games, matching the reference converter.
+        if db.get_entry(i).is_none_or(|e| e.get_delete_flag()) {
+            continue;
+        }
+
         let game = db.get_game(i)?;
         let pgn = game.to_pgn();
         writeln!(writer, "{}", pgn)?;
+        exported += 1;
 
         if args.verbose && (i + 1) % 100 == 0 {
             eprintln!("Processed {}/{} games", i + 1, total);
@@ -67,7 +74,7 @@ fn export_command(args: &ExportArgs) -> Result<()> {
     }
 
     if args.verbose {
-        eprintln!("Done. {} games exported.", total);
+        eprintln!("Done. {} games exported.", exported);
     }
 
     Ok(())
