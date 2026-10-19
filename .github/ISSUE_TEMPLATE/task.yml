@@ -1,0 +1,46 @@
+name: Task
+description: Propose a discrete implementation or maintenance task.
+title: ''
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What needs to change, and why?
+    validations:
+      required: true
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe the observable result.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List the conditions that must be satisfied.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: Non-goals
+      description: Identify adjacent work that is deliberately excluded.
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Include constraints, dependencies, screenshots, or references.
+    validations:
+      required: false
