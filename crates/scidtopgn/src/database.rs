@@ -353,9 +353,9 @@ impl Database {
                 buf.put_byte(crate::mov::ENCODE_COMMENT)?;
             }
 
-            if node.var_child.is_some() {
+            if let Some(var_child) = node.var_child {
                 buf.put_byte(crate::mov::ENCODE_START_MARKER)?;
-                Self::encode_moves(buf, game, node.var_child.unwrap())?;
+                Self::encode_moves(buf, game, var_child)?;
                 buf.put_byte(crate::mov::ENCODE_END_MARKER)?;
             }
 
