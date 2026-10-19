@@ -14,10 +14,9 @@ name = "scidtopgn"
 path = "src/main.rs"
 
 [dependencies]
-scidtopgn = { path = "../scidtopgn" }
+scidtopgn = { path = "../scidtopgn", version = "0.1.0" }
 anyhow = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }
-scidtopgn = { path = "../scidtopgn" }
