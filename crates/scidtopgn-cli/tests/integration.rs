@@ -203,10 +203,13 @@ const ENTRY_FLAGS_LOW_BYTE: usize = 8;
 /// given entries directly in the copied .si4, leaving every record in place.
 fn copy_with_deleted(dir: &std::path::Path, name: &str, deleted: &[u32]) -> std::path::PathBuf {
     let workspace = get_workspace_root();
-    let src = std::path::Path::new(&workspace).join("tests/data").join(name);
+    let src = std::path::Path::new(&workspace)
+        .join("tests/data")
+        .join(name);
     let dst = dir.join(name);
     for ext in ["si4", "sn4", "sg4"] {
-        std::fs::copy(src.with_extension(ext), dst.with_extension(ext)).expect("Failed to copy database");
+        std::fs::copy(src.with_extension(ext), dst.with_extension(ext))
+            .expect("Failed to copy database");
     }
 
     let si4 = dst.with_extension("si4");
@@ -221,7 +224,10 @@ fn copy_with_deleted(dir: &std::path::Path, name: &str, deleted: &[u32]) -> std:
 
     let db = scidtopgn::Database::open(&dst).expect("Failed to open copied database");
     for n in 0..db.num_games() {
-        assert_eq!(db.get_entry(n).unwrap().get_delete_flag(), deleted.contains(&n));
+        assert_eq!(
+            db.get_entry(n).unwrap().get_delete_flag(),
+            deleted.contains(&n)
+        );
     }
     dst
 }
@@ -237,14 +243,29 @@ fn database_bytes(db: &std::path::Path) -> Vec<Vec<u8>> {
 /// both succeed with identical stdout, and returns that output.
 fn export_both_ways(db: &std::path::Path) -> String {
     let bin = env!("CARGO_BIN_EXE_scidtopgn");
-    let default = Command::new(bin).arg(db).output().expect("Failed to run CLI");
-    let explicit = Command::new(bin).arg("export").arg(db).output().expect("Failed to run CLI");
+    let default = Command::new(bin)
+        .arg(db)
+        .output()
+        .expect("Failed to run CLI");
+    let explicit = Command::new(bin)
+        .arg("export")
+        .arg(db)
+        .output()
+        .expect("Failed to run CLI");
 
     for output in [&default, &explicit] {
-        assert!(output.status.success(), "Export should succeed: {}", String::from_utf8_lossy(&output.stderr));
+        assert!(
+            output.status.success(),
+            "Export should succeed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
     let stdout = String::from_utf8(default.stdout).expect("Output should be UTF-8");
-    assert_eq!(stdout, String::from_utf8_lossy(&explicit.stdout), "Both invocations should match");
+    assert_eq!(
+        stdout,
+        String::from_utf8_lossy(&explicit.stdout),
+        "Both invocations should match"
+    );
     stdout
 }
 
@@ -263,10 +284,16 @@ fn test_cli_export_skips_deleted_games() {
         .map(|n| format!("{}\n", db.get_game(n).unwrap().to_pgn()))
         .collect();
     assert_eq!(stdout.matches("[Event \"").count(), 3);
-    assert_eq!(stdout, expected, "Nondeleted games should export in order, unchanged");
+    assert_eq!(
+        stdout, expected,
+        "Nondeleted games should export in order, unchanged"
+    );
 
     assert_eq!(db.num_games(), 5, "Deleted records should remain");
-    assert!(database_bytes(&db_path) == before, "Export should not modify the database");
+    assert!(
+        database_bytes(&db_path) == before,
+        "Export should not modify the database"
+    );
 }
 
 #[test]
@@ -278,5 +305,8 @@ fn test_cli_export_all_deleted() {
     let stdout = export_both_ways(&db_path);
 
     assert!(stdout.is_empty(), "Expected no games, got: {}", stdout);
-    assert!(database_bytes(&db_path) == before, "Export should not modify the database");
+    assert!(
+        database_bytes(&db_path) == before,
+        "Export should not modify the database"
+    );
 }
