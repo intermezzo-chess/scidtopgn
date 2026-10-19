@@ -20,13 +20,25 @@ fn test_cli_count() {
     let workspace = get_workspace_root();
 
     let output = Command::new("cargo")
-        .args(["run", "-p", "scidtopgn-cli", "--release", "--", "tests/data/one", "--count"])
+        .args([
+            "run",
+            "-p",
+            "scidtopgn-cli",
+            "--release",
+            "--",
+            "tests/data/one",
+            "--count",
+        ])
         .current_dir(&workspace)
         .output()
         .expect("Failed to run CLI");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("1 games"), "Expected '1 games' in output, got: {}", stdout);
+    assert!(
+        stdout.contains("1 games"),
+        "Expected '1 games' in output, got: {}",
+        stdout
+    );
 }
 
 #[test]
@@ -34,7 +46,14 @@ fn test_cli_output() {
     let workspace = get_workspace_root();
 
     let output = Command::new("cargo")
-        .args(["run", "-p", "scidtopgn-cli", "--release", "--", "tests/data/one"])
+        .args([
+            "run",
+            "-p",
+            "scidtopgn-cli",
+            "--release",
+            "--",
+            "tests/data/one",
+        ])
         .current_dir(&workspace)
         .output()
         .expect("Failed to run CLI");
@@ -51,7 +70,14 @@ fn test_cli_five_games() {
     let workspace = get_workspace_root();
 
     let output = Command::new("cargo")
-        .args(["run", "-p", "scidtopgn-cli", "--release", "--", "tests/data/five"])
+        .args([
+            "run",
+            "-p",
+            "scidtopgn-cli",
+            "--release",
+            "--",
+            "tests/data/five",
+        ])
         .current_dir(&workspace)
         .output()
         .expect("Failed to run CLI");
@@ -69,7 +95,15 @@ fn test_cli_output_to_file() {
     let output_path = temp.path().join("output.pgn");
 
     let output = Command::new("cargo")
-        .args(["run", "-p", "scidtopgn-cli", "--release", "--", "tests/data/one", "-o"])
+        .args([
+            "run",
+            "-p",
+            "scidtopgn-cli",
+            "--release",
+            "--",
+            "tests/data/one",
+            "-o",
+        ])
         .arg(&output_path)
         .current_dir(&workspace)
         .output()
@@ -89,13 +123,26 @@ fn test_cli_import() {
     let db_path = temp.path().join("imported");
 
     let output = Command::new("cargo")
-        .args(["run", "-p", "scidtopgn-cli", "--release", "--", "import", "tests/data/one.pgn", "-o"])
+        .args([
+            "run",
+            "-p",
+            "scidtopgn-cli",
+            "--release",
+            "--",
+            "import",
+            "tests/data/one.pgn",
+            "-o",
+        ])
         .arg(&db_path)
         .current_dir(&workspace)
         .output()
         .expect("Failed to run CLI");
 
-    assert!(output.status.success(), "Import should succeed: {:?}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "Import should succeed: {:?}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     let mut db = scidtopgn::Database::open(&db_path).expect("Failed to open imported database");
     assert_eq!(db.num_games(), 1, "Should have 1 game");
@@ -106,7 +153,11 @@ fn test_cli_import() {
     assert!(game.eco.is_some(), "ECO should be preserved");
 
     let pgn = game.to_pgn();
-    assert!(pgn.contains("1. e4 c5"), "Moves should be preserved: {}", pgn);
+    assert!(
+        pgn.contains("1. e4 c5"),
+        "Moves should be preserved: {}",
+        pgn
+    );
 }
 
 #[test]
@@ -116,7 +167,16 @@ fn test_cli_import_append() {
     let db_path = temp.path().join("append_test");
 
     let output1 = Command::new("cargo")
-        .args(["run", "-p", "scidtopgn-cli", "--release", "--", "import", "tests/data/one.pgn", "-o"])
+        .args([
+            "run",
+            "-p",
+            "scidtopgn-cli",
+            "--release",
+            "--",
+            "import",
+            "tests/data/one.pgn",
+            "-o",
+        ])
         .arg(&db_path)
         .current_dir(&workspace)
         .output()
@@ -124,7 +184,16 @@ fn test_cli_import_append() {
     assert!(output1.status.success());
 
     let output2 = Command::new("cargo")
-        .args(["run", "-p", "scidtopgn-cli", "--release", "--", "import", "tests/data/one.pgn", "-o"])
+        .args([
+            "run",
+            "-p",
+            "scidtopgn-cli",
+            "--release",
+            "--",
+            "import",
+            "tests/data/one.pgn",
+            "-o",
+        ])
         .arg(&db_path)
         .current_dir(&workspace)
         .output()
@@ -142,7 +211,16 @@ fn test_cli_import_overwrite() {
     let db_path = temp.path().join("overwrite_test");
 
     let output1 = Command::new("cargo")
-        .args(["run", "-p", "scidtopgn-cli", "--release", "--", "import", "tests/data/one.pgn", "-o"])
+        .args([
+            "run",
+            "-p",
+            "scidtopgn-cli",
+            "--release",
+            "--",
+            "import",
+            "tests/data/one.pgn",
+            "-o",
+        ])
         .arg(&db_path)
         .current_dir(&workspace)
         .output()
@@ -150,12 +228,26 @@ fn test_cli_import_overwrite() {
     assert!(output1.status.success());
 
     let output2 = Command::new("cargo")
-        .args(["run", "-p", "scidtopgn-cli", "--release", "--", "import", "tests/data/one.pgn", "--overwrite", "-o"])
+        .args([
+            "run",
+            "-p",
+            "scidtopgn-cli",
+            "--release",
+            "--",
+            "import",
+            "tests/data/one.pgn",
+            "--overwrite",
+            "-o",
+        ])
         .arg(&db_path)
         .current_dir(&workspace)
         .output()
         .expect("Failed to run CLI");
-    assert!(output2.status.success(), "Overwrite should succeed: {:?}", String::from_utf8_lossy(&output2.stderr));
+    assert!(
+        output2.status.success(),
+        "Overwrite should succeed: {:?}",
+        String::from_utf8_lossy(&output2.stderr)
+    );
 
     let db = scidtopgn::Database::open(&db_path).expect("Failed to open database");
     assert_eq!(db.num_games(), 1, "Should have 1 game after overwrite");
@@ -169,7 +261,16 @@ fn test_cli_pgn_roundtrip() {
     let pgn_path = temp.path().join("exported.pgn");
 
     let import_output = Command::new("cargo")
-        .args(["run", "-p", "scidtopgn-cli", "--release", "--", "import", "tests/data/one.pgn", "-o"])
+        .args([
+            "run",
+            "-p",
+            "scidtopgn-cli",
+            "--release",
+            "--",
+            "import",
+            "tests/data/one.pgn",
+            "-o",
+        ])
         .arg(&db_path)
         .current_dir(&workspace)
         .output()

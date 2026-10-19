@@ -46,7 +46,11 @@ fn test_five_database() {
         let game = db.get_game(i).expect(&format!("Failed to get game {}", i));
         let pgn = game.to_pgn();
         assert!(!pgn.is_empty(), "Game {} PGN should not be empty", i);
-        assert!(pgn.contains("[Event \""), "Game {} should have Event tag", i);
+        assert!(
+            pgn.contains("[Event \""),
+            "Game {} should have Event tag",
+            i
+        );
     }
 }
 
@@ -95,5 +99,9 @@ fn test_check_symbol_in_moves() {
     let game = db.get_game(0).expect("Failed to get game");
     let pgn = game.to_pgn();
 
-    assert!(pgn.contains("Qxd2+"), "PGN should contain check symbol: {}", pgn);
+    assert!(
+        pgn.contains("Qxd2+"),
+        "PGN should contain check symbol: {}",
+        pgn
+    );
 }
