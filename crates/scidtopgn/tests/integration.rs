@@ -1,16 +1,12 @@
 use tempfile::TempDir;
 
 fn get_workspace_root() -> String {
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    if manifest_dir.contains("/crates/") {
-        let parent = std::path::Path::new(&manifest_dir)
-            .parent()
-            .and_then(|p| p.parent())
-            .unwrap();
-        parent.to_string_lossy().to_string()
-    } else {
-        manifest_dir
-    }
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .expect("crate should be two levels below the workspace root")
+        .to_string_lossy()
+        .into_owned()
 }
 
 #[test]
