@@ -13,8 +13,11 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # Bump deliberately, together with docs/RELEASING.md and CONTRIBUTING.md.
+  # Bump deliberately, together with KNOPE_SHA256, docs/RELEASING.md, and
+  # CONTRIBUTING.md.
   KNOPE_VERSION: "0.23.0"
+  # SHA-256 of knope-x86_64-unknown-linux-musl.tgz for KNOPE_VERSION.
+  KNOPE_SHA256: "76a970a5e237344abc14be3de37ed50c021b659a9b66b3f54afc77e6d48ac501"
   # The only branch this workflow writes to. Each run replaces its contents.
   VERSION_BRANCH: knope/version
 
@@ -22,6 +25,11 @@ jobs:
   version:
     name: version
     runs-on: ubuntu-latest
+    # Pushes the version branch and opens the PR. Every step here is ours, so
+    # no third-party action gets this token.
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - name: Require main
         if: github.ref != 'refs/heads/main'
@@ -49,10 +57,14 @@ jobs:
             printf '%s\n' "${files[@]}"
           fi
 
-      - uses: knope-dev/action@19617851f9f13ab2f27a05989c55efb18aca3675 # v2.1.2
+      - name: Install Knope
         if: steps.changesets.outputs.pending == 'true'
-        with:
-          version: ${{ env.KNOPE_VERSION }}
+        run: |
+          archive="$RUNNER_TEMP/knope.tgz"
+          curl -fsSL -o "$archive" "https://github.com/knope-dev/knope/releases/download/knope%2Fv$KNOPE_VERSION/knope-x86_64-unknown-linux-musl.tgz"
+          echo "$KNOPE_SHA256  $archive" | sha256sum --check
+          tar -xzf "$archive" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/knope-x86_64-unknown-linux-musl" >> "$GITHUB_PATH"
 
       - name: Prepare the version
         id: prepare
@@ -61,34 +73,32 @@ jobs:
           knope prepare-release --verbose
           echo "version=$(knope get-version)" >> "$GITHUB_OUTPUT"
 
-      # The default GITHUB_TOKEN can't be used here: pushes and pull requests
-      # made with it don't trigger CI.
       - name: Push the version branch
         if: steps.changesets.outputs.pending == 'true'
         env:
-          TOKEN: ${{ secrets.VERSION_PR_TOKEN }}
+          TOKEN: ${{ github.token }}
           VERSION: ${{ steps.prepare.outputs.version }}
         run: |
-          if [ -z "$TOKEN" ]; then
-            echo "::error::The VERSION_PR_TOKEN secret isn't set. See docs/RELEASING.md."
-            exit 1
-          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch -C "$VERSION_BRANCH"
           git commit -m "chore: prepare release v$VERSION"
           git push --force "https://x-access-token:$TOKEN@github.com/$GITHUB_REPOSITORY.git" "HEAD:refs/heads/$VERSION_BRANCH"
 
+      # CI on a PR opened or updated with GITHUB_TOKEN waits for a maintainer
+      # to approve the run. See docs/RELEASING.md.
       - name: Create or update the version PR
         if: steps.changesets.outputs.pending == 'true'
         env:
-          GH_TOKEN: ${{ secrets.VERSION_PR_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.prepare.outputs.version }}
         run: |
           title="chore: prepare release v$VERSION"
           body="$RUNNER_TEMP/body.md"
           {
             echo "Created by the [Version workflow]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID). Merging this PR prepares v$VERSION. It doesn't tag or publish anything. Running the workflow again replaces this branch."
+            echo
+            echo "CI on this PR waits for a maintainer to approve the run."
             echo
             # This version's CHANGELOG.md section, without its heading.
             awk -v heading="## $VERSION" '
@@ -107,3 +117,4 @@ jobs:
             url=$(gh api "$pulls" -f title="$title" -f head="$VERSION_BRANCH" -f base=main -F body=@"$body" --jq .html_url)
             echo "Opened the version PR for v$VERSION: $url" >> "$GITHUB_STEP_SUMMARY"
           fi
+          echo "Approve the CI run on the PR before merging it." >> "$GITHUB_STEP_SUMMARY"

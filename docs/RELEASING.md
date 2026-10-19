@@ -66,25 +66,11 @@ So `minor` and `patch` both bump the last number, and only `major` bumps the mid
 
 ## One-time setup
 
-### Version PR token
+The Version workflow pushes the version branch and opens the PR with the workflow's own `GITHUB_TOKEN`. No personal token or secret is needed.
 
-The Version workflow pushes the version branch and opens the PR with a classic personal access token. The default `GITHUB_TOKEN` can't be used: pushes and pull requests made with it don't trigger other workflows, so CI wouldn't run on the version PR and `ci-success` would never report.
+In the repository, open **Settings → Actions → General**. Under **Workflow permissions**, turn on **Allow GitHub Actions to create and approve pull requests**. Without it, the workflow fails at **Create or update the version PR**. Keep the default permissions read-only; the version job requests write access for itself.
 
-1. Create a [classic personal access token](https://github.com/settings/tokens/new) with an expiration date, and record the date. Select only the **`public_repo`** scope. It covers pushing the branch and opening the PR because this repository is public.
-2. If `intermezzo-chess` enforces SAML single sign-on, authorize the token for the organization with **Configure SSO** on the token list.
-3. In the repository, open **Settings → Secrets and variables → Actions**. Add a repository secret named `VERSION_PR_TOKEN` with the token.
-
-A classic token can't be limited to one repository. `public_repo` grants write access to every public repository its owner can write to, so a leaked token reaches beyond this repository. It is stored only as this secret and passed only to the two workflow steps that push and open the PR. A GitHub App token can replace it later.
-
-The token belongs to one user account. The version branch and PR appear as that user. That user can't approve the version PR, so if `main` requires an approving review, another maintainer has to approve it.
-
-To rotate the token before it expires, create a new one with the same settings and replace the value of `VERSION_PR_TOKEN`. Then delete the old token and run the Version workflow to confirm the new one works. If the token has expired or the secret is missing, the workflow fails at the **Push the version branch** step.
-
-If the push is rejected with `refusing to allow a Personal Access Token to create or update workflow`, `main` has changed a file under `.github/workflows/` since the version branch was last pushed. Add the **`workflow`** scope to the token, then run the workflow again.
-
-### Actions settings
-
-No changes are needed. The workflow doesn't use `GITHUB_TOKEN` to write, so the default workflow permissions can stay read-only and **Allow GitHub Actions to create and approve pull requests** can stay off.
+A PR opened or updated with `GITHUB_TOKEN` doesn't start CI on its own. GitHub creates the CI run with the status **Action required**, and a maintainer approves it. The version PR and branch appear as `github-actions[bot]`.
 
 ## Prepare a release
 
@@ -94,12 +80,15 @@ No changes are needed. The workflow doesn't use `GITHUB_TOKEN` to write, so the 
 4. Otherwise, the run creates or updates the PR titled `chore: prepare release vX.Y.Z` from the `knope/version` branch. The run summary links to it. Each run replaces that branch with `main` plus one new version commit.
 5. Review the PR. Check the proposed version against the changes, the new `CHANGELOG.md` section, the version changes in `Cargo.toml`, `Cargo.lock`, and `crates/scidtopgn-cli/Cargo.toml`, and the deleted changesets.
 6. To change the changelog wording, fix the changesets on `main` and run the workflow again. Commits pushed to `knope/version` by hand are lost on the next run.
-7. Wait for `ci-success` to pass, then merge the PR. Merging prepares the version; nothing is tagged or published.
+7. Approve the CI run. On the PR, open the **Checks** tab, or find the CI run with the status **Action required** under **Actions**, and approve it. Each run of the Version workflow updates the branch and needs a new approval.
+8. Wait for `ci-success` to pass, then merge the PR. Merging prepares the version; nothing is tagged or published.
 
 If more changesets are merged to `main` while the version PR is open, run the workflow again to include them.
+
+If the push is rejected with `refusing to allow a GitHub App to create or update workflow`, `main` has changed a file under `.github/workflows/` since the version branch was last pushed. `GITHUB_TOKEN` can't be given permission to change workflow files. Delete the `knope/version` branch on GitHub, which closes the version PR, and run the workflow again.
 
 The first release, `0.1.0`, is already prepared in `Cargo.toml` and `CHANGELOG.md`, so it doesn't need a version PR.
 
 ## Updating Knope
 
-Bump Knope deliberately. Update `KNOPE_VERSION` in `version.yml` and the version in this document and in `CONTRIBUTING.md`. Read Knope's release notes, then check the bump table above with `knope prepare-release --dry-run` and a temporary changeset of each type.
+Bump Knope deliberately. Update `KNOPE_VERSION` and `KNOPE_SHA256` in `version.yml`, and the version in this document and in `CONTRIBUTING.md`. The hash is the SHA-256 of `knope-x86_64-unknown-linux-musl.tgz`, which GitHub shows as the asset's digest on the release page. Read Knope's release notes, then check the bump table above with `knope prepare-release --dry-run` and a temporary changeset of each type.
