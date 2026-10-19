@@ -1,0 +1,41 @@
+# Release configuration for Knope. See docs/RELEASING.md.
+
+# Versions come from `.changeset/*.md` files only, never from commit messages.
+[changes]
+ignore_conventional_commits = true
+
+# Both crates share one version, set in `[workspace.package]`, and one
+# `vX.Y.Z` tag.
+[package]
+versioned_files = [
+  "Cargo.toml",
+  { path = "Cargo.lock", dependency = "scidtopgn" },
+  { path = "Cargo.lock", dependency = "scidtopgn-cli" },
+  { path = "crates/scidtopgn-cli/Cargo.toml", dependency = "scidtopgn" },
+]
+changelog = "CHANGELOG.md"
+
+[[workflows]]
+name = "document-change"
+help_text = "Add a changeset describing a change"
+
+[[workflows.steps]]
+type = "CreateChangeFile"
+
+# Updates the versioned files and CHANGELOG.md, deletes the changesets it used,
+# and stages the result. It doesn't commit, push, or tag. The Version workflow
+# runs it on main.
+[[workflows]]
+name = "prepare-release"
+help_text = "Apply pending changesets to the version and changelog"
+
+[[workflows.steps]]
+type = "PrepareRelease"
+
+[[workflows]]
+name = "get-version"
+help_text = "Print the current version"
+
+[[workflows.steps]]
+type = "Command"
+command = "echo \"$version\""
