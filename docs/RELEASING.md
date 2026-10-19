@@ -68,20 +68,19 @@ So `minor` and `patch` both bump the last number, and only `major` bumps the mid
 
 ### Version PR token
 
-The Version workflow pushes the version branch and opens the PR with a fine-grained personal access token. The default `GITHUB_TOKEN` can't be used: pushes and pull requests made with it don't trigger other workflows, so CI wouldn't run on the version PR and `ci-success` would never report.
+The Version workflow pushes the version branch and opens the PR with a classic personal access token. The default `GITHUB_TOKEN` can't be used: pushes and pull requests made with it don't trigger other workflows, so CI wouldn't run on the version PR and `ci-success` would never report.
 
-1. Create a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new):
-   - **Resource owner:** `intermezzo-chess`. The organization may need to approve the token.
-   - **Expiration:** your choice. Record the date.
-   - **Repository access:** only `intermezzo-chess/scidtopgn`.
-   - **Repository permissions:** **Contents** read and write, and **Pull requests** read and write. **Metadata** read-only is added automatically.
-2. In the repository, open **Settings → Secrets and variables → Actions**. Add a repository secret named `VERSION_PR_TOKEN` with the token.
+1. Create a [classic personal access token](https://github.com/settings/tokens/new) with an expiration date, and record the date. Select only the **`public_repo`** scope. It covers pushing the branch and opening the PR because this repository is public.
+2. If `intermezzo-chess` enforces SAML single sign-on, authorize the token for the organization with **Configure SSO** on the token list.
+3. In the repository, open **Settings → Secrets and variables → Actions**. Add a repository secret named `VERSION_PR_TOKEN` with the token.
+
+A classic token can't be limited to one repository. `public_repo` grants write access to every public repository its owner can write to, so a leaked token reaches beyond this repository. It is stored only as this secret and passed only to the two workflow steps that push and open the PR. A GitHub App token can replace it later.
 
 The token belongs to one user account. The version branch and PR appear as that user. That user can't approve the version PR, so if `main` requires an approving review, another maintainer has to approve it.
 
-To rotate the token before it expires, create a new one with the same settings and replace the value of `VERSION_PR_TOKEN`. Then revoke the old token and run the Version workflow to confirm the new one works. If the token has expired or the secret is missing, the workflow fails at the **Push the version branch** step.
+To rotate the token before it expires, create a new one with the same settings and replace the value of `VERSION_PR_TOKEN`. Then delete the old token and run the Version workflow to confirm the new one works. If the token has expired or the secret is missing, the workflow fails at the **Push the version branch** step.
 
-If the push is rejected with `refusing to allow a Personal Access Token to create or update workflow`, `main` has changed a file under `.github/workflows/` since the version branch was last pushed. Give the token the **Workflows** read and write permission as well, then run the workflow again.
+If the push is rejected with `refusing to allow a Personal Access Token to create or update workflow`, `main` has changed a file under `.github/workflows/` since the version branch was last pushed. Add the **`workflow`** scope to the token, then run the workflow again.
 
 ### Actions settings
 
