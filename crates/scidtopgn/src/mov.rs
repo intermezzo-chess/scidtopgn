@@ -1,5 +1,5 @@
-use crate::common::{Color, Piece, Square};
 use crate::bytebuf::ByteBuffer;
+use crate::common::{Color, Piece, Square};
 use crate::error::{Error, Result};
 
 pub const ENCODE_NAG: u8 = 11;
@@ -52,33 +52,41 @@ const KING_SQDIFF: [i32; 11] = [0, -9, -8, -7, -1, 1, 7, 8, 9, -2, 2];
 const KNIGHT_SQDIFF: [i32; 9] = [0, -17, -15, -10, -6, 6, 10, 15, 17];
 const PAWN_SQDIFF: [i32; 16] = [7, 8, 9, 7, 8, 9, 7, 8, 9, 7, 8, 9, 7, 8, 9, 16];
 const PAWN_PROMO: [Piece; 16] = [
-    Piece::Empty, Piece::Empty, Piece::Empty,
-    Piece::Queen, Piece::Queen, Piece::Queen,
-    Piece::Rook, Piece::Rook, Piece::Rook,
-    Piece::Bishop, Piece::Bishop, Piece::Bishop,
-    Piece::Knight, Piece::Knight, Piece::Knight,
+    Piece::Empty,
+    Piece::Empty,
+    Piece::Empty,
+    Piece::Queen,
+    Piece::Queen,
+    Piece::Queen,
+    Piece::Rook,
+    Piece::Rook,
+    Piece::Rook,
+    Piece::Bishop,
+    Piece::Bishop,
+    Piece::Bishop,
+    Piece::Knight,
+    Piece::Knight,
+    Piece::Knight,
     Piece::Empty,
 ];
 
-const KING_DIFF_TO_VAL: [u8; 19] = [
-    1, 2, 3, 0, 0, 0, 0, 9, 4, 0, 5, 10, 0, 0, 0, 0, 6, 7, 8
-];
+const KING_DIFF_TO_VAL: [u8; 19] = [1, 2, 3, 0, 0, 0, 0, 9, 4, 0, 5, 10, 0, 0, 0, 0, 6, 7, 8];
 
 const KNIGHT_DIFF_TO_VAL: [u8; 35] = [
-    1, 0, 2, 0, 0, 0, 0, 3, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 5, 0, 0, 0, 6, 0, 0, 0, 0, 7, 0, 8
+    1, 0, 2, 0, 0, 0, 0, 3, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 6, 0, 0, 0, 0,
+    7, 0, 8,
 ];
 
 pub fn encode_king(buf: &mut ByteBuffer, sm: &SimpleMove) -> Result<()> {
     assert!(sm.piece_num == 0, "Kings MUST be piece number zero");
-    
+
     if sm.to == sm.from {
         buf.put_byte(make_move_byte(0, 0))?;
         return Ok(());
     }
-    
+
     let diff = sm.to.to_index() as i32 - sm.from.to_index() as i32;
-    assert!(diff >= -9 && diff <= 9, "Invalid king move difference");
+    assert!((-9..=9).contains(&diff), "Invalid king move difference");
     let val = KING_DIFF_TO_VAL[(diff + 9) as usize];
     assert!(val != 0, "Invalid king move");
     buf.put_byte(make_move_byte(0, val))?;
@@ -90,14 +98,17 @@ pub fn decode_king(val: u8, sm: &mut SimpleMove) -> Result<()> {
         sm.to = sm.from;
         return Ok(());
     }
-    
-    if val < 1 || val > 10 {
+
+    if !(1..=10).contains(&val) {
         return Err(Error::Decode(format!("Invalid king move value: {}", val)));
     }
-    
+
     let new_idx = sm.from.to_index() as i32 + KING_SQDIFF[val as usize];
-    if new_idx < 0 || new_idx > 63 {
-        return Err(Error::Decode(format!("King move out of bounds: {}", new_idx)));
+    if !(0..=63).contains(&new_idx) {
+        return Err(Error::Decode(format!(
+            "King move out of bounds: {}",
+            new_idx
+        )));
     }
     sm.to = Square::from_index(new_idx as usize);
     Ok(())
@@ -105,7 +116,7 @@ pub fn decode_king(val: u8, sm: &mut SimpleMove) -> Result<()> {
 
 pub fn encode_knight(buf: &mut ByteBuffer, sm: &SimpleMove) -> Result<()> {
     let diff = sm.to.to_index() as i32 - sm.from.to_index() as i32;
-    assert!(diff >= -17 && diff <= 17, "Invalid knight move difference");
+    assert!((-17..=17).contains(&diff), "Invalid knight move difference");
     let val = KNIGHT_DIFF_TO_VAL[(diff + 17) as usize];
     assert!(val != 0, "Invalid knight move");
     buf.put_byte(make_move_byte(sm.piece_num, val))?;
@@ -113,13 +124,16 @@ pub fn encode_knight(buf: &mut ByteBuffer, sm: &SimpleMove) -> Result<()> {
 }
 
 pub fn decode_knight(val: u8, sm: &mut SimpleMove) -> Result<()> {
-    if val < 1 || val > 8 {
+    if !(1..=8).contains(&val) {
         return Err(Error::Decode(format!("Invalid knight move value: {}", val)));
     }
-    
+
     let new_idx = sm.from.to_index() as i32 + KNIGHT_SQDIFF[val as usize];
-    if new_idx < 0 || new_idx > 63 {
-        return Err(Error::Decode(format!("Knight move out of bounds: {}", new_idx)));
+    if !(0..=63).contains(&new_idx) {
+        return Err(Error::Decode(format!(
+            "Knight move out of bounds: {}",
+            new_idx
+        )));
     }
     sm.to = Square::from_index(new_idx as usize);
     Ok(())
@@ -148,11 +162,11 @@ pub fn encode_bishop(buf: &mut ByteBuffer, sm: &SimpleMove) -> Result<()> {
     let mut val = sm.to.file();
     let rank_diff = sm.to.rank() as i32 - sm.from.rank() as i32;
     let fyle_diff = sm.to.file() as i32 - sm.from.file() as i32;
-    
+
     if rank_diff * fyle_diff < 0 {
         val += 8;
     }
-    
+
     buf.put_byte(make_move_byte(sm.piece_num, val))?;
     Ok(())
 }
@@ -160,15 +174,18 @@ pub fn encode_bishop(buf: &mut ByteBuffer, sm: &SimpleMove) -> Result<()> {
 pub fn decode_bishop(val: u8, sm: &mut SimpleMove) -> Result<()> {
     let fyle = val & 7;
     let fyle_diff = fyle as i32 - sm.from.file() as i32;
-    
+
     let to_idx = if val >= 8 {
         sm.from.to_index() as i32 - 7 * fyle_diff
     } else {
         sm.from.to_index() as i32 + 9 * fyle_diff
     };
-    
-    if to_idx < 0 || to_idx > 63 {
-        return Err(Error::Decode(format!("Bishop move out of bounds: {}", to_idx)));
+
+    if !(0..=63).contains(&to_idx) {
+        return Err(Error::Decode(format!(
+            "Bishop move out of bounds: {}",
+            to_idx
+        )));
     }
     sm.to = Square::from_index(to_idx as usize);
     Ok(())
@@ -196,8 +213,11 @@ pub fn decode_queen(buf: &mut ByteBuffer, val: u8, sm: &mut SimpleMove) -> Resul
         sm.to = Square::make(val, sm.from.rank());
     } else {
         let second_byte = buf.get_byte()?;
-        if second_byte < 64 || second_byte > 127 {
-            return Err(Error::Decode(format!("Invalid queen diagonal second byte: {}", second_byte)));
+        if !(64..=127).contains(&second_byte) {
+            return Err(Error::Decode(format!(
+                "Invalid queen diagonal second byte: {}",
+                second_byte
+            )));
         }
         sm.to = Square::from_index((second_byte - 64) as usize);
     }
@@ -206,7 +226,7 @@ pub fn decode_queen(buf: &mut ByteBuffer, val: u8, sm: &mut SimpleMove) -> Resul
 
 pub fn encode_pawn(buf: &mut ByteBuffer, sm: &SimpleMove) -> Result<()> {
     let diff = (sm.to.to_index() as i32 - sm.from.to_index() as i32).abs();
-    
+
     let val = if diff == 16 {
         15
     } else {
@@ -216,7 +236,7 @@ pub fn encode_pawn(buf: &mut ByteBuffer, sm: &SimpleMove) -> Result<()> {
             9 => 2,
             _ => panic!("Invalid pawn move difference: {}", diff),
         };
-        
+
         match sm.promote {
             Piece::Queen => base_val + 3,
             Piece::Rook => base_val + 6,
@@ -226,26 +246,29 @@ pub fn encode_pawn(buf: &mut ByteBuffer, sm: &SimpleMove) -> Result<()> {
             _ => panic!("Invalid promotion piece"),
         }
     };
-    
+
     buf.put_byte(make_move_byte(sm.piece_num, val))?;
     Ok(())
 }
 
 pub fn decode_pawn(val: u8, sm: &mut SimpleMove, to_move: Color) -> Result<()> {
     let diff = PAWN_SQDIFF[val as usize];
-    
+
     let to_idx = if to_move == Color::White {
         sm.from.to_index() as i32 + diff
     } else {
         sm.from.to_index() as i32 - diff
     };
-    
-    if to_idx < 0 || to_idx > 63 {
-        return Err(Error::Decode(format!("Pawn move out of bounds: {}", to_idx)));
+
+    if !(0..=63).contains(&to_idx) {
+        return Err(Error::Decode(format!(
+            "Pawn move out of bounds: {}",
+            to_idx
+        )));
     }
     sm.to = Square::from_index(to_idx as usize);
     sm.promote = PAWN_PROMO[val as usize];
-    
+
     Ok(())
 }
 
@@ -289,7 +312,7 @@ mod tests {
         sm.from = Square::B1;
         decode_knight(8, &mut sm).unwrap();
         assert_eq!(sm.to, Square::C3);
-        
+
         let mut sm = SimpleMove::new();
         sm.from = Square::G1;
         decode_knight(5, &mut sm).unwrap();
@@ -318,9 +341,9 @@ mod tests {
 
         let mut sm = SimpleMove::new();
         sm.from = Square::C1;
-        decode_bishop(8 + 0, &mut sm).unwrap();
+        decode_bishop(8, &mut sm).unwrap();
         assert_eq!(sm.to, Square::A3);
-        
+
         let mut sm = SimpleMove::new();
         sm.from = Square::C1;
         decode_bishop(8 + 1, &mut sm).unwrap();
@@ -426,7 +449,7 @@ mod tests {
         sm.to = Square::C3;
         encode_knight(&mut buf, &sm).unwrap();
         assert_eq!(buf.as_slice(), &[0x28]);
-        
+
         let mut buf = ByteBuffer::new();
         let mut sm = SimpleMove::new();
         sm.piece_num = 2;

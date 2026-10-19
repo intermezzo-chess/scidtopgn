@@ -1,6 +1,6 @@
 use crate::common::GameResult;
 use crate::error::{Error, Result};
-use crate::{Date, date_make, date_get_year, date_get_month, date_get_day};
+use crate::{date_get_day, date_get_month, date_get_year, date_make, Date};
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::Path;
@@ -67,10 +67,10 @@ impl Default for IndexHeader {
     fn default() -> Self {
         let mut magic = [0u8; 8];
         magic.copy_from_slice(INDEX_MAGIC);
-        
+
         let description = [0u8; SCID_DESC_LENGTH + 1];
         let custom_flag_desc = [[0u8; CUSTOM_FLAG_DESC_LENGTH + 1]; CUSTOM_FLAG_MAX];
-        
+
         Self {
             magic,
             version: SCID_VERSION,
@@ -90,23 +90,23 @@ impl IndexHeader {
 
     pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self> {
         let mut header = Self::default();
-        
+
         reader.read_exact(&mut header.magic)?;
         if &header.magic != INDEX_MAGIC {
             return Err(Error::Database("Invalid magic number".to_string()));
         }
-        
+
         header.version = read_u16_be(reader)?;
         header.base_type = read_u32_be(reader)?;
         header.num_games = read_u24_be(reader)?;
         header.auto_load = read_u24_be(reader)?;
-        
+
         reader.read_exact(&mut header.description)?;
-        
+
         for i in 0..CUSTOM_FLAG_MAX {
             reader.read_exact(&mut header.custom_flag_desc[i])?;
         }
-        
+
         Ok(header)
     }
 
@@ -117,16 +117,20 @@ impl IndexHeader {
         write_u24_be(writer, self.num_games)?;
         write_u24_be(writer, self.auto_load)?;
         writer.write_all(&self.description)?;
-        
+
         for i in 0..CUSTOM_FLAG_MAX {
             writer.write_all(&self.custom_flag_desc[i])?;
         }
-        
+
         Ok(())
     }
 
     pub fn description_str(&self) -> &str {
-        let end = self.description.iter().position(|&b| b == 0).unwrap_or(SCID_DESC_LENGTH);
+        let end = self
+            .description
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(SCID_DESC_LENGTH);
         std::str::from_utf8(&self.description[..end]).unwrap_or("")
     }
 
@@ -314,11 +318,11 @@ impl IndexEntry {
         let month = date_get_month(edate);
         let day = date_get_day(edate);
         let year_offset = (date_get_year(edate) as i32) & 7;
-        
+
         if year_offset == 0 {
             return 0;
         }
-        
+
         let year = game_year + year_offset - 4;
         if year < 0 {
             return 0;
@@ -329,21 +333,21 @@ impl IndexEntry {
     pub fn set_event_date(&mut self, edate: u32) {
         let mut coded_date = (date_get_month(edate) as u32) << 5;
         coded_date |= date_get_day(edate) as u32;
-        
+
         let eyear = date_get_year(edate) as i32;
         let dyear = date_get_year(self.get_date()) as i32;
         let mut eyear = eyear;
-        
+
         if eyear < (dyear - 3) || eyear > (dyear + 3) {
             eyear = 0;
         }
-        
+
         if eyear == 0 {
             coded_date = 0;
         } else {
             coded_date |= (((eyear + 4 - dyear) as u32) & 7) << 9;
         }
-        
+
         self.dates = (self.dates & 0x000FFFFF) | (coded_date << 20);
     }
 
@@ -453,12 +457,24 @@ impl IndexEntry {
     }
 
     fn encode_count(x: u16) -> u16 {
-        if x <= 10 { return x; }
-        if x <= 12 { return 10; }
-        if x <= 17 { return 11; }
-        if x <= 24 { return 12; }
-        if x <= 34 { return 13; }
-        if x <= 44 { return 14; }
+        if x <= 10 {
+            return x;
+        }
+        if x <= 12 {
+            return 10;
+        }
+        if x <= 17 {
+            return 11;
+        }
+        if x <= 24 {
+            return 12;
+        }
+        if x <= 34 {
+            return 13;
+        }
+        if x <= 44 {
+            return 14;
+        }
         15
     }
 
@@ -515,35 +531,35 @@ impl IndexEntry {
         let length_low = read_u16_be(reader)?;
         let length_high = read_u8(reader)?;
         let flags = read_u16_be(reader)?;
-        
+
         let white_black_high = read_u8(reader)?;
         let white_id_low = read_u16_be(reader)?;
         let black_id_low = read_u16_be(reader)?;
-        
+
         let event_site_rnd_high = read_u8(reader)?;
         let event_id_low = read_u16_be(reader)?;
         let site_id_low = read_u16_be(reader)?;
         let round_id_low = read_u16_be(reader)?;
-        
+
         let var_counts = read_u16_be(reader)?;
         let eco_code = read_u16_be(reader)?;
-        
+
         let dates = read_u32_be(reader)?;
-        
+
         let white_elo = read_u16_be(reader)?;
         let black_elo = read_u16_be(reader)?;
-        
+
         let final_mat_sig = read_u32_be(reader)?;
         let num_half_moves = read_u8(reader)?;
-        
+
         let mut home_pawn_data = [0u8; HPSIG_SIZE];
         reader.read_exact(&mut home_pawn_data)?;
-        
+
         let pb0 = home_pawn_data[0];
         home_pawn_data[0] = pb0 & 63;
         let num_half_moves_high = ((pb0 as u16) >> 6) << 8;
         let num_half_moves = (num_half_moves as u16) | num_half_moves_high;
-        
+
         let mut entry = Self {
             offset,
             length_low,
@@ -565,14 +581,14 @@ impl IndexEntry {
             num_half_moves: num_half_moves as u8,
             home_pawn_data,
         };
-        
+
         if entry.get_white_elo() > MAX_ELO {
             entry.set_white_elo(MAX_ELO);
         }
         if entry.get_black_elo() > MAX_ELO {
             entry.set_black_elo(MAX_ELO);
         }
-        
+
         Ok(entry)
     }
 
@@ -581,30 +597,30 @@ impl IndexEntry {
         write_u16_be(writer, self.length_low)?;
         write_u8(writer, self.length_high)?;
         write_u16_be(writer, self.flags)?;
-        
+
         write_u8(writer, self.white_black_high)?;
         write_u16_be(writer, self.white_id_low)?;
         write_u16_be(writer, self.black_id_low)?;
-        
+
         write_u8(writer, self.event_site_rnd_high)?;
         write_u16_be(writer, self.event_id_low)?;
         write_u16_be(writer, self.site_id_low)?;
         write_u16_be(writer, self.round_id_low)?;
-        
+
         write_u16_be(writer, self.var_counts)?;
         write_u16_be(writer, self.eco_code)?;
         write_u32_be(writer, self.dates)?;
-        
+
         write_u16_be(writer, self.white_elo)?;
         write_u16_be(writer, self.black_elo)?;
-        
+
         write_u32_be(writer, self.final_mat_sig)?;
-        write_u8(writer, self.num_half_moves & 0xFF)?;
-        
+        write_u8(writer, self.num_half_moves)?;
+
         let pb0 = (self.home_pawn_data[0] & 63) | (((self.num_half_moves as u16) >> 8) << 6) as u8;
         write_u8(writer, pb0)?;
         writer.write_all(&self.home_pawn_data[1..])?;
-        
+
         Ok(())
     }
 }
@@ -613,6 +629,12 @@ pub struct Index {
     header: IndexHeader,
     entries: Vec<IndexEntry>,
     dirty: bool,
+}
+
+impl Default for Index {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Index {
@@ -628,15 +650,15 @@ impl Index {
         let path = path.as_ref();
         let file = File::open(path)?;
         let mut reader = BufReader::new(file);
-        
+
         let header = IndexHeader::read(&mut reader)?;
-        
+
         let mut entries = Vec::with_capacity(header.num_games as usize);
         for _ in 0..header.num_games {
             let entry = IndexEntry::read(&mut reader)?;
             entries.push(entry);
         }
-        
+
         Ok(Self {
             header,
             entries,
@@ -648,12 +670,12 @@ impl Index {
         let path = path.as_ref();
         let file = File::create(path)?;
         let mut writer = BufWriter::new(file);
-        
+
         let mut index = Self::new();
         index.header.write(&mut writer)?;
         writer.flush()?;
         index.dirty = false;
-        
+
         Ok(index)
     }
 
@@ -686,12 +708,12 @@ impl Index {
         if self.header.num_games >= MAX_GAMES {
             return Err(Error::Database("Index full".to_string()));
         }
-        
+
         let game_num = self.header.num_games;
         self.entries.push(entry);
         self.header.num_games += 1;
         self.dirty = true;
-        
+
         Ok(game_num)
     }
 
@@ -699,26 +721,26 @@ impl Index {
         if game_num >= self.header.num_games {
             return Err(Error::Database("Invalid game number".to_string()));
         }
-        
+
         let pos = INDEX_HEADER_SIZE as u64 + (game_num as u64) * (INDEX_ENTRY_SIZE as u64);
         writer.seek(SeekFrom::Start(pos))?;
-        
+
         self.entries[game_num as usize].write(writer)?;
-        
+
         Ok(())
     }
 
     pub fn flush<W: Write + Seek>(&mut self, writer: &mut W) -> Result<()> {
         writer.seek(SeekFrom::Start(0))?;
         self.header.write(writer)?;
-        
+
         for entry in &self.entries {
             entry.write(writer)?;
         }
-        
+
         writer.flush()?;
         self.dirty = false;
-        
+
         Ok(())
     }
 
@@ -793,19 +815,19 @@ pub fn eco_to_string(eco_code: u16) -> Option<String> {
     if eco_code == 0 {
         return None;
     }
-    
+
     let eco_code = eco_code - 1;
     let basic_code = eco_code / 131;
-    
+
     let letter = (b'A' + (basic_code / 100) as u8) as char;
     let digit1 = ((basic_code / 10) % 10) as u8 + b'0';
     let digit2 = (basic_code % 10) as u8 + b'0';
-    
+
     let mut result = String::new();
     result.push(letter);
     result.push(digit1 as char);
     result.push(digit2 as char);
-    
+
     let mut sub_code = eco_code % 131;
     if sub_code > 0 {
         sub_code -= 1;
@@ -816,7 +838,7 @@ pub fn eco_to_string(eco_code: u16) -> Option<String> {
             result.push((b'0' + sub_digit as u8) as char);
         }
     }
-    
+
     Some(result)
 }
 
@@ -825,53 +847,53 @@ pub fn eco_from_string(s: &str) -> u16 {
     if chars.is_empty() {
         return 0;
     }
-    
+
     let mut eco: u16;
-    
+
     let first = chars[0];
-    if first >= 'A' && first <= 'E' {
+    if ('A'..='E').contains(&first) {
         eco = (first as u16 - 'A' as u16) * 13100;
-    } else if first >= 'a' && first <= 'e' {
+    } else if ('a'..='e').contains(&first) {
         eco = (first as u16 - 'a' as u16) * 13100;
     } else {
         return 0;
     }
-    
+
     if chars.len() < 2 {
         return eco + 1;
     }
-    
+
     let second = chars[1];
-    if second < '0' || second > '9' {
+    if !second.is_ascii_digit() {
         return 0;
     }
     eco += (second as u16 - '0' as u16) * 1310;
-    
+
     if chars.len() < 3 {
         return eco + 1;
     }
-    
+
     let third = chars[2];
-    if third < '0' || third > '9' {
+    if !third.is_ascii_digit() {
         return 0;
     }
     eco += (third as u16 - '0' as u16) * 131;
-    
+
     if chars.len() >= 4 {
         let fourth = chars[3];
-        if fourth >= 'a' && fourth <= 'z' {
+        if fourth.is_ascii_lowercase() {
             eco += 1;
             eco += (fourth as u16 - 'a' as u16) * 5;
-            
+
             if chars.len() >= 5 {
                 let fifth = chars[4];
-                if fifth >= '1' && fifth <= '4' {
+                if ('1'..='4').contains(&fifth) {
                     eco += fifth as u16 - '0' as u16;
                 }
             }
         }
     }
-    
+
     eco + 1
 }
 
@@ -896,13 +918,13 @@ mod tests {
     #[test]
     fn test_entry_length_encoding() {
         let mut entry = IndexEntry::new();
-        
+
         entry.set_length(1000);
         assert_eq!(entry.get_length(), 1000);
-        
+
         entry.set_length(70000);
         assert_eq!(entry.get_length(), 70000);
-        
+
         entry.set_length(131071);
         assert_eq!(entry.get_length(), 131071);
     }
@@ -910,19 +932,19 @@ mod tests {
     #[test]
     fn test_name_id_encoding() {
         let mut entry = IndexEntry::new();
-        
+
         entry.set_white(0x12345);
         assert_eq!(entry.get_white(), 0x12345);
-        
+
         entry.set_black(0xABCDE);
         assert_eq!(entry.get_black(), 0xABCDE);
-        
+
         entry.set_event(0x1A2B3);
         assert_eq!(entry.get_event(), 0x1A2B3);
-        
+
         entry.set_site(0x2B3C4);
         assert_eq!(entry.get_site(), 0x2B3C4);
-        
+
         entry.set_round(0x3C4D);
         assert_eq!(entry.get_round(), 0x3C4D);
     }
@@ -930,7 +952,7 @@ mod tests {
     #[test]
     fn test_date_encoding() {
         let mut entry = IndexEntry::new();
-        
+
         entry.set_date(date_make(2022, 12, 19));
         assert_eq!(entry.get_year(), 2022);
         assert_eq!(entry.get_month(), 12);
@@ -940,10 +962,10 @@ mod tests {
     #[test]
     fn test_event_date_encoding() {
         let mut entry = IndexEntry::new();
-        
+
         entry.set_date(date_make(2022, 6, 15));
         entry.set_event_date(date_make(2022, 8, 10));
-        
+
         let edate = entry.get_event_date();
         assert_eq!(date_get_year(edate), 2022);
         assert_eq!(date_get_month(edate), 8);
@@ -953,16 +975,16 @@ mod tests {
     #[test]
     fn test_result_encoding() {
         let mut entry = IndexEntry::new();
-        
+
         entry.set_result(GameResult::White);
         assert_eq!(entry.get_result(), GameResult::White);
-        
+
         entry.set_result(GameResult::Black);
         assert_eq!(entry.get_result(), GameResult::Black);
-        
+
         entry.set_result(GameResult::Draw);
         assert_eq!(entry.get_result(), GameResult::Draw);
-        
+
         entry.set_result(GameResult::None);
         assert_eq!(entry.get_result(), GameResult::None);
     }
@@ -970,12 +992,12 @@ mod tests {
     #[test]
     fn test_elo_encoding() {
         let mut entry = IndexEntry::new();
-        
+
         entry.set_white_elo(2850);
         entry.set_white_rating_type(1);
         assert_eq!(entry.get_white_elo(), 2850);
         assert_eq!(entry.get_white_rating_type(), 1);
-        
+
         entry.set_black_elo(2700);
         entry.set_black_rating_type(2);
         assert_eq!(entry.get_black_elo(), 2700);
@@ -985,31 +1007,31 @@ mod tests {
     #[test]
     fn test_var_counts_encoding() {
         let mut entry = IndexEntry::new();
-        
+
         entry.set_variation_count(5);
         entry.set_comment_count(8);
         entry.set_nag_count(20);
         entry.set_result(GameResult::Draw);
-        
+
         assert_eq!(entry.get_variation_count(), 5);
         assert_eq!(entry.get_comment_count(), 8);
         assert_eq!(entry.get_nag_count(), 20);
         assert_eq!(entry.get_result(), GameResult::Draw);
     }
-    
+
     #[test]
     fn test_var_counts_approx_encoding() {
         let mut entry = IndexEntry::new();
-        
+
         entry.set_comment_count(12);
         assert_eq!(entry.get_comment_count(), 10);
-        
+
         entry.set_comment_count(18);
         assert_eq!(entry.get_comment_count(), 20);
-        
+
         entry.set_comment_count(50);
         assert_eq!(entry.get_comment_count(), 50);
-        
+
         entry.set_comment_count(100);
         assert_eq!(entry.get_comment_count(), 50);
     }
@@ -1032,16 +1054,16 @@ mod tests {
         entry.set_eco_code(0x1234);
         entry.set_flag(IDX_MASK_START, true);
         entry.set_flag(IDX_MASK_PROMO, true);
-        
+
         let mut buffer = Vec::new();
         {
             let mut cursor = Cursor::new(&mut buffer);
             entry.write(&mut cursor).unwrap();
         }
-        
+
         let mut cursor = Cursor::new(&buffer);
         let entry2 = IndexEntry::read(&mut cursor).unwrap();
-        
+
         assert_eq!(entry2.get_offset(), 12345);
         assert_eq!(entry2.get_length(), 67890);
         assert_eq!(entry2.get_white(), 0x12345);

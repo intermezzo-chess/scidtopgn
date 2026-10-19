@@ -29,9 +29,7 @@ impl Date {
                 message: format!("Invalid day {}", day),
             });
         }
-        let value = ((year as u32) << YEAR_SHIFT)
-            | ((month as u32) << MONTH_SHIFT)
-            | (day as u32);
+        let value = ((year as u32) << YEAR_SHIFT) | ((month as u32) << MONTH_SHIFT) | (day as u32);
         Ok(Date(value))
     }
 
@@ -61,7 +59,10 @@ impl Date {
 
     pub fn from_string(s: &str) -> Self {
         let parts: Vec<&str> = s.split('.').collect();
-        let year = parts.get(0).and_then(|p| p.parse::<u16>().ok()).unwrap_or(0);
+        let year = parts
+            .first()
+            .and_then(|p| p.parse::<u16>().ok())
+            .unwrap_or(0);
         let month = parts.get(1).and_then(|p| p.parse::<u8>().ok()).unwrap_or(0);
         let day = parts.get(2).and_then(|p| p.parse::<u8>().ok()).unwrap_or(0);
 
@@ -69,9 +70,7 @@ impl Date {
         let month = if month > 12 { 0 } else { month };
         let day = if day > 31 { 0 } else { day };
 
-        let value = ((year as u32) << YEAR_SHIFT)
-            | ((month as u32) << MONTH_SHIFT)
-            | (day as u32);
+        let value = ((year as u32) << YEAR_SHIFT) | ((month as u32) << MONTH_SHIFT) | (day as u32);
         Date(value)
     }
 
@@ -169,7 +168,7 @@ pub fn date_valid_string(s: &str) -> bool {
         let mut seen_other = false;
 
         for ch in part.chars() {
-            if ch >= '0' && ch <= '9' {
+            if ch.is_ascii_digit() {
                 seen_digit = true;
             } else if ch == '?' {
                 seen_question = true;

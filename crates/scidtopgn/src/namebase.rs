@@ -73,12 +73,7 @@ impl NameBase {
                 BTreeMap::new(),
                 BTreeMap::new(),
             ],
-            by_id: [
-                Vec::new(),
-                Vec::new(),
-                Vec::new(),
-                Vec::new(),
-            ],
+            by_id: [Vec::new(), Vec::new(), Vec::new(), Vec::new()],
             num_names: [0; NUM_NAME_TYPES],
             max_frequency: [0; NUM_NAME_TYPES],
             timestamp: 0,
@@ -113,7 +108,7 @@ impl NameBase {
 
     pub fn add_name(&mut self, ntype: NameType, name: &str) -> Result<u32> {
         let idx = ntype.as_usize();
-        
+
         if self.num_names[idx] >= ntype.max_id() {
             return Err(Error::Database("NameBase full".to_string()));
         }
@@ -130,12 +125,12 @@ impl NameBase {
         };
 
         self.trees[idx].insert(name.to_string(), id);
-        
+
         while self.by_id[idx].len() <= id as usize {
             self.by_id[idx].push(None);
         }
         self.by_id[idx][id as usize] = Some(entry);
-        
+
         self.num_names[idx] += 1;
         Ok(id)
     }
@@ -171,10 +166,7 @@ impl NameBase {
     pub fn get_all_names(&self, ntype: NameType) -> Vec<(u32, String, u32)> {
         self.by_id[ntype.as_usize()]
             .iter()
-            .filter_map(|opt| {
-                opt.as_ref()
-                    .map(|e| (e.id, e.name.clone(), e.frequency))
-            })
+            .filter_map(|opt| opt.as_ref().map(|e| (e.id, e.name.clone(), e.frequency)))
             .collect()
     }
 
@@ -257,15 +249,15 @@ impl NameBase {
         }
 
         self.timestamp = read_four_bytes(reader)?;
-        
+
         let mut num_names = [0u32; NUM_NAME_TYPES];
-        for i in 0..NUM_NAME_TYPES {
-            num_names[i] = read_three_bytes(reader)?;
+        for n in num_names.iter_mut() {
+            *n = read_three_bytes(reader)?;
         }
-        
+
         let mut max_freq = [0u32; NUM_NAME_TYPES];
-        for i in 0..NUM_NAME_TYPES {
-            max_freq[i] = read_three_bytes(reader)?;
+        for freq in max_freq.iter_mut() {
+            *freq = read_three_bytes(reader)?;
         }
 
         self.max_frequency = max_freq;
@@ -274,9 +266,9 @@ impl NameBase {
             let count = num_names[nt_idx];
             let max_f = max_freq[nt_idx];
             let ntype = NameType::try_from(nt_idx)?;
-            
+
             let mut prev_name = String::new();
-            
+
             for i in 0..count {
                 let id = if count >= 65536 {
                     read_three_bytes(reader)?
@@ -312,7 +304,7 @@ impl NameBase {
 
                 let name = String::from_utf8(name_bytes)
                     .map_err(|_| Error::CorruptData("Invalid UTF-8 in name".to_string()))?;
-                
+
                 let clean_name: String = name
                     .chars()
                     .filter(|&c| c >= ' ')
@@ -335,7 +327,7 @@ impl NameBase {
 
                 prev_name = clean_name;
             }
-            
+
             self.num_names[nt_idx] = count;
         }
 
@@ -359,7 +351,7 @@ impl NameBase {
             let entries = self.sorted_names(ntype);
             let count = self.num_names[nt_idx];
             let max_f = self.max_frequency[nt_idx];
-            
+
             let mut prev_name: Option<&str> = None;
 
             for entry in &entries {
@@ -414,18 +406,18 @@ mod tests {
     #[test]
     fn test_add_and_find() {
         let mut nb = NameBase::new();
-        
+
         let id1 = nb.add_name(NameType::Player, "Carlsen, Magnus").unwrap();
         let id2 = nb.add_name(NameType::Player, "Caruana, Fabiano").unwrap();
-        
+
         assert_eq!(id1, 0);
         assert_eq!(id2, 1);
         assert_eq!(nb.count(NameType::Player), 2);
-        
+
         assert_eq!(nb.find_name(NameType::Player, "Carlsen, Magnus"), Some(0));
         assert_eq!(nb.find_name(NameType::Player, "Caruana, Fabiano"), Some(1));
         assert_eq!(nb.find_name(NameType::Player, "Nakamura, Hikaru"), None);
-        
+
         assert_eq!(nb.get_name(NameType::Player, 0), Some("Carlsen, Magnus"));
         assert_eq!(nb.get_name(NameType::Player, 1), Some("Caruana, Fabiano"));
     }
@@ -433,13 +425,13 @@ mod tests {
     #[test]
     fn test_frequency() {
         let mut nb = NameBase::new();
-        
+
         let id = nb.add_name(NameType::Player, "Carlsen, Magnus").unwrap();
         assert_eq!(nb.get_frequency(NameType::Player, id), 0);
-        
+
         nb.increment_frequency(NameType::Player, id);
         assert_eq!(nb.get_frequency(NameType::Player, id), 1);
-        
+
         nb.increment_frequency(NameType::Player, id);
         assert_eq!(nb.get_frequency(NameType::Player, id), 2);
         assert_eq!(nb.max_frequency(NameType::Player), 2);

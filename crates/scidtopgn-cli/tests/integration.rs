@@ -1,41 +1,43 @@
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use tempfile::TempDir;
 
-fn get_workspace_root() -> String {
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    if manifest_dir.contains("/crates/") {
-        let parent = std::path::Path::new(&manifest_dir)
-            .parent()
-            .and_then(|p| p.parent())
-            .unwrap();
-        parent.to_string_lossy().to_string()
-    } else {
-        manifest_dir
-    }
+fn get_workspace_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .expect("crate should be two levels below the workspace root")
+        .to_path_buf()
+}
+
+/// Returns a command for the CLI binary, run from the workspace root so the
+/// fixture paths under `tests/data` resolve.
+fn cli() -> Command {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_scidtopgn"));
+    cmd.current_dir(get_workspace_root());
+    cmd
 }
 
 #[test]
 fn test_cli_count() {
-    let workspace = get_workspace_root();
-
-    let output = Command::new("cargo")
-        .args(["run", "-p", "scidtopgn-cli", "--release", "--", "tests/data/one", "--count"])
-        .current_dir(&workspace)
+    let output = cli()
+        .args(["tests/data/one", "--count"])
         .output()
         .expect("Failed to run CLI");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("1 games"), "Expected '1 games' in output, got: {}", stdout);
+    assert!(
+        stdout.contains("1 games"),
+        "Expected '1 games' in output, got: {}",
+        stdout
+    );
 }
 
 #[test]
 fn test_cli_output() {
-    let workspace = get_workspace_root();
-
-    let output = Command::new("cargo")
-        .args(["run", "-p", "scidtopgn-cli", "--release", "--", "tests/data/one"])
-        .current_dir(&workspace)
+    let output = cli()
+        .arg("tests/data/one")
         .output()
         .expect("Failed to run CLI");
 
@@ -48,11 +50,8 @@ fn test_cli_output() {
 
 #[test]
 fn test_cli_five_games() {
-    let workspace = get_workspace_root();
-
-    let output = Command::new("cargo")
-        .args(["run", "-p", "scidtopgn-cli", "--release", "--", "tests/data/five"])
-        .current_dir(&workspace)
+    let output = cli()
+        .arg("tests/data/five")
         .output()
         .expect("Failed to run CLI");
 
@@ -64,14 +63,12 @@ fn test_cli_five_games() {
 
 #[test]
 fn test_cli_output_to_file() {
-    let workspace = get_workspace_root();
     let temp = TempDir::new().expect("Failed to create temp dir");
     let output_path = temp.path().join("output.pgn");
 
-    let output = Command::new("cargo")
-        .args(["run", "-p", "scidtopgn-cli", "--release", "--", "tests/data/one", "-o"])
+    let output = cli()
+        .args(["tests/data/one", "-o"])
         .arg(&output_path)
-        .current_dir(&workspace)
         .output()
         .expect("Failed to run CLI");
 
@@ -84,18 +81,20 @@ fn test_cli_output_to_file() {
 
 #[test]
 fn test_cli_import() {
-    let workspace = get_workspace_root();
     let temp = TempDir::new().expect("Failed to create temp dir");
     let db_path = temp.path().join("imported");
 
-    let output = Command::new("cargo")
-        .args(["run", "-p", "scidtopgn-cli", "--release", "--", "import", "tests/data/one.pgn", "-o"])
+    let output = cli()
+        .args(["import", "tests/data/one.pgn", "-o"])
         .arg(&db_path)
-        .current_dir(&workspace)
         .output()
         .expect("Failed to run CLI");
 
-    assert!(output.status.success(), "Import should succeed: {:?}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "Import should succeed: {:?}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     let mut db = scidtopgn::Database::open(&db_path).expect("Failed to open imported database");
     assert_eq!(db.num_games(), 1, "Should have 1 game");
@@ -106,27 +105,28 @@ fn test_cli_import() {
     assert!(game.eco.is_some(), "ECO should be preserved");
 
     let pgn = game.to_pgn();
-    assert!(pgn.contains("1. e4 c5"), "Moves should be preserved: {}", pgn);
+    assert!(
+        pgn.contains("1. e4 c5"),
+        "Moves should be preserved: {}",
+        pgn
+    );
 }
 
 #[test]
 fn test_cli_import_append() {
-    let workspace = get_workspace_root();
     let temp = TempDir::new().expect("Failed to create temp dir");
     let db_path = temp.path().join("append_test");
 
-    let output1 = Command::new("cargo")
-        .args(["run", "-p", "scidtopgn-cli", "--release", "--", "import", "tests/data/one.pgn", "-o"])
+    let output1 = cli()
+        .args(["import", "tests/data/one.pgn", "-o"])
         .arg(&db_path)
-        .current_dir(&workspace)
         .output()
         .expect("Failed to run CLI");
     assert!(output1.status.success());
 
-    let output2 = Command::new("cargo")
-        .args(["run", "-p", "scidtopgn-cli", "--release", "--", "import", "tests/data/one.pgn", "-o"])
+    let output2 = cli()
+        .args(["import", "tests/data/one.pgn", "-o"])
         .arg(&db_path)
-        .current_dir(&workspace)
         .output()
         .expect("Failed to run CLI");
     assert!(output2.status.success());
@@ -137,25 +137,26 @@ fn test_cli_import_append() {
 
 #[test]
 fn test_cli_import_overwrite() {
-    let workspace = get_workspace_root();
     let temp = TempDir::new().expect("Failed to create temp dir");
     let db_path = temp.path().join("overwrite_test");
 
-    let output1 = Command::new("cargo")
-        .args(["run", "-p", "scidtopgn-cli", "--release", "--", "import", "tests/data/one.pgn", "-o"])
+    let output1 = cli()
+        .args(["import", "tests/data/one.pgn", "-o"])
         .arg(&db_path)
-        .current_dir(&workspace)
         .output()
         .expect("Failed to run CLI");
     assert!(output1.status.success());
 
-    let output2 = Command::new("cargo")
-        .args(["run", "-p", "scidtopgn-cli", "--release", "--", "import", "tests/data/one.pgn", "--overwrite", "-o"])
+    let output2 = cli()
+        .args(["import", "tests/data/one.pgn", "--overwrite", "-o"])
         .arg(&db_path)
-        .current_dir(&workspace)
         .output()
         .expect("Failed to run CLI");
-    assert!(output2.status.success(), "Overwrite should succeed: {:?}", String::from_utf8_lossy(&output2.stderr));
+    assert!(
+        output2.status.success(),
+        "Overwrite should succeed: {:?}",
+        String::from_utf8_lossy(&output2.stderr)
+    );
 
     let db = scidtopgn::Database::open(&db_path).expect("Failed to open database");
     assert_eq!(db.num_games(), 1, "Should have 1 game after overwrite");
@@ -163,25 +164,22 @@ fn test_cli_import_overwrite() {
 
 #[test]
 fn test_cli_pgn_roundtrip() {
-    let workspace = get_workspace_root();
     let temp = TempDir::new().expect("Failed to create temp dir");
     let db_path = temp.path().join("roundtrip");
     let pgn_path = temp.path().join("exported.pgn");
 
-    let import_output = Command::new("cargo")
-        .args(["run", "-p", "scidtopgn-cli", "--release", "--", "import", "tests/data/one.pgn", "-o"])
+    let import_output = cli()
+        .args(["import", "tests/data/one.pgn", "-o"])
         .arg(&db_path)
-        .current_dir(&workspace)
         .output()
         .expect("Failed to run import");
     assert!(import_output.status.success());
 
-    let export_output = Command::new("cargo")
-        .args(["run", "-p", "scidtopgn-cli", "--release", "--", "export"])
+    let export_output = cli()
+        .arg("export")
         .arg(&db_path)
         .arg("-o")
         .arg(&pgn_path)
-        .current_dir(&workspace)
         .output()
         .expect("Failed to run export");
     assert!(export_output.status.success());
@@ -202,10 +200,7 @@ const ENTRY_FLAGS_LOW_BYTE: usize = 8;
 /// Copies a test database into `dir` and sets the logical delete flag on the
 /// given entries directly in the copied .si4, leaving every record in place.
 fn copy_with_deleted(dir: &std::path::Path, name: &str, deleted: &[u32]) -> std::path::PathBuf {
-    let workspace = get_workspace_root();
-    let src = std::path::Path::new(&workspace)
-        .join("tests/data")
-        .join(name);
+    let src = get_workspace_root().join("tests/data").join(name);
     let dst = dir.join(name);
     for ext in ["si4", "sn4", "sg4"] {
         std::fs::copy(src.with_extension(ext), dst.with_extension(ext))

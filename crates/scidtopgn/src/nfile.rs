@@ -25,11 +25,14 @@ impl NFile {
         let sn4_path = path.with_extension("sn4");
         let file = File::open(&sn4_path)?;
         let mut reader = BufReader::new(file);
-        
+
         let mut namebase = NameBase::new();
         namebase.read_sn4(&mut reader)?;
-        
-        Ok(NFile { namebase, path: sn4_path })
+
+        Ok(NFile {
+            namebase,
+            path: sn4_path,
+        })
     }
 
     pub fn namebase(&self) -> &NameBase {

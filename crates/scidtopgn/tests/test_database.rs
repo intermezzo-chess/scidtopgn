@@ -1,4 +1,4 @@
-use scidtopgn::{Database, Game, GameResult, Date};
+use scidtopgn::{Database, Date, Game, GameResult};
 
 fn get_test_data_path(name: &str) -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -14,7 +14,7 @@ fn get_test_data_path(name: &str) -> std::path::PathBuf {
 fn test_open_one_database() {
     let path = get_test_data_path("one");
     let db = Database::open(&path).unwrap();
-    
+
     assert_eq!(db.num_games(), 1);
 }
 
@@ -22,20 +22,20 @@ fn test_open_one_database() {
 fn test_get_game_from_one() {
     let path = get_test_data_path("one");
     let mut db = Database::open(&path).unwrap();
-    
+
     let game = db.get_game(0).unwrap();
-    
+
     assert_eq!(game.white, "Hossain, Enam");
     assert_eq!(game.black, "Murshed, N");
     assert_eq!(game.event, "47th ch-Bangahbandhu 2022");
     assert_eq!(game.site, "Dhaka BAN");
     assert_eq!(game.round, "5.6");
     assert_eq!(game.result, GameResult::Draw);
-    
+
     assert_eq!(game.date.year(), 2022);
     assert_eq!(game.date.month(), 12);
     assert_eq!(game.date.day(), 19);
-    
+
     assert_eq!(game.white_elo, Some(2372));
     assert_eq!(game.black_elo, Some(2419));
 }
@@ -44,10 +44,10 @@ fn test_get_game_from_one() {
 fn test_game_to_pgn() {
     let path = get_test_data_path("one");
     let mut db = Database::open(&path).unwrap();
-    
+
     let game = db.get_game(0).unwrap();
     let pgn = game.to_pgn();
-    
+
     assert!(pgn.contains("[Event \"47th ch-Bangahbandhu 2022\"]"));
     assert!(pgn.contains("[Site \"Dhaka BAN\"]"));
     assert!(pgn.contains("[White \"Hossain, Enam\"]"));
@@ -55,7 +55,7 @@ fn test_game_to_pgn() {
     assert!(pgn.contains("[Result \"1/2-1/2\"]"));
     assert!(pgn.contains("[WhiteElo \"2372\"]"));
     assert!(pgn.contains("[BlackElo \"2419\"]"));
-    
+
     assert!(pgn.contains("1. e4"));
 }
 
@@ -63,7 +63,7 @@ fn test_game_to_pgn() {
 fn test_open_five_database() {
     let path = get_test_data_path("five");
     let db = Database::open(&path).unwrap();
-    
+
     assert_eq!(db.num_games(), 5);
 }
 
@@ -71,7 +71,7 @@ fn test_open_five_database() {
 fn test_iterate_five_games() {
     let path = get_test_data_path("five");
     let mut db = Database::open(&path).unwrap();
-    
+
     let mut count = 0;
     for result in db.games() {
         let game = result.unwrap();
@@ -79,7 +79,7 @@ fn test_iterate_five_games() {
         assert!(!game.black.is_empty());
         count += 1;
     }
-    
+
     assert_eq!(count, 5);
 }
 
@@ -87,9 +87,9 @@ fn test_iterate_five_games() {
 fn test_get_index_entry() {
     let path = get_test_data_path("one");
     let db = Database::open(&path).unwrap();
-    
+
     let entry = db.get_entry(0).unwrap();
-    
+
     assert!(entry.get_length() > 0);
     assert_eq!(entry.get_result(), GameResult::Draw);
 }
@@ -98,10 +98,10 @@ fn test_get_index_entry() {
 fn test_database_roundtrip() {
     let temp_dir = tempfile::TempDir::new().unwrap();
     let path = temp_dir.path().join("test_db");
-    
+
     {
         let mut db = Database::create(&path).unwrap();
-        
+
         let mut game = Game::new();
         game.white = "Player1, White".to_string();
         game.black = "Player2, Black".to_string();
@@ -112,20 +112,20 @@ fn test_database_roundtrip() {
         game.result = GameResult::White;
         game.white_elo = Some(2500);
         game.black_elo = Some(2400);
-        
+
         db.add_game(&game).unwrap();
         db.flush().unwrap();
     }
-    
+
     {
         let db = Database::open(&path).unwrap();
         assert_eq!(db.num_games(), 1);
     }
-    
+
     {
         let mut db = Database::open(&path).unwrap();
         let game = db.get_game(0).unwrap();
-        
+
         assert_eq!(game.white, "Player1, White");
         assert_eq!(game.black, "Player2, Black");
         assert_eq!(game.event, "Test Event");

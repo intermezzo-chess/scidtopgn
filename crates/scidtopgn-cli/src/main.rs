@@ -59,7 +59,7 @@ fn export_command(args: &ExportArgs) -> Result<()> {
     let mut exported = 0u32;
     for i in 0..total {
         // Skip logically deleted games, matching the reference converter.
-        if db.get_entry(i).is_none_or(|e| e.get_delete_flag()) {
+        if db.get_entry(i).map_or(true, |e| e.get_delete_flag()) {
             continue;
         }
 
