@@ -35,18 +35,13 @@ static COMMON_TAGS: [&str; 14] = [
     "",
 ];
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Marker {
+    #[default]
     NoMarker,
     StartMarker,
     EndMarker,
     EndGame,
-}
-
-impl Default for Marker {
-    fn default() -> Self {
-        Marker::NoMarker
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -703,7 +698,7 @@ impl Game {
                 let new_file = king_sq.file() as i8 + king_file_delta;
                 let new_rank = king_sq.rank() as i8 + king_rank_delta;
 
-                if new_file < 0 || new_file > 7 || new_rank < 0 || new_rank > 7 {
+                if !(0..=7).contains(&new_file) || !(0..=7).contains(&new_rank) {
                     continue;
                 }
 
@@ -755,14 +750,13 @@ impl Game {
         let var_child = self.moves[current_idx].var_child;
         self.moves[start_idx].var_parent = Some(current_idx);
 
-        if var_child.is_none() {
-            self.moves[current_idx].var_child = Some(start_idx);
-        } else {
-            let mut last_var = var_child.unwrap();
-            while self.moves[last_var].var_child.is_some() {
-                last_var = self.moves[last_var].var_child.unwrap();
+        if let Some(mut last_var) = var_child {
+            while let Some(next_var) = self.moves[last_var].var_child {
+                last_var = next_var;
             }
             self.moves[last_var].var_child = Some(start_idx);
+        } else {
+            self.moves[current_idx].var_child = Some(start_idx);
         }
 
         self.moves[current_idx].num_variations += 1;
@@ -866,6 +860,9 @@ impl Game {
         Ok(())
     }
 
+    // One parameter per Seven Tag Roster tag; grouping them would change the
+    // public API.
+    #[allow(clippy::too_many_arguments)]
     pub fn load_standard_tags(
         &mut self,
         white: &str,
@@ -890,7 +887,7 @@ impl Game {
 
         pgn.push_str(&format!("[Event \"{}\"]\n", self.event));
         pgn.push_str(&format!("[Site \"{}\"]\n", self.site));
-        pgn.push_str(&format!("[Date \"{}\"]\n", self.date.to_string()));
+        pgn.push_str(&format!("[Date \"{}\"]\n", self.date));
         pgn.push_str(&format!("[Round \"{}\"]\n", self.round));
         pgn.push_str(&format!("[White \"{}\"]\n", self.white));
         pgn.push_str(&format!("[Black \"{}\"]\n", self.black));
@@ -922,7 +919,7 @@ impl Game {
         }
 
         if let Some(event_date) = self.event_date {
-            pgn.push_str(&format!("[EventDate \"{}\"]\n", event_date.to_string()));
+            pgn.push_str(&format!("[EventDate \"{}\"]\n", event_date));
         }
 
         let excluded_tags = [
@@ -971,7 +968,7 @@ impl Game {
                 if !self.moves[current_idx].nags.is_empty() {
                     for &nag in &self.moves[current_idx].nags {
                         token.push(' ');
-                        token.push_str(&nag_to_symbol(nag));
+                        token.push_str(nag_to_symbol(nag));
                     }
                 }
 

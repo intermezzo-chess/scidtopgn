@@ -251,13 +251,13 @@ impl NameBase {
         self.timestamp = read_four_bytes(reader)?;
 
         let mut num_names = [0u32; NUM_NAME_TYPES];
-        for i in 0..NUM_NAME_TYPES {
-            num_names[i] = read_three_bytes(reader)?;
+        for n in num_names.iter_mut() {
+            *n = read_three_bytes(reader)?;
         }
 
         let mut max_freq = [0u32; NUM_NAME_TYPES];
-        for i in 0..NUM_NAME_TYPES {
-            max_freq[i] = read_three_bytes(reader)?;
+        for freq in max_freq.iter_mut() {
+            *freq = read_three_bytes(reader)?;
         }
 
         self.max_frequency = max_freq;

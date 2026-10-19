@@ -229,7 +229,7 @@ impl Database {
         }
 
         if let Some(start_idx) = game.first_move {
-            self.encode_moves(&mut buf, game, start_idx)?;
+            Self::encode_moves(&mut buf, game, start_idx)?;
         }
 
         buf.put_byte(crate::mov::ENCODE_END_GAME)?;
@@ -261,7 +261,7 @@ impl Database {
         Ok(())
     }
 
-    fn encode_moves(&self, buf: &mut ByteBuffer, game: &Game, start_idx: usize) -> Result<()> {
+    fn encode_moves(buf: &mut ByteBuffer, game: &Game, start_idx: usize) -> Result<()> {
         let mut current_idx = Some(start_idx);
         let mut board = if game.non_standard_start {
             game.start_board.clone().unwrap_or_else(Board::std_start)
@@ -355,7 +355,7 @@ impl Database {
 
             if node.var_child.is_some() {
                 buf.put_byte(crate::mov::ENCODE_START_MARKER)?;
-                self.encode_moves(buf, game, node.var_child.unwrap())?;
+                Self::encode_moves(buf, game, node.var_child.unwrap())?;
                 buf.put_byte(crate::mov::ENCODE_END_MARKER)?;
             }
 
@@ -367,13 +367,12 @@ impl Database {
 
     fn encode_comments(&self, buf: &mut ByteBuffer, game: &Game) -> Result<()> {
         if let Some(start_idx) = game.first_move {
-            self.encode_comments_recursive(buf, game, start_idx)?;
+            Self::encode_comments_recursive(buf, game, start_idx)?;
         }
         Ok(())
     }
 
     fn encode_comments_recursive(
-        &self,
         buf: &mut ByteBuffer,
         game: &Game,
         start_idx: usize,
@@ -399,7 +398,7 @@ impl Database {
             }
 
             if let Some(var_child) = node.var_child {
-                self.encode_comments_recursive(buf, game, var_child)?;
+                Self::encode_comments_recursive(buf, game, var_child)?;
             }
 
             current_idx = node.next;

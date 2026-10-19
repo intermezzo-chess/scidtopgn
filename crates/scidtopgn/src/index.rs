@@ -615,7 +615,7 @@ impl IndexEntry {
         write_u16_be(writer, self.black_elo)?;
 
         write_u32_be(writer, self.final_mat_sig)?;
-        write_u8(writer, self.num_half_moves & 0xFF)?;
+        write_u8(writer, self.num_half_moves)?;
 
         let pb0 = (self.home_pawn_data[0] & 63) | (((self.num_half_moves as u16) >> 8) << 6) as u8;
         write_u8(writer, pb0)?;
@@ -629,6 +629,12 @@ pub struct Index {
     header: IndexHeader,
     entries: Vec<IndexEntry>,
     dirty: bool,
+}
+
+impl Default for Index {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Index {
@@ -845,9 +851,9 @@ pub fn eco_from_string(s: &str) -> u16 {
     let mut eco: u16;
 
     let first = chars[0];
-    if first >= 'A' && first <= 'E' {
+    if ('A'..='E').contains(&first) {
         eco = (first as u16 - 'A' as u16) * 13100;
-    } else if first >= 'a' && first <= 'e' {
+    } else if ('a'..='e').contains(&first) {
         eco = (first as u16 - 'a' as u16) * 13100;
     } else {
         return 0;
@@ -858,7 +864,7 @@ pub fn eco_from_string(s: &str) -> u16 {
     }
 
     let second = chars[1];
-    if second < '0' || second > '9' {
+    if !second.is_ascii_digit() {
         return 0;
     }
     eco += (second as u16 - '0' as u16) * 1310;
@@ -868,20 +874,20 @@ pub fn eco_from_string(s: &str) -> u16 {
     }
 
     let third = chars[2];
-    if third < '0' || third > '9' {
+    if !third.is_ascii_digit() {
         return 0;
     }
     eco += (third as u16 - '0' as u16) * 131;
 
     if chars.len() >= 4 {
         let fourth = chars[3];
-        if fourth >= 'a' && fourth <= 'z' {
+        if fourth.is_ascii_lowercase() {
             eco += 1;
             eco += (fourth as u16 - 'a' as u16) * 5;
 
             if chars.len() >= 5 {
                 let fifth = chars[4];
-                if fifth >= '1' && fifth <= '4' {
+                if ('1'..='4').contains(&fifth) {
                     eco += fifth as u16 - '0' as u16;
                 }
             }

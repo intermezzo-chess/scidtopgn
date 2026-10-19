@@ -331,7 +331,7 @@ impl Board {
                         });
                     }
 
-                    let square = Square::make(file as u8, rank as u8);
+                    let square = Square::make(file, rank as u8);
                     board.add_piece(piece, color, square)?;
                     file += 1;
                 }
@@ -534,27 +534,27 @@ impl Board {
                         }
                     }
                     Piece::Bishop => {
-                        if file_diff.abs() == rank_diff.abs() && file_diff != 0 {
-                            if self.is_path_clear(from_sq, square) {
-                                return true;
-                            }
+                        if file_diff.abs() == rank_diff.abs()
+                            && file_diff != 0
+                            && self.is_path_clear(from_sq, square)
+                        {
+                            return true;
                         }
                     }
                     Piece::Rook => {
-                        if (file_diff == 0 || rank_diff == 0) && (file_diff != 0 || rank_diff != 0)
+                        if (file_diff == 0 || rank_diff == 0)
+                            && (file_diff != 0 || rank_diff != 0)
+                            && self.is_path_clear(from_sq, square)
                         {
-                            if self.is_path_clear(from_sq, square) {
-                                return true;
-                            }
+                            return true;
                         }
                     }
                     Piece::Queen => {
                         if (file_diff.abs() == rank_diff.abs() || file_diff == 0 || rank_diff == 0)
                             && (file_diff != 0 || rank_diff != 0)
+                            && self.is_path_clear(from_sq, square)
                         {
-                            if self.is_path_clear(from_sq, square) {
-                                return true;
-                            }
+                            return true;
                         }
                     }
                     Piece::King => {

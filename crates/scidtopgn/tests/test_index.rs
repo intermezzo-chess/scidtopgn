@@ -102,7 +102,7 @@ fn test_read_five_si4() {
     for i in 0..5 {
         let entry = index
             .get_entry(i)
-            .expect(&format!("Entry {} should exist", i));
+            .unwrap_or_else(|| panic!("Entry {} should exist", i));
         assert!(
             entry.get_offset() > 0 || i == 0,
             "Offset {} should be non-zero",

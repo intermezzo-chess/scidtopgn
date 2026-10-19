@@ -167,7 +167,7 @@ pub enum Square {
 impl Square {
     pub fn from_index(i: usize) -> Self {
         if i < 64 {
-            unsafe { std::mem::transmute(i as u8) }
+            unsafe { std::mem::transmute::<u8, Square>(i as u8) }
         } else {
             Square::Null
         }
@@ -192,7 +192,7 @@ impl Square {
     pub fn from_chars(file: char, rank: char) -> Result<Self> {
         let f = file as u8;
         let r = rank as u8;
-        if f < b'a' || f > b'h' || r < b'1' || r > b'8' {
+        if !(b'a'..=b'h').contains(&f) || !(b'1'..=b'8').contains(&r) {
             return Err(Error::InvalidMove {
                 move_str: format!("Invalid square: {}{}", file, rank),
             });
@@ -236,8 +236,8 @@ impl Square {
     }
 
     pub fn distance(self, other: Square) -> u8 {
-        let rd = (self.rank() as i8 - other.rank() as i8).abs() as u8;
-        let fd = (self.file() as i8 - other.file() as i8).abs() as u8;
+        let rd = (self.rank() as i8 - other.rank() as i8).unsigned_abs();
+        let fd = (self.file() as i8 - other.file() as i8).unsigned_abs();
         rd.max(fd)
     }
 }

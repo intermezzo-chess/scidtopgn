@@ -86,7 +86,7 @@ pub fn encode_king(buf: &mut ByteBuffer, sm: &SimpleMove) -> Result<()> {
     }
 
     let diff = sm.to.to_index() as i32 - sm.from.to_index() as i32;
-    assert!(diff >= -9 && diff <= 9, "Invalid king move difference");
+    assert!((-9..=9).contains(&diff), "Invalid king move difference");
     let val = KING_DIFF_TO_VAL[(diff + 9) as usize];
     assert!(val != 0, "Invalid king move");
     buf.put_byte(make_move_byte(0, val))?;
@@ -99,12 +99,12 @@ pub fn decode_king(val: u8, sm: &mut SimpleMove) -> Result<()> {
         return Ok(());
     }
 
-    if val < 1 || val > 10 {
+    if !(1..=10).contains(&val) {
         return Err(Error::Decode(format!("Invalid king move value: {}", val)));
     }
 
     let new_idx = sm.from.to_index() as i32 + KING_SQDIFF[val as usize];
-    if new_idx < 0 || new_idx > 63 {
+    if !(0..=63).contains(&new_idx) {
         return Err(Error::Decode(format!(
             "King move out of bounds: {}",
             new_idx
@@ -116,7 +116,7 @@ pub fn decode_king(val: u8, sm: &mut SimpleMove) -> Result<()> {
 
 pub fn encode_knight(buf: &mut ByteBuffer, sm: &SimpleMove) -> Result<()> {
     let diff = sm.to.to_index() as i32 - sm.from.to_index() as i32;
-    assert!(diff >= -17 && diff <= 17, "Invalid knight move difference");
+    assert!((-17..=17).contains(&diff), "Invalid knight move difference");
     let val = KNIGHT_DIFF_TO_VAL[(diff + 17) as usize];
     assert!(val != 0, "Invalid knight move");
     buf.put_byte(make_move_byte(sm.piece_num, val))?;
@@ -124,12 +124,12 @@ pub fn encode_knight(buf: &mut ByteBuffer, sm: &SimpleMove) -> Result<()> {
 }
 
 pub fn decode_knight(val: u8, sm: &mut SimpleMove) -> Result<()> {
-    if val < 1 || val > 8 {
+    if !(1..=8).contains(&val) {
         return Err(Error::Decode(format!("Invalid knight move value: {}", val)));
     }
 
     let new_idx = sm.from.to_index() as i32 + KNIGHT_SQDIFF[val as usize];
-    if new_idx < 0 || new_idx > 63 {
+    if !(0..=63).contains(&new_idx) {
         return Err(Error::Decode(format!(
             "Knight move out of bounds: {}",
             new_idx
@@ -181,7 +181,7 @@ pub fn decode_bishop(val: u8, sm: &mut SimpleMove) -> Result<()> {
         sm.from.to_index() as i32 + 9 * fyle_diff
     };
 
-    if to_idx < 0 || to_idx > 63 {
+    if !(0..=63).contains(&to_idx) {
         return Err(Error::Decode(format!(
             "Bishop move out of bounds: {}",
             to_idx
@@ -213,7 +213,7 @@ pub fn decode_queen(buf: &mut ByteBuffer, val: u8, sm: &mut SimpleMove) -> Resul
         sm.to = Square::make(val, sm.from.rank());
     } else {
         let second_byte = buf.get_byte()?;
-        if second_byte < 64 || second_byte > 127 {
+        if !(64..=127).contains(&second_byte) {
             return Err(Error::Decode(format!(
                 "Invalid queen diagonal second byte: {}",
                 second_byte
@@ -260,7 +260,7 @@ pub fn decode_pawn(val: u8, sm: &mut SimpleMove, to_move: Color) -> Result<()> {
         sm.from.to_index() as i32 - diff
     };
 
-    if to_idx < 0 || to_idx > 63 {
+    if !(0..=63).contains(&to_idx) {
         return Err(Error::Decode(format!(
             "Pawn move out of bounds: {}",
             to_idx
@@ -341,7 +341,7 @@ mod tests {
 
         let mut sm = SimpleMove::new();
         sm.from = Square::C1;
-        decode_bishop(8 + 0, &mut sm).unwrap();
+        decode_bishop(8, &mut sm).unwrap();
         assert_eq!(sm.to, Square::A3);
 
         let mut sm = SimpleMove::new();

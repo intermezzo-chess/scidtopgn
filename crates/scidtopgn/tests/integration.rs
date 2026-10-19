@@ -43,7 +43,9 @@ fn test_five_database() {
     assert_eq!(db.num_games(), 5);
 
     for i in 0..5 {
-        let game = db.get_game(i).expect(&format!("Failed to get game {}", i));
+        let game = db
+            .get_game(i)
+            .unwrap_or_else(|_| panic!("Failed to get game {}", i));
         let pgn = game.to_pgn();
         assert!(!pgn.is_empty(), "Game {} PGN should not be empty", i);
         assert!(

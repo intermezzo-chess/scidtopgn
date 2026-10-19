@@ -60,7 +60,7 @@ impl Date {
     pub fn from_string(s: &str) -> Self {
         let parts: Vec<&str> = s.split('.').collect();
         let year = parts
-            .get(0)
+            .first()
             .and_then(|p| p.parse::<u16>().ok())
             .unwrap_or(0);
         let month = parts.get(1).and_then(|p| p.parse::<u8>().ok()).unwrap_or(0);
@@ -168,7 +168,7 @@ pub fn date_valid_string(s: &str) -> bool {
         let mut seen_other = false;
 
         for ch in part.chars() {
-            if ch >= '0' && ch <= '9' {
+            if ch.is_ascii_digit() {
                 seen_digit = true;
             } else if ch == '?' {
                 seen_question = true;

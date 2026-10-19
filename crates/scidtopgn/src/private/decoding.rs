@@ -39,7 +39,7 @@ pub fn decode_move(
 }
 
 pub fn is_special_byte(byte: u8) -> bool {
-    byte >= ENCODE_NAG && byte <= ENCODE_END_GAME
+    (ENCODE_NAG..=ENCODE_END_GAME).contains(&byte)
 }
 
 pub fn is_move_byte(byte: u8) -> bool {

@@ -42,13 +42,3 @@ pub use pgn::{parse_pgn, parse_single_game, PgnParser};
 pub use position::{Board, PieceList, BK_CASTLE, BQ_CASTLE, WK_CASTLE, WQ_CASTLE};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_version() {
-        assert!(!VERSION.is_empty());
-    }
-}
