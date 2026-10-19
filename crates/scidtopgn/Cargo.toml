@@ -5,6 +5,7 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+rust-version.workspace = true
 description = "Library for reading and writing SCID chess databases"
 keywords = ["chess", "pgn", "database", "scid"]
 categories = ["parser-implementations", "game-development"]
