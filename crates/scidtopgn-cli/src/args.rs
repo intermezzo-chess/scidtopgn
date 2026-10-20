@@ -1,7 +1,7 @@
 use clap::{Args, Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "scidtopgn")]
+#[command(name = "scidtopgn", version)]
 #[command(about = "Convert between SCID databases and PGN format", long_about = None)]
 pub struct Cli {
     /// Database path (without extension) - shorthand for 'export'

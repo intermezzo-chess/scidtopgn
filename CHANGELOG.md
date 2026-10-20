@@ -9,6 +9,7 @@ All notable changes to the `scidtopgn` library and the `scidtopgn-cli` crate are
 - Initial release.
 - The `scidtopgn` library reads and writes SCID databases (`.si4`, `.sn4`, and `.sg4`) and parses PGN.
 - The `scidtopgn` command exports a SCID database to PGN on stdout or to a file, with `--count` and `--overwrite`.
+- `scidtopgn --version` prints the version.
 - `scidtopgn import` imports PGN from a file or stdin into a new or existing SCID database. Invalid games are skipped with a warning, or abort the import with `--on-error=abort`.
 - Export skips logically deleted games, matching the SCID reference converter.
 - Locked builds (`cargo install scidtopgn-cli --locked`) support Rust 1.70 and later.
