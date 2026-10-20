@@ -18,7 +18,8 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  # Bump deliberately. A newer toolchain can add lints.
+  # Bump deliberately. A newer toolchain can add lints. Keep in sync with
+  # STABLE_TOOLCHAIN in release.yml.
   STABLE_TOOLCHAIN: "1.99.1"
   # Keep in sync with `rust-version` in the root Cargo.toml.
   MSRV: "1.70.0"

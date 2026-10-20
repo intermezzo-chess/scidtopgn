@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Usage: crate-published <crate> <version>
+#
+# Exits 0 if the crates.io index lists <version> of <crate>, 1 if it doesn't,
+# and 2 if the index can't be read. Cargo resolves dependencies from this
+# index, so a listed version is one Cargo can download.
+set -euo pipefail
+
+if [ "$#" -ne 2 ]; then
+  echo "Usage: crate-published <crate> <version>" >&2
+  exit 2
+fi
+crate=$1
+version=$2
+
+# Index path for names of four or more characters:
+# https://doc.rust-lang.org/cargo/reference/registry-index.html#index-files
+url="https://index.crates.io/${crate:0:2}/${crate:2:2}/$crate"
+body=$(mktemp)
+trap 'rm -f "$body"' EXIT
+
+status=$(curl -sS -o "$body" -w '%{http_code}' -H 'Cache-Control: no-cache' "$url") || exit 2
+case "$status" in
+  200)
+    # One JSON object per published version.
+    if jq -se --arg version "$version" 'any(.[]; .vers == $version)' "$body" > /dev/null; then
+      exit 0
+    fi
+    exit 1
+    ;;
+  404) exit 1 ;;
+  *)
+    echo "The crates.io index returned HTTP $status for $crate." >&2
+    exit 2
+    ;;
+esac
