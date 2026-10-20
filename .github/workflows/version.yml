@@ -2,6 +2,11 @@ name: Version
 
 on:
   workflow_dispatch:
+    inputs:
+      prerelease-label:
+        description: "Prerelease label, such as rc or beta. Leave empty for a stable version."
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -37,6 +42,17 @@ jobs:
           echo "::error::The Version workflow only runs on main, but this run was started on $GITHUB_REF. Run it again with main selected."
           exit 1
 
+      # Knope accepts any label, including an empty one, and builds an
+      # invalid version from it.
+      - name: Check the prerelease label
+        env:
+          PRERELEASE_LABEL: ${{ inputs.prerelease-label }}
+        run: |
+          if [ -n "$PRERELEASE_LABEL" ] && ! [[ "$PRERELEASE_LABEL" =~ ^[a-z][a-z0-9]*$ ]]; then
+            echo "::error::The prerelease label must be lowercase letters and digits, starting with a letter, such as rc. Got \"$PRERELEASE_LABEL\"."
+            exit 1
+          fi
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Knope reads tags to find the last release.
@@ -69,8 +85,14 @@ jobs:
       - name: Prepare the version
         id: prepare
         if: steps.changesets.outputs.pending == 'true'
+        env:
+          PRERELEASE_LABEL: ${{ inputs.prerelease-label }}
         run: |
-          knope prepare-release --verbose
+          if [ -n "$PRERELEASE_LABEL" ]; then
+            knope prepare-release --verbose --prerelease-label "$PRERELEASE_LABEL"
+          else
+            knope prepare-release --verbose
+          fi
           echo "version=$(knope get-version)" >> "$GITHUB_OUTPUT"
 
       - name: Push the version branch
