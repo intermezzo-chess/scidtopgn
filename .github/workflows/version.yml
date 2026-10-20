@@ -1,0 +1,120 @@
+name: Version
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Runs queue instead of cancelling. Each run starts from main and replaces the
+# version branch, so a queued run loses nothing.
+concurrency:
+  group: version
+  cancel-in-progress: false
+
+env:
+  # Bump deliberately, together with KNOPE_SHA256, docs/RELEASING.md, and
+  # CONTRIBUTING.md.
+  KNOPE_VERSION: "0.23.0"
+  # SHA-256 of knope-x86_64-unknown-linux-musl.tgz for KNOPE_VERSION.
+  KNOPE_SHA256: "76a970a5e237344abc14be3de37ed50c021b659a9b66b3f54afc77e6d48ac501"
+  # The only branch this workflow writes to. Each run replaces its contents.
+  VERSION_BRANCH: knope/version
+
+jobs:
+  version:
+    name: version
+    runs-on: ubuntu-latest
+    # Pushes the version branch and opens the PR. Every step here is ours, so
+    # no third-party action gets this token.
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Require main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::The Version workflow only runs on main, but this run was started on $GITHUB_REF. Run it again with main selected."
+          exit 1
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Knope reads tags to find the last release.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check for pending changesets
+        id: changesets
+        run: |
+          shopt -s nullglob
+          files=(.changeset/*.md)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "pending=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No changesets are pending. No branch or pull request was changed."
+            echo "No changesets are pending on \`main\`. No branch or pull request was changed." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "pending=true" >> "$GITHUB_OUTPUT"
+            printf '%s\n' "${files[@]}"
+          fi
+
+      - name: Install Knope
+        if: steps.changesets.outputs.pending == 'true'
+        run: |
+          archive="$RUNNER_TEMP/knope.tgz"
+          curl -fsSL -o "$archive" "https://github.com/knope-dev/knope/releases/download/knope%2Fv$KNOPE_VERSION/knope-x86_64-unknown-linux-musl.tgz"
+          echo "$KNOPE_SHA256  $archive" | sha256sum --check
+          tar -xzf "$archive" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/knope-x86_64-unknown-linux-musl" >> "$GITHUB_PATH"
+
+      - name: Prepare the version
+        id: prepare
+        if: steps.changesets.outputs.pending == 'true'
+        run: |
+          knope prepare-release --verbose
+          echo "version=$(knope get-version)" >> "$GITHUB_OUTPUT"
+
+      - name: Push the version branch
+        if: steps.changesets.outputs.pending == 'true'
+        env:
+          TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.prepare.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -C "$VERSION_BRANCH"
+          git commit -m "chore: prepare release v$VERSION"
+          git push --force "https://x-access-token:$TOKEN@github.com/$GITHUB_REPOSITORY.git" "HEAD:refs/heads/$VERSION_BRANCH"
+
+      # CI on a PR opened or updated with GITHUB_TOKEN waits for a maintainer
+      # to approve the run. See docs/RELEASING.md.
+      - name: Create or update the version PR
+        if: steps.changesets.outputs.pending == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.prepare.outputs.version }}
+        run: |
+          title="chore: prepare release v$VERSION"
+          body="$RUNNER_TEMP/body.md"
+          {
+            echo "Created by the [Version workflow]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID). Merging this PR prepares v$VERSION. It doesn't tag or publish anything. Running the workflow again replaces this branch."
+            echo
+            echo "CI on this PR waits for a maintainer to approve the run."
+            echo
+            # This version's CHANGELOG.md section, without its heading.
+            awk -v heading="## $VERSION" '
+              $0 == heading || index($0, heading " ") == 1 { found = 1; next }
+              found && /^## / { exit }
+              found
+            ' CHANGELOG.md
+          } > "$body"
+
+          pulls="repos/$GITHUB_REPOSITORY/pulls"
+          number=$(gh api "$pulls?head=$GITHUB_REPOSITORY_OWNER:$VERSION_BRANCH&base=main&state=open" --jq '.[0].number // empty')
+          if [ -n "$number" ]; then
+            url=$(gh api -X PATCH "$pulls/$number" -f title="$title" -F body=@"$body" --jq .html_url)
+            echo "Updated the version PR for v$VERSION: $url" >> "$GITHUB_STEP_SUMMARY"
+          else
+            url=$(gh api "$pulls" -f title="$title" -f head="$VERSION_BRANCH" -f base=main -F body=@"$body" --jq .html_url)
+            echo "Opened the version PR for v$VERSION: $url" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "Approve the CI run on the PR before merging it." >> "$GITHUB_STEP_SUMMARY"

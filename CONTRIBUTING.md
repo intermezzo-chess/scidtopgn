@@ -13,11 +13,23 @@ and build both crates.
 
 ## Before opening a PR
 
+Run the same checks as CI. `--locked` fails if `Cargo.lock` would change.
+
 ```sh
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
 ```
+
+### Record the change
+
+If users of the library or the CLI can notice the change, add a changeset. Install [Knope](https://knope.tech) 0.23.0 with `cargo install knope --version 0.23.0 --locked`, then run:
+
+```sh
+knope document-change
+```
+
+Choose `major` for a breaking change, `minor` for a backward-compatible addition, or `patch` for a fix, and enter a one-line summary. Commit the new `.changeset/*.md` file with the change. Changes to tests, CI, or contributor documentation don't need a changeset. [docs/RELEASING.md](docs/RELEASING.md#record-a-change) explains the file format and how each type bumps a 0.x version.
 
 Fill in the [pull request template](.github/pull_request_template.md) and
 reference the issue the PR addresses.
@@ -71,7 +83,7 @@ To build the C++ unit tests, download `doctest.h` first. The steps are in
 
 ## Releasing
 
-There is no release automation yet (see [#22](https://github.com/intermezzo-chess/scidtopgn/issues/22)).
+See [docs/RELEASING.md](docs/RELEASING.md).
 
 ## Commands
 
@@ -80,8 +92,9 @@ There is no release automation yet (see [#22](https://github.com/intermezzo-ches
 | `cargo build` / `cargo build --release`                 | Builds the library and the `scidtopgn` binary.                                              |
 | `cargo run -p scidtopgn-cli -- <database>`              | Exports a database to PGN on stdout without installing. Pass the database path without its extension. |
 | `cargo run -p scidtopgn-cli -- import <pgn> -o <db>`    | Imports a PGN file into a SCID database.                                                    |
-| `cargo test --workspace`                                | Runs the unit and integration tests for both crates.                                        |
+| `cargo test --workspace --locked`                       | Runs the unit and integration tests for both crates.                                        |
 | `cargo test -p scidtopgn` / `cargo test -p scidtopgn-cli` | Runs one crate's tests.                                                                   |
 | `cargo fmt --all`                                       | Formats the workspace with rustfmt.                                                         |
-| `cargo clippy --workspace --all-targets -- -D warnings` | Lints the workspace and treats warnings as errors.                                          |
+| `cargo clippy --workspace --all-targets --locked -- -D warnings` | Lints the workspace and treats warnings as errors.                                 |
 | `cargo doc --workspace --no-deps --open`                | Builds and opens the API documentation.                                                     |
+| `knope document-change`                                 | Adds a changeset describing a change.                                                       |
