@@ -197,6 +197,60 @@ expect "sync-release-assets: setup for a missing archive" 0 sync
 echo "extra build" > "$dist/scidtopgn-v0.1.0-aarch64-apple-darwin.tar.gz"
 expect "sync-release-assets: SHA256SUMS lacks a built archive" 1 sync
 
+# check-archive-notices -------------------------------------------------------
+
+sources="$work/sources"
+mkdir -p "$sources/alpha-1.0.0" "$sources/beta_rs-0.2.1" "$sources/gamma-3.0.0"
+printf 'Copyright (c) 2020 Alpha Author\n\nPermission is hereby granted, free of charge.\n' > "$sources/alpha-1.0.0/LICENSE-MIT"
+printf 'Apache text\n' > "$sources/alpha-1.0.0/LICENSE-APACHE"
+printf '    MIT License\n\n    Copyright (c) Beta Corporation.\n\n    The above copyright notice shall be included.\n' > "$sources/beta_rs-0.2.1/license-mit"
+crates=$'scidtopgn-cli v0.1.0 (/src/crates/scidtopgn-cli)\nalpha v1.0.0\nbeta_rs v0.2.1\nalpha v1.0.0\nbeta_rs v0.2.1 (*)\n'
+notices_full=$'Crate        License used\nalpha 1.0.0  MIT\nbeta_rs 0.2.1  MIT\n\n====\n\nalpha 1.0.0\n\nCopyright (c) 2020 Alpha Author\n\nPermission is hereby granted,\nfree of charge.\n\n====\n\nbeta_rs 0.2.1\n\nMIT License\nCopyright (c) Beta Corporation.\nThe above copyright notice shall be included.\n'
+
+# archive <name> <notices> writes <name>.tar.gz with <name>/THIRD_PARTY_LICENSES,
+# or no notices file when <notices> is "-".
+archive() {
+  mkdir -p "$work/archives/$1"
+  if [ "$2" != - ]; then
+    printf '%s' "$2" > "$work/archives/$1/THIRD_PARTY_LICENSES"
+  fi
+  tar -czf "$work/$1.tar.gz" -C "$work/archives" "$1"
+}
+check_notices() {
+  printf '%s' "$crates" | "$scripts/check-archive-notices" "$work/$1" "$sources"
+}
+
+archive full "$notices_full"
+expect "check-archive-notices: every crate covered" 0 check_notices full.tar.gz
+expect_output "check-archive-notices: skips workspace and repeated crates" "covers 2 crates"
+
+unlisted=${notices_full/beta_rs 0.2.1  MIT/}
+archive unlisted "${unlisted/$'\nbeta_rs 0.2.1\n'/$'\n'}"
+expect "check-archive-notices: crate not listed" 1 check_notices unlisted.tar.gz
+expect_output "check-archive-notices: names the unlisted crate" "doesn't list beta_rs 0.2.1"
+
+archive no-copyright "${notices_full/Copyright (c) 2020 Alpha Author/}"
+expect "check-archive-notices: copyright line missing" 1 check_notices no-copyright.tar.gz
+expect_output "check-archive-notices: names the incomplete notice" "lacks the text of alpha 1.0.0's LICENSE-MIT"
+
+archive no-notices -
+expect "check-archive-notices: archive without THIRD_PARTY_LICENSES" 1 check_notices no-notices.tar.gz
+
+crates+=$'gamma v3.0.0\n'
+archive gamma "$notices_full"$'gamma 3.0.0  MIT\n'
+expect "check-archive-notices: crate without a license file" 1 check_notices gamma.tar.gz
+expect_output "check-archive-notices: names the crate without a license file" "No MIT license file for gamma 3.0.0"
+crates=${crates%$'gamma v3.0.0\n'}
+
+if command -v zip > /dev/null; then
+  (cd "$work/archives" && zip -qr "$work/full.zip" full)
+  expect "check-archive-notices: zip archive" 0 check_notices full.zip
+fi
+
+expect "check-archive-notices: no crates on stdin" 2 \
+  "$scripts/check-archive-notices" "$work/full.tar.gz" "$sources" < /dev/null
+expect "check-archive-notices: missing argument" 2 "$scripts/check-archive-notices" "$work/full.tar.gz"
+
 if [ "$failures" -gt 0 ]; then
   echo "$failures failed."
   exit 1
