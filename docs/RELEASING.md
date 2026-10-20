@@ -139,7 +139,7 @@ Each archive contains a `scidtopgn-vX.Y.Z-<target>` directory with the binary, `
 
 ## Recover from a partial failure
 
-Each step of the `release` job skips what is already done: a tag on the run's commit, archives already attached to the release, and crate versions already on crates.io. To recover, fix the cause and run the job again. The workflow refuses only when the tag, the published release with `SHA256SUMS`, and both crates all exist.
+Each step of the `release` job skips what is already done: a tag on the run's commit, archives that finished uploading to the release, and crate versions already on crates.io. An upload that failed partway, which GitHub leaves as an asset in the `starter` state, is deleted and uploaded again. To recover, fix the cause and run the job again. The workflow refuses only when the tag, the published release with `SHA256SUMS`, and both crates all exist.
 
 - **A job before approval fails.** Nothing has been tagged or published. Fix the cause on `main` and start a new run. For a transient failure, rerun the failed jobs instead.
 - **The `release` job fails.** Fix the cause, such as a missing or expired token. Then open the run and choose **Re-run jobs → Re-run failed jobs**. The rerun uses the same commit and the same archives, and needs approval again. GitHub allows reruns for 30 days.
