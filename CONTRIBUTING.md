@@ -98,3 +98,4 @@ See [docs/RELEASING.md](docs/RELEASING.md).
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | Lints the workspace and treats warnings as errors.                                 |
 | `cargo doc --workspace --no-deps --open`                | Builds and opens the API documentation.                                                     |
 | `knope document-change`                                 | Adds a changeset describing a change.                                                       |
+| `.github/scripts/run-tests`                             | Tests the release workflow's scripts in `.github/scripts/`.                                 |

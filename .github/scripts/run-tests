@@ -1,0 +1,204 @@
+#!/usr/bin/env bash
+# Tests the release scripts in this directory. Stubs replace curl and gh, so
+# nothing touches the network or GitHub. Run it from anywhere.
+set -euo pipefail
+
+scripts=$(cd "$(dirname "$0")" && pwd)
+work=$(mktemp -d "${TMPDIR:-/tmp}/run-tests.XXXXXX")
+trap 'rm -rf "$work"' EXIT
+failures=0
+
+# expect <name> <status> <command...> checks the command's exit status.
+expect() {
+  local name=$1 want=$2 got=0
+  shift 2
+  "$@" > "$work/out" 2>&1 || got=$?
+  if [ "$got" = "$want" ]; then
+    echo "ok   $name"
+  else
+    echo "FAIL $name: exit $got, want $want"
+    sed 's/^/     /' "$work/out"
+    failures=$((failures + 1))
+  fi
+}
+
+# expect_output <name> <text> fails unless the last command printed <text>.
+expect_output() {
+  if grep -qF -- "$2" "$work/out"; then
+    echo "ok   $1"
+  else
+    echo "FAIL $1: output lacks \"$2\""
+    sed 's/^/     /' "$work/out"
+    failures=$((failures + 1))
+  fi
+}
+
+mkdir "$work/bin"
+export PATH="$work/bin:$PATH"
+
+# crate-published -------------------------------------------------------------
+
+# Answers with FAKE_STATUS and the body in FAKE_BODY.
+cat > "$work/bin/curl" <<'EOF'
+#!/usr/bin/env bash
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = -o ]; then
+    printf '%s' "$FAKE_BODY" > "$2"
+    shift
+  fi
+  shift
+done
+printf '%s' "$FAKE_STATUS"
+EOF
+chmod +x "$work/bin/curl"
+
+index=$'{"name":"scidtopgn","vers":"0.1.0"}\n{"name":"scidtopgn","vers":"0.1.1"}\n'
+FAKE_STATUS=200 FAKE_BODY=$index expect "crate-published: listed version" 0 "$scripts/crate-published" scidtopgn 0.1.1
+FAKE_STATUS=200 FAKE_BODY=$index expect "crate-published: unlisted version" 1 "$scripts/crate-published" scidtopgn 0.2.0
+FAKE_STATUS=404 FAKE_BODY="" expect "crate-published: unknown crate" 1 "$scripts/crate-published" scidtopgn 0.1.0
+FAKE_STATUS=200 FAKE_BODY=$'{"vers":"0.1.0"}\n{not json\n' expect "crate-published: malformed index" 2 "$scripts/crate-published" scidtopgn 0.1.0
+FAKE_STATUS=500 FAKE_BODY="" expect "crate-published: server error" 2 "$scripts/crate-published" scidtopgn 0.1.0
+expect "crate-published: missing argument" 2 "$scripts/crate-published" scidtopgn
+
+# pending-changesets ----------------------------------------------------------
+
+repo="$work/repo"
+git init -q "$repo"
+git_commit() {
+  git -C "$repo" add -A
+  git -C "$repo" -c user.name=test -c user.email=test@example.com commit -q -m "$1"
+}
+changeset() {
+  mkdir -p "$repo/.changeset"
+  printf -- '---\ndefault: %s\n---\n\n# %s\n\nDetails about the change.\nMore details.\n' "$2" "$3" > "$repo/.changeset/$1.md"
+}
+set_version() {
+  printf '[workspace.package]\nversion = "%s"\n' "$1" > "$repo/Cargo.toml"
+}
+pending() {
+  (cd "$repo" && "$scripts/pending-changesets" "$@")
+}
+
+set_version 0.1.0
+git_commit "release 0.1.0"
+expect "pending-changesets: stable, none" 0 pending 0.1.0
+
+changeset add-thing minor "Add a thing"
+git_commit "add a changeset"
+expect "pending-changesets: stable, one left over" 1 pending 0.1.0
+expect_output "pending-changesets: lists the left-over changeset" ".changeset/add-thing.md"
+
+set_version 0.1.1-rc.0
+git_commit "prepare 0.1.1-rc.0"
+expect "pending-changesets: prerelease, nothing new" 0 pending 0.1.1-rc.0
+
+changeset fix-thing patch "Fix a thing"
+git_commit "add a changeset after the prerelease"
+expect "pending-changesets: prerelease, added changeset" 1 pending 0.1.1-rc.0
+
+set_version 0.1.1-rc.1
+git_commit "prepare 0.1.1-rc.1"
+echo "Another detail." >> "$repo/.changeset/add-thing.md"
+git_commit "edit a changeset"
+expect "pending-changesets: prerelease, edited changeset" 1 pending 0.1.1-rc.1
+
+set_version 0.1.1-rc.2
+git_commit "prepare 0.1.1-rc.2"
+git -C "$repo" mv .changeset/fix-thing.md .changeset/fix-the-thing.md
+echo "One more detail." >> "$repo/.changeset/fix-the-thing.md"
+git_commit "rename and edit a changeset"
+expect "pending-changesets: prerelease, renamed and edited changeset" 1 pending 0.1.1-rc.2
+expect_output "pending-changesets: lists the renamed changeset" ".changeset/fix-the-thing.md"
+
+expect "pending-changesets: version never set" 2 pending 0.9.0-rc.0
+expect "pending-changesets: missing argument" 2 pending
+
+# sync-release-assets ---------------------------------------------------------
+
+# A release whose assets are files in $FAKE_RELEASE/<state>/. Each upload is
+# logged to $FAKE_RELEASE/log.
+cat > "$work/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+shopt -s nullglob
+release=$FAKE_RELEASE
+case "$1 $2" in
+  "release view")
+    for state in uploaded starter; do
+      for file in "$release/$state"/*; do
+        jq -n --arg name "$(basename "$file")" --arg state "$state" '{name: $name, state: $state}'
+      done
+    done | jq -s '{assets: .}'
+    ;;
+  "release delete-asset")
+    rm -f "$release/uploaded/$4" "$release/starter/$4"
+    ;;
+  "release upload")
+    cp "$4" "$release/uploaded/"
+    echo "upload $(basename "$4")" >> "$release/log"
+    ;;
+  "release download")
+    cp "$release/uploaded"/* "$5/"
+    ;;
+  *)
+    echo "gh stub: unexpected arguments: $*" >&2
+    exit 64
+    ;;
+esac
+EOF
+chmod +x "$work/bin/gh"
+
+new_release() {
+  export FAKE_RELEASE="$work/release-$1"
+  mkdir -p "$FAKE_RELEASE/uploaded" "$FAKE_RELEASE/starter"
+  : > "$FAKE_RELEASE/log"
+  dist="$work/dist-$1"
+  mkdir -p "$dist"
+  echo "linux build $1" > "$dist/scidtopgn-v0.1.0-x86_64-unknown-linux-gnu.tar.gz"
+  echo "windows build $1" > "$dist/scidtopgn-v0.1.0-x86_64-pc-windows-msvc.zip"
+}
+sync() {
+  "$scripts/sync-release-assets" v0.1.0 "$dist"
+}
+uploads() {
+  sort "$FAKE_RELEASE/log" | tr '\n' ' '
+}
+
+new_release fresh
+expect "sync-release-assets: empty release" 0 sync
+expect_output "sync-release-assets: checks the archives" "scidtopgn-v0.1.0-x86_64-unknown-linux-gnu.tar.gz: OK"
+expect "sync-release-assets: uploads every archive and SHA256SUMS" 0 \
+  test "$(uploads)" = "upload SHA256SUMS upload scidtopgn-v0.1.0-x86_64-pc-windows-msvc.zip upload scidtopgn-v0.1.0-x86_64-unknown-linux-gnu.tar.gz "
+expect "sync-release-assets: rerun on a finished release" 0 sync
+expect "sync-release-assets: rerun uploads nothing" 0 \
+  test "$(uploads)" = "upload SHA256SUMS upload scidtopgn-v0.1.0-x86_64-pc-windows-msvc.zip upload scidtopgn-v0.1.0-x86_64-unknown-linux-gnu.tar.gz "
+
+# An earlier attempt uploaded the Linux archive from a different build, then
+# failed with the Windows archive and SHA256SUMS left in the "starter" state.
+new_release partial
+echo "linux build from an earlier run" > "$FAKE_RELEASE/uploaded/scidtopgn-v0.1.0-x86_64-unknown-linux-gnu.tar.gz"
+: > "$FAKE_RELEASE/starter/scidtopgn-v0.1.0-x86_64-pc-windows-msvc.zip"
+: > "$FAKE_RELEASE/starter/SHA256SUMS"
+expect "sync-release-assets: rerun with unfinished uploads" 0 sync
+expect_output "sync-release-assets: deletes the unfinished archive" "Deleting scidtopgn-v0.1.0-x86_64-pc-windows-msvc.zip, an unfinished upload (starter)."
+expect "sync-release-assets: uploads only what was unfinished" 0 \
+  test "$(uploads)" = "upload SHA256SUMS upload scidtopgn-v0.1.0-x86_64-pc-windows-msvc.zip "
+expect "sync-release-assets: keeps the finished archive" 0 \
+  grep -qx "linux build from an earlier run" "$FAKE_RELEASE/uploaded/scidtopgn-v0.1.0-x86_64-unknown-linux-gnu.tar.gz"
+expect "sync-release-assets: leaves no unfinished assets" 0 test -z "$(ls -A "$FAKE_RELEASE/starter")"
+
+new_release tampered
+expect "sync-release-assets: setup for tampering" 0 sync
+echo "replaced by hand" > "$FAKE_RELEASE/uploaded/scidtopgn-v0.1.0-x86_64-pc-windows-msvc.zip"
+expect "sync-release-assets: archive doesn't match SHA256SUMS" 1 sync
+
+new_release missing
+expect "sync-release-assets: setup for a missing archive" 0 sync
+echo "extra build" > "$dist/scidtopgn-v0.1.0-aarch64-apple-darwin.tar.gz"
+expect "sync-release-assets: SHA256SUMS lacks a built archive" 1 sync
+
+if [ "$failures" -gt 0 ]; then
+  echo "$failures failed."
+  exit 1
+fi
+echo "All passed."

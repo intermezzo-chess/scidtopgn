@@ -1,0 +1,399 @@
+name: Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Runs queue instead of cancelling. Each run checks again what is already
+# released, so a queued run only finishes what is missing.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  # Keep in sync with STABLE_TOOLCHAIN in ci.yml.
+  STABLE_TOOLCHAIN: "1.99.1"
+
+defaults:
+  run:
+    shell: bash
+
+# Every job checks out `github.sha`, the commit the run was started on, so a
+# push to main during the run changes nothing. The called CI workflow checks
+# out the same commit. Reruns keep it too.
+jobs:
+  # Refuses before anything is built or approved. Its outputs record which
+  # release steps are already done, and its summary shows them to the reviewer.
+  check:
+    name: check
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+      lib-published: ${{ steps.state.outputs.lib-published }}
+      cli-published: ${{ steps.state.outputs.cli-published }}
+    steps:
+      - name: Require main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::The Release workflow only runs on main, but this run was started on $GITHUB_REF. Run it again with main selected."
+          exit 1
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          # Tags, and the history to find the commit that set the version.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Read the version
+        id: version
+        run: |
+          metadata=$(cargo metadata --no-deps --format-version 1)
+          version=$(jq -r '.packages[] | select(.name == "scidtopgn") | .version' <<< "$metadata")
+          cli_version=$(jq -r '.packages[] | select(.name == "scidtopgn-cli") | .version' <<< "$metadata")
+          requirement=$(jq -r '.packages[] | select(.name == "scidtopgn-cli") | .dependencies[] | select(.name == "scidtopgn") | .req' <<< "$metadata")
+          if [ "$cli_version" != "$version" ] || [ "$requirement" != "^$version" ]; then
+            echo "::error::scidtopgn is $version, but scidtopgn-cli is $cli_version and requires scidtopgn $requirement. Prepare versions with the Version workflow."
+            exit 1
+          fi
+          prerelease=false
+          if [[ "$version" == *-* ]]; then
+            prerelease=true
+          fi
+          {
+            echo "version=$version"
+            echo "tag=v$version"
+            echo "prerelease=$prerelease"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Check for pending changesets
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          status=0
+          .github/scripts/pending-changesets "$VERSION" || status=$?
+          if [ "$status" -eq 1 ]; then
+            echo "::error::Changesets are pending, so $VERSION wouldn't include them. Run the Version workflow and merge its PR, then run Release again."
+          fi
+          exit "$status"
+
+      - name: Extract the release notes
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # This version's CHANGELOG.md section, without its heading.
+          awk -v heading="## $VERSION" '
+            $0 == heading || index($0, heading " ") == 1 { found = 1; next }
+            found && /^## / { exit }
+            found
+          ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          if ! grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md"; then
+            echo "::error::CHANGELOG.md has no section for $VERSION. Prepare versions with the Version workflow."
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-notes
+          path: ${{ runner.temp }}/notes.md
+          if-no-files-found: error
+
+      - name: Check what is already released
+        id: state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          state() { if [ "$1" = true ]; then echo "$2"; else echo "$3"; fi; }
+
+          tag_done=false
+          tag_commit=$(git rev-parse -q --verify "refs/tags/$TAG^{commit}") || true
+          if [ -n "$tag_commit" ]; then
+            tag_done=true
+          fi
+
+          # Published only after every asset is uploaded and SHA256SUMS
+          # verified, so a published release whose assets, including
+          # SHA256SUMS, all finished uploading is done.
+          release_done=false
+          if release=$(gh release view "$TAG" --json isDraft,assets 2> "$RUNNER_TEMP/release-error"); then
+            release_done=$(jq -r '(.isDraft | not) and any(.assets[]; .name == "SHA256SUMS") and all(.assets[]; .state == "uploaded")' <<< "$release")
+          elif ! grep -q "release not found" "$RUNNER_TEMP/release-error"; then
+            cat "$RUNNER_TEMP/release-error" >&2
+            exit 1
+          fi
+
+          published() {
+            local status=0
+            .github/scripts/crate-published "$1" "$VERSION" || status=$?
+            case "$status" in
+              0) echo true ;;
+              1) echo false ;;
+              *) exit 1 ;;
+            esac
+          }
+          lib_published=$(published scidtopgn)
+          cli_published=$(published scidtopgn-cli)
+          echo "lib-published=$lib_published" >> "$GITHUB_OUTPUT"
+          echo "cli-published=$cli_published" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Release $TAG"
+            echo
+            echo "Commit: \`$GITHUB_SHA\`"
+            echo
+            echo "| Step | State |"
+            echo "| --- | --- |"
+            echo "| Tag \`$TAG\` | $(state "$tag_done" "Done" "Will be created") |"
+            echo "| GitHub release | $(state "$release_done" "Done" "Will be created or finished") |"
+            echo "| \`scidtopgn\` on crates.io | $(state "$lib_published" "Done" "Will be published") |"
+            echo "| \`scidtopgn-cli\` on crates.io | $(state "$cli_published" "Done" "Will be published") |"
+            echo
+            echo "### Release notes"
+            echo
+            cat "$RUNNER_TEMP/notes.md"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$tag_done" = true ] && [ "$release_done" = true ] && [ "$lib_published" = true ] && [ "$cli_published" = true ]; then
+            echo "::error::$TAG is already released: the tag, the GitHub release, and both crates exist. Nothing is left to do. To release a new version, run the Version workflow first."
+            exit 1
+          fi
+          if [ "$tag_done" = true ] && [ "$tag_commit" != "$GITHUB_SHA" ]; then
+            echo "::error::Tag $TAG points to $tag_commit, not $GITHUB_SHA. To finish that release, rerun the failed jobs of the run that created the tag. See docs/RELEASING.md."
+            exit 1
+          fi
+
+  ci:
+    name: ci
+    needs: check
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    name: build (${{ matrix.target }})
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        # Each target builds on a runner that can run the binary.
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-apple-darwin
+            os: macos-26-intel
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    env:
+      TARGET: ${{ matrix.target }}
+      VERSION: ${{ needs.check.outputs.version }}
+      ARCHIVE: scidtopgn-v${{ needs.check.outputs.version }}-${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: ${{ env.STABLE_TOOLCHAIN }}
+          targets: ${{ matrix.target }}
+      # No Cargo cache: release binaries build from a clean state.
+      - name: Build
+        run: |
+          cargo build --release --locked -p scidtopgn-cli --target "$TARGET"
+          exe=""
+          if [ "$RUNNER_OS" = Windows ]; then
+            exe=".exe"
+          fi
+          echo "BIN=target/$TARGET/release/scidtopgn$exe" >> "$GITHUB_ENV"
+
+      - name: Run the binary
+        run: |
+          output=$("$BIN" --version)
+          echo "$output"
+          if [ "$output" != "scidtopgn $VERSION" ]; then
+            echo "::error::Expected \"scidtopgn $VERSION\" from $BIN --version, got \"$output\"."
+            exit 1
+          fi
+
+      - name: Archive
+        env:
+          # Keeps macOS tar from adding AppleDouble files.
+          COPYFILE_DISABLE: 1
+        run: |
+          staging="$RUNNER_TEMP/$ARCHIVE"
+          mkdir "$staging" dist
+          cp "$BIN" LICENSE README.md "$staging/"
+          if [ "$RUNNER_OS" = Windows ]; then
+            (cd "$RUNNER_TEMP" && 7z a -tzip "$GITHUB_WORKSPACE/dist/$ARCHIVE.zip" "$ARCHIVE" > /dev/null)
+          else
+            tar -czf "dist/$ARCHIVE.tar.gz" -C "$RUNNER_TEMP" "$ARCHIVE"
+          fi
+          ls -l dist
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ env.ARCHIVE }}
+          path: dist/
+          if-no-files-found: error
+
+  publish-dry-run:
+    name: publish dry run
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: ${{ env.STABLE_TOOLCHAIN }}
+      - name: Dry-run cargo publish
+        env:
+          LIB_PUBLISHED: ${{ needs.check.outputs.lib-published }}
+          CLI_PUBLISHED: ${{ needs.check.outputs.cli-published }}
+        run: |
+          if [ "$LIB_PUBLISHED" = false ]; then
+            # Verifies scidtopgn-cli against the local scidtopgn, which isn't
+            # on crates.io yet.
+            cargo publish --dry-run --locked --workspace
+          elif [ "$CLI_PUBLISHED" = false ]; then
+            cargo publish --dry-run --locked -p scidtopgn-cli
+          else
+            echo "Both crates are already on crates.io."
+          fi
+
+  # Everything above must pass first. The reviewer approves this job, and
+  # each step skips whatever is already done, so rerunning it after a failure
+  # finishes the release. crates.io comes last because it can't be undone.
+  release:
+    name: release
+    needs: [check, ci, build, publish-dry-run]
+    runs-on: ubuntu-latest
+    # Requires a reviewer and allows only main. CARGO_REGISTRY_TOKEN is a
+    # secret of this environment only.
+    environment: release
+    # Creates the tag and the GitHub release. Only first-party actions run in
+    # this job.
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      VERSION: ${{ needs.check.outputs.version }}
+      TAG: ${{ needs.check.outputs.tag }}
+    steps:
+      - name: Check the crates.io token
+        if: needs.check.outputs.lib-published == 'false' || needs.check.outputs.cli-published == 'false'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
+            echo "::error::CARGO_REGISTRY_TOKEN isn't set in the release environment. Nothing was tagged or published. See docs/RELEASING.md."
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          # Current tags, to check the release tag again.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: scidtopgn-v*
+          path: dist
+          merge-multiple: true
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-notes
+          path: ${{ runner.temp }}
+
+      - name: Create the tag
+        run: |
+          if commit=$(git rev-parse -q --verify "refs/tags/$TAG^{commit}"); then
+            if [ "$commit" != "$GITHUB_SHA" ]; then
+              echo "::error::Tag $TAG points to $commit, not $GITHUB_SHA."
+              exit 1
+            fi
+            echo "Tag $TAG already exists."
+          else
+            gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA" > /dev/null
+            echo "Created tag $TAG."
+          fi
+
+      - name: Create the GitHub release
+        env:
+          PRERELEASE: ${{ needs.check.outputs.prerelease }}
+        run: |
+          # A draft until every asset is uploaded and verified.
+          if ! gh release view "$TAG" --json isDraft > /dev/null 2> "$RUNNER_TEMP/release-error"; then
+            if ! grep -q "release not found" "$RUNNER_TEMP/release-error"; then
+              cat "$RUNNER_TEMP/release-error" >&2
+              exit 1
+            fi
+            flags=(--draft --verify-tag --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md")
+            if [ "$PRERELEASE" = true ]; then
+              flags+=(--prerelease)
+            fi
+            gh release create "$TAG" "${flags[@]}"
+          fi
+
+          .github/scripts/sync-release-assets "$TAG" dist
+
+          if [ "$(gh release view "$TAG" --json isDraft --jq .isDraft)" = true ]; then
+            gh release edit "$TAG" --draft=false
+            echo "Published the GitHub release."
+          else
+            echo "The GitHub release is already published."
+          fi
+
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          rustup toolchain install "$STABLE_TOOLCHAIN" --profile minimal
+          # scidtopgn first: scidtopgn-cli depends on it.
+          for crate in scidtopgn scidtopgn-cli; do
+            status=0
+            .github/scripts/crate-published "$crate" "$VERSION" || status=$?
+            case "$status" in
+              0) echo "$crate $VERSION is already on crates.io."; continue ;;
+              1) ;;
+              *) exit 1 ;;
+            esac
+            cargo +"$STABLE_TOOLCHAIN" publish --locked -p "$crate"
+            # Cargo waits too, but gives up after a minute without failing.
+            for attempt in $(seq 60); do
+              if .github/scripts/crate-published "$crate" "$VERSION"; then
+                echo "crates.io serves $crate $VERSION."
+                break
+              fi
+              if [ "$attempt" -eq 60 ]; then
+                echo "::error::crates.io doesn't serve $crate $VERSION after 10 minutes. Rerun this job once it does."
+                exit 1
+              fi
+              sleep 10
+            done
+          done
+
+      - name: Summarize
+        run: |
+          {
+            echo "## Released $TAG"
+            echo
+            echo "- [GitHub release]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG)"
+            echo "- [scidtopgn $VERSION](https://crates.io/crates/scidtopgn/$VERSION)"
+            echo "- [scidtopgn-cli $VERSION](https://crates.io/crates/scidtopgn-cli/$VERSION)"
+          } >> "$GITHUB_STEP_SUMMARY"

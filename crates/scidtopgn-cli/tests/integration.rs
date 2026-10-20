@@ -35,6 +35,17 @@ fn test_cli_count() {
 }
 
 #[test]
+fn test_cli_version() {
+    let output = cli().arg("--version").output().expect("Failed to run CLI");
+
+    assert!(output.status.success(), "--version should succeed");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        format!("scidtopgn {}\n", env!("CARGO_PKG_VERSION"))
+    );
+}
+
+#[test]
 fn test_cli_output() {
     let output = cli()
         .arg("tests/data/one")

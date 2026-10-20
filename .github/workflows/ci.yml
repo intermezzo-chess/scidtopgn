@@ -18,7 +18,8 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  # Bump deliberately. A newer toolchain can add lints.
+  # Bump deliberately. A newer toolchain can add lints. Keep in sync with
+  # STABLE_TOOLCHAIN in release.yml.
   STABLE_TOOLCHAIN: "1.99.1"
   # Keep in sync with `rust-version` in the root Cargo.toml.
   MSRV: "1.70.0"
@@ -70,13 +71,22 @@ jobs:
       - run: cargo build --workspace --locked
       - run: cargo test --workspace --locked
 
+  scripts:
+    name: release scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: .github/scripts/run-tests
+
   # The only required check. Matrix entries can change without touching branch
   # protection. `always()` makes it run, and fail, when a needed job fails or
   # is skipped, because a skipped required check counts as passing.
   ci-success:
     name: ci-success
     if: always()
-    needs: [lint, test, msrv]
+    needs: [lint, test, msrv, scripts]
     runs-on: ubuntu-latest
     steps:
       - name: Check that every job succeeded

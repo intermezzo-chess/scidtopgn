@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Usage: pending-changesets <version>
+#
+# Lists the changesets that <version> doesn't include, one per line. Exits 0
+# if there are none, 1 if there are some, and 2 on errors. Run it from the
+# repository root, with the history that set <version>.
+set -euo pipefail
+
+if [ "$#" -ne 1 ]; then
+  echo "Usage: pending-changesets <version>" >&2
+  exit 2
+fi
+version=$1
+
+list_pending() {
+  if [[ "$version" != *-* ]]; then
+    # Preparing a stable version deletes every changeset, so any left over
+    # is pending.
+    shopt -s nullglob
+    local file
+    for file in .changeset/*.md; do
+      echo "$file"
+    done
+  else
+    # Knope keeps changesets after a prerelease and deletes them at the next
+    # stable release. Only changesets added or changed since the commit that
+    # set this version are pending.
+    local base
+    base=$(git log -1 --format=%H -S"version = \"$version\"" -- Cargo.toml) || return 2
+    if [ -z "$base" ]; then
+      echo "Couldn't find the commit that set version $version in Cargo.toml." >&2
+      return 2
+    fi
+    # Without --no-renames, a renamed changeset has status R and the filter
+    # misses it, even if its content changed.
+    git diff --no-renames --name-only --diff-filter=AM "$base" HEAD -- '.changeset/*.md' || return 2
+  fi
+}
+
+pending=$(list_pending) || exit 2
+if [ -n "$pending" ]; then
+  echo "$pending"
+  exit 1
+fi

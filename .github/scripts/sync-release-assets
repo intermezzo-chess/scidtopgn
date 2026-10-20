@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# Usage: sync-release-assets <tag> <dir>
+#
+# Makes the GitHub release for <tag> serve every archive in <dir> and a
+# SHA256SUMS file for them, then verifies what the release serves. Archives
+# the release already has are kept, even if <dir> holds different bytes, so a
+# rerun finishes an earlier attempt. Needs gh, with GH_TOKEN and GH_REPO set.
+set -euo pipefail
+
+if [ "$#" -ne 2 ]; then
+  echo "Usage: sync-release-assets <tag> <dir>" >&2
+  exit 2
+fi
+tag=$1
+dir=$2
+work=$(mktemp -d "${TMPDIR:-/tmp}/sync-release-assets.XXXXXX")
+trap 'rm -rf "$work"' EXIT
+shopt -s nullglob
+if [ -z "$(ls -A "$dir")" ]; then
+  echo "$dir has no archives." >&2
+  exit 2
+fi
+
+# Prints "<state> <name>" for each asset.
+list_assets() {
+  gh release view "$tag" --json assets | jq -r '.assets[] | "\(.state) \(.name)"'
+}
+
+# Prints the file names in a directory, sorted.
+list_files() {
+  local file
+  for file in "$1"/*; do
+    basename "$file"
+  done | sort
+}
+
+# An upload that fails, for example with HTTP 502, can leave an asset in the
+# "starter" state: it has the name but not the content. Delete it so it's
+# uploaded again.
+assets=$(list_assets)
+while read -r state name; do
+  if [ -n "$name" ] && [ "$state" != uploaded ]; then
+    echo "Deleting $name, an unfinished upload ($state)."
+    gh release delete-asset "$tag" "$name" --yes
+  fi
+done <<< "$assets"
+
+uploaded=$(list_assets | awk '$1 == "uploaded" { print $2 }')
+for file in "$dir"/*; do
+  name=$(basename "$file")
+  if grep -qxF "$name" <<< "$uploaded"; then
+    echo "$name is already attached."
+  else
+    gh release upload "$tag" "$file"
+  fi
+done
+
+# SHA256SUMS describes the archives the release has, which can differ from
+# <dir> after a rerun.
+if ! grep -qxF SHA256SUMS <<< "$uploaded"; then
+  mkdir "$work/sums"
+  gh release download "$tag" --dir "$work/sums"
+  (cd "$work/sums" && sha256sum -- *) > "$work/SHA256SUMS"
+  gh release upload "$tag" "$work/SHA256SUMS"
+fi
+
+# SHA256SUMS must match every archive, and list exactly the archives
+# attached and the ones in <dir>.
+mkdir "$work/verify"
+gh release download "$tag" --dir "$work/verify"
+if [ ! -f "$work/verify/SHA256SUMS" ]; then
+  echo "The release has no SHA256SUMS." >&2
+  exit 1
+fi
+(cd "$work/verify" && sha256sum --check SHA256SUMS)
+listed=$(awk '{ print $2 }' "$work/verify/SHA256SUMS" | sort)
+attached=$(list_files "$work/verify" | grep -vx SHA256SUMS || true)
+built=$(list_files "$dir")
+if [ "$listed" != "$attached" ] || [ "$listed" != "$built" ]; then
+  echo "SHA256SUMS, the attached archives, and the archives in $dir don't match." >&2
+  printf 'SHA256SUMS:\n%s\nAttached:\n%s\nIn %s:\n%s\n' "$listed" "$attached" "$dir" "$built" >&2
+  exit 1
+fi
