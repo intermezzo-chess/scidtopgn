@@ -16,21 +16,29 @@ version=$2
 # Index path for names of four or more characters:
 # https://doc.rust-lang.org/cargo/reference/registry-index.html#index-files
 url="https://index.crates.io/${crate:0:2}/${crate:2:2}/$crate"
-body=$(mktemp)
+body=$(mktemp "${TMPDIR:-/tmp}/crate-published.XXXXXX")
 trap 'rm -f "$body"' EXIT
 
-status=$(curl -sS -o "$body" -w '%{http_code}' -H 'Cache-Control: no-cache' "$url") || exit 2
-case "$status" in
+http_status=$(curl -sS -o "$body" -w '%{http_code}' -H 'Cache-Control: no-cache' "$url") || exit 2
+case "$http_status" in
   200)
-    # One JSON object per published version.
-    if jq -se --arg version "$version" 'any(.[]; .vers == $version)' "$body" > /dev/null; then
-      exit 0
-    fi
-    exit 1
+    # One JSON object per published version. With -e, jq exits 1 when the
+    # result is false, and with another nonzero status when it can't parse
+    # the response.
+    jq_status=0
+    jq -se --arg version "$version" 'any(.[]; .vers == $version)' "$body" > /dev/null || jq_status=$?
+    case "$jq_status" in
+      0) exit 0 ;;
+      1) exit 1 ;;
+      *)
+        echo "Couldn't read the crates.io index entry for $crate." >&2
+        exit 2
+        ;;
+    esac
     ;;
   404) exit 1 ;;
   *)
-    echo "The crates.io index returned HTTP $status for $crate." >&2
+    echo "The crates.io index returned HTTP $http_status for $crate." >&2
     exit 2
     ;;
 esac
