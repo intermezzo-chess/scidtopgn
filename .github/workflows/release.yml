@@ -74,27 +74,13 @@ jobs:
       - name: Check for pending changesets
         env:
           VERSION: ${{ steps.version.outputs.version }}
-          PRERELEASE: ${{ steps.version.outputs.prerelease }}
         run: |
-          shopt -s nullglob
-          if [ "$PRERELEASE" = false ]; then
-            pending=(.changeset/*.md)
-          else
-            # Knope keeps changesets after a prerelease and deletes them at the
-            # next stable release. Only changesets added or changed since this
-            # version was prepared are pending.
-            base=$(git log -1 --format=%H -S"version = \"$VERSION\"" -- Cargo.toml)
-            if [ -z "$base" ]; then
-              echo "::error::Couldn't find the commit that set version $VERSION in Cargo.toml."
-              exit 1
-            fi
-            mapfile -t pending < <(git diff --name-only --diff-filter=AM "$base" HEAD -- '.changeset/*.md')
-          fi
-          if [ "${#pending[@]}" -gt 0 ]; then
-            printf '%s\n' "${pending[@]}"
+          status=0
+          .github/scripts/pending-changesets "$VERSION" || status=$?
+          if [ "$status" -eq 1 ]; then
             echo "::error::Changesets are pending, so $VERSION wouldn't include them. Run the Version workflow and merge its PR, then run Release again."
-            exit 1
           fi
+          exit "$status"
 
       - name: Extract the release notes
         env:
