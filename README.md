@@ -1,18 +1,24 @@
-![scidtopgn](./assets/scidtopgn.png)
+![scidtopgn](https://raw.githubusercontent.com/intermezzo-chess/scidtopgn/main/assets/scidtopgn.png)
 
 A Rust library and CLI for converting between SCID (.si4/.sn4/.sg4) and PGN formats. Fast, accurate, and functional on Windows, Mac, and Linux.
 
-![animation showing scidtopgn in the terminal](./assets/scidtopgn.gif)
+![animation showing scidtopgn in the terminal](https://raw.githubusercontent.com/intermezzo-chess/scidtopgn/main/assets/scidtopgn.gif)
+
+## Install
+
+Download an archive for your platform from [GitHub Releases](https://github.com/intermezzo-chess/scidtopgn/releases). Each release lists SHA-256 checksums in `SHA256SUMS`.
+
+Or install from [crates.io](https://crates.io/crates/scidtopgn-cli) with Rust 1.70 or later:
+
+```bash
+cargo install scidtopgn-cli --locked
+```
+
+`--locked` uses the dependency versions the release was tested with. Without it, Cargo may pick newer dependencies that need a newer Rust.
 
 ## Quick start (CLI)
 
-> [!CAUTION]
-> This library is still in beta; you must build it from source. For now! Once some additional testing has been done, you'll be able to download it separately.
-
 ```bash
-# build it
-cargo build --release
-
 # dump a SCID database to PGN
 scidtopgn /path/to/database
 
@@ -100,4 +106,4 @@ If you're the kind of person who wants to understand the binary format, see `SCI
 
 ## License
 
-Licensed under the MIT License.
+Licensed under the [GNU General Public License, version 2 only](https://github.com/intermezzo-chess/scidtopgn/blob/main/LICENSE) (GPL-2.0-only). Parts of the library are derived from [Scid](https://scid.sourceforge.net/) by Shane Hudson and others.
