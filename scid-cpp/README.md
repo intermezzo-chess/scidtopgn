@@ -310,7 +310,9 @@ ls scid/*.cpp scid/*.h
 
 ## License
 
-Uses SCID source code. Original SCID license applies to reused code.
+The `scid/` directory holds source files from [Scid vs. PC](https://scidvspc.sourceforge.net/) (Subversion revision 3585). Most are unchanged; a few have small changes for this tool, and `charset.h` and `stored.h` are stubs written for it. The files keep their upstream copyright notices. Scid is distributed under the GNU General Public License without a version number, as stated in [`scid/COPYING`](scid/COPYING). Section 9 of GPL version 2 permits distributing such a program under any version, so this project distributes them under GPL version 3 or later.
+
+The rest of `scid-cpp/` is part of scidtopgn and licensed under GPL-3.0-or-later. See the root [`LICENSE`](../LICENSE).
 
 ## Acknowledgments
 
@@ -502,7 +504,9 @@ brew install cmake
 
 ## License
 
-This tool uses SCID source code. Original SCID license applies to reused code.
+The `scid/` directory holds source files from [Scid vs. PC](https://scidvspc.sourceforge.net/) (Subversion revision 3585). Most are unchanged; a few have small changes for this tool, and `charset.h` and `stored.h` are stubs written for it. The files keep their upstream copyright notices. Scid is distributed under the GNU General Public License without a version number, as stated in [`scid/COPYING`](scid/COPYING). Section 9 of GPL version 2 permits distributing such a program under any version, so this project distributes them under GPL version 3 or later.
+
+The rest of `scid-cpp/` is part of scidtopgn and licensed under GPL-3.0-or-later. See the root [`LICENSE`](../LICENSE).
 
 ## Acknowledgments
 

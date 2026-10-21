@@ -106,4 +106,4 @@ If you're the kind of person who wants to understand the binary format, see `SCI
 
 ## License
 
-Licensed under the [GNU General Public License, version 2 only](https://github.com/intermezzo-chess/scidtopgn/blob/main/LICENSE) (GPL-2.0-only). Parts of the library are derived from [Scid](https://scid.sourceforge.net/) by Shane Hudson and others.
+Licensed under the [GNU General Public License, version 3 or later](https://github.com/intermezzo-chess/scidtopgn/blob/main/LICENSE) (GPL-3.0-or-later). Parts of the library are derived from [Scid](https://scid.sourceforge.net/) and [Scid vs. PC](https://scidvspc.sourceforge.net/) by Shane Hudson and others.

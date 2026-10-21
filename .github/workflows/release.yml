@@ -231,13 +231,30 @@ jobs:
         run: |
           staging="$RUNNER_TEMP/$ARCHIVE"
           mkdir "$staging" dist
-          cp "$BIN" LICENSE README.md "$staging/"
+          cp "$BIN" LICENSE THIRD_PARTY_LICENSES README.md "$staging/"
+          .github/scripts/copy-rust-std-notices "$staging/rust-std-licenses"
           if [ "$RUNNER_OS" = Windows ]; then
             (cd "$RUNNER_TEMP" && 7z a -tzip "$GITHUB_WORKSPACE/dist/$ARCHIVE.zip" "$ARCHIVE" > /dev/null)
           else
             tar -czf "dist/$ARCHIVE.tar.gz" -C "$RUNNER_TEMP" "$ARCHIVE"
           fi
           ls -l dist
+
+      # Checks the archive's notices against the crates compiled into this
+      # target's binary and against the toolchain that built it. Proc macros
+      # run only at build time, so they're left out. The build unpacked each
+      # crate's source into Cargo's registry.
+      - name: Check the archive's notices
+        run: |
+          cargo_home=${CARGO_HOME:-$HOME/.cargo}
+          sysroot=$(rustc --print sysroot)
+          if [ "$RUNNER_OS" = Windows ]; then
+            cargo_home=$(cygpath -u "$cargo_home")
+            sysroot=$(cygpath -u "$sysroot")
+          fi
+          sources=("$cargo_home"/registry/src/index.crates.io-*)
+          cargo tree --locked -p scidtopgn-cli --target "$TARGET" -e normal,no-proc-macro --prefix none --format '{p}' |
+            .github/scripts/check-archive-notices dist/"$ARCHIVE".* "${sources[0]}" "$sysroot/share/doc/rust"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

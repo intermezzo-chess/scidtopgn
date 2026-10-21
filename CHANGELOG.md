@@ -13,3 +13,4 @@ All notable changes to the `scidtopgn` library and the `scidtopgn-cli` crate are
 - `scidtopgn import` imports PGN from a file or stdin into a new or existing SCID database. Invalid games are skipped with a warning, or abort the import with `--on-error=abort`.
 - Export skips logically deleted games, matching the SCID reference converter.
 - Locked builds (`cargo install scidtopgn-cli --locked`) support Rust 1.70 and later.
+- Both crates are licensed under GPL-3.0-or-later.

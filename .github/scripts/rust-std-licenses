@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Usage: rust-std-licenses <COPYRIGHT-library.html>
+#
+# Prints the SPDX identifiers, one per line, of the licenses named in the
+# "In-tree files" section of a Rust toolchain's COPYRIGHT-library.html. That
+# section names the licenses without including their text; the toolchain has
+# each one in share/doc/rust/licenses/<id>.txt. Exits 1 if the section names
+# none, which means the file's format has changed.
+set -euo pipefail
+
+if [ "$#" -ne 1 ]; then
+  echo "Usage: rust-std-licenses <COPYRIGHT-library.html>" >&2
+  exit 2
+fi
+
+ids=$(sed -n '/id="in-tree-files"/,/id="out-of-tree-dependencies"/p' "$1" |
+  sed -n 's|.*<b>License:</b> *\(.*\)</p>.*|\1|p' |
+  tr -s ' ()' '\n' |
+  grep -v -x -E 'OR|AND|WITH' |
+  grep . |
+  sort -u) || true
+if [ -z "$ids" ]; then
+  echo "Found no in-tree licenses in $1." >&2
+  exit 1
+fi
+echo "$ids"
