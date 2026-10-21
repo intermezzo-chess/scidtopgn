@@ -8,7 +8,7 @@ The library now uses [shakmaty](https://crates.io/crates/shakmaty) 0.30 for lega
 
 - PGN export disambiguates moves correctly (for example `Nbd2`, `R1a3`, `Qh4e1`, and `Nd2` when the other knight is pinned) and writes `#` only for checkmate.
 - Every move read from a SCID database or PGN file is checked for legality. An illegal move is an error instead of a corrupted game.
-- PGN import stores the SAN it generates, so check and mate signs, unneeded disambiguation, and castling written with zeros are corrected.
+- PGN import stores the SAN it generates, so check and mate signs, unneeded disambiguation, castling written with zeros or lowercase letters (previously skipped without a warning), and promotions without `=` are corrected.
 
 Breaking changes to the library API:
 

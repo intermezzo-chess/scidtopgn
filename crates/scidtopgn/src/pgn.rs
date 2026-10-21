@@ -476,6 +476,7 @@ fn strip_move_number(token: &str) -> &str {
 fn is_move_token(token: &str) -> bool {
     is_null_move(token)
         || token.starts_with("0-0")
+        || token.starts_with("o-o")
         || token.starts_with(|c: char| "abcdefghKQRBNPO".contains(c))
 }
 
@@ -487,9 +488,10 @@ fn is_null_move(token: &str) -> bool {
 /// Parses a move in SAN.
 ///
 /// Besides standard SAN this accepts a check, mate, or annotation suffix
-/// (ignored, since the SAN is regenerated), castling written with zeros, a
-/// pawn move with a `P`, a missing or extra capture `x` when that leaves
-/// only one legal move, and SCID's null moves.
+/// (ignored, since the SAN is regenerated), castling written with zeros or
+/// lowercase letters, a pawn move with a `P`, a promotion without `=`, a
+/// missing or extra capture `x` when that leaves only one legal move, and
+/// SCID's null moves.
 fn parse_move(
     token: &str,
     chess: &Chess,
@@ -498,13 +500,23 @@ fn parse_move(
     if is_null_move(token) {
         return Ok(GameMove::Null);
     }
-    let token = match token.strip_prefix("0-0") {
-        Some(rest) => format!("O-O{}", rest.replace('0', "O")),
+    let token = match token
+        .strip_prefix("0-0")
+        .or_else(|| token.strip_prefix("o-o"))
+    {
+        Some(rest) => format!("O-O{}", rest.replace(['0', 'o'], "O")),
         None => token.to_string(),
     };
     let token = match token.strip_prefix('P') {
         Some(rest) if rest.starts_with(|c: char| ('a'..='h').contains(&c)) => rest,
         _ => &token,
+    };
+    let is_pawn_move = token.starts_with(|c: char| ('a'..='h').contains(&c));
+    let token = match token.as_bytes() {
+        [.., b'1' | b'8', piece @ (b'Q' | b'R' | b'B' | b'N')] if is_pawn_move => {
+            format!("{}={}", &token[..token.len() - 1], char::from(*piece))
+        }
+        _ => token.to_string(),
     };
 
     let san = San::from_ascii(token.as_bytes())?;
@@ -594,11 +606,23 @@ mod tests {
     }
 
     #[test]
+    fn test_promotion_without_equals_sign() {
+        let chess = crate::position::chess_from_fen("1n2k3/P7/8/8/8/8/8/4K3 w - - 0 1").unwrap();
+        for (token, expected) in [("a8Q", "a8=Q"), ("axb8N", "axb8=N"), ("a8=R", "a8=R")] {
+            let GameMove::Move(m) = parse_move(token, &chess).unwrap() else {
+                panic!("{token} is not a null move");
+            };
+            assert_eq!(San::from_move(&chess, m).to_string(), expected);
+        }
+    }
+
+    #[test]
     fn test_is_move_token() {
         assert!(is_move_token("e4"));
         assert!(is_move_token("Nf3"));
         assert!(is_move_token("O-O"));
         assert!(is_move_token("0-0-0"));
+        assert!(is_move_token("o-o"));
         assert!(is_move_token("--"));
         assert!(!is_move_token(""));
         assert!(!is_move_token("1."));
@@ -627,6 +651,8 @@ mod tests {
         };
         assert_eq!(san("0-0"), "O-O");
         assert_eq!(san("0-0-0"), "O-O-O");
+        assert_eq!(san("o-o"), "O-O");
+        assert_eq!(san("o-o-o"), "O-O-O");
         assert_eq!(san("O-O+!?"), "O-O");
         assert_eq!(san("Pa3"), "a3");
         assert_eq!(san("Nxe5"), "Nxe5");
