@@ -1,0 +1,43 @@
+[Event "Variations"]
+[Site "?"]
+[Date "2026.10.21"]
+[Round "1"]
+[White "White"]
+[Black "Black"]
+[Result "*"]
+
+1. e4 e5 2. Nf3 (2. f4 exf4 (2... d5 3. exd5 Qxd5) 3. Nf3) (2. Nc3 Nf6 (2... Nc6) 3. f4) 2... Nc6 3. Bb5 (3. Bc4 Bc5 (3... Nf6 4. Ng5 d5 5. exd5 Na5 (5... Nxd5 6. Nxf7 Kxf7) 6. Bb5+ c6) 4. O-O) 3... a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 8. c3 O-O 9. h3 Nb8 10. d4 Nbd7 *
+
+[Event "Promotions"]
+[Site "?"]
+[Date "2026.10.21"]
+[Round "2"]
+[White "White"]
+[Black "Black"]
+[Result "0-1"]
+[SetUp "1"]
+[FEN "r3k2r/1P6/8/8/3pP3/8/6p1/R3K2R b KQkq e3 0 25"]
+
+25... dxe3 26. bxa8=N (26. bxa8=Q+ Kd7) (26. bxa8=R+ Kd7) (26. b8=B Rxb8) 26... gxh1=Q+ (26... gxh1=R+ 27. Ke2) (26... gxh1=B 27. Rd1) (26... g1=N 27. Rd1) 27. Ke2 Qxa1 28. Nc7+ Kd7 29. -- (29. Nb5 Rh2+) 29... Qb2+ 30. Kxe3 Rh3+ 31. Kf4 Qf2+ 32. Kg4 Rg3+ 33. Kh4 Qh2# 0-1
+
+[Event "Null moves"]
+[Site "?"]
+[Date "2026.10.21"]
+[Round "3"]
+[White "White"]
+[Black "Black"]
+[Result "1-0"]
+
+1. e4 -- 2. d4 e6 3. -- (3. Nc3 Bb4) 3... d5 4. e5 c5 5. c3 Nc6 6. Nf3 Qb6 7. Be2 cxd4 8. cxd4 Nge7 9. Na3 Nf5 10. Nc2 Bb4+ 11. Kf1 O-O 12. g4 Nfe7 13. h4 f6 14. exf6 Rxf6 15. g5 Rf7 16. Bd3 Ng6 17. h5 Nf4 18. Bxf4 Rxf4 19. Bxh7+ Kxh7 20. Qd3+ Kg8 21. Qh7+ Kf8 22. Qh8+ Ke7 23. Qxg7+ Kd8 24. g6 1-0
+
+[Event "Black to move"]
+[Site "?"]
+[Date "2026.10.21"]
+[Round "4"]
+[White "White"]
+[Black "Black"]
+[Result "1/2-1/2"]
+[SetUp "1"]
+[FEN "4k3/4p3/8/8/8/8/8/R3K3 b Q - 3 40"]
+
+40... Kd7 41. O-O-O+ Kc6 42. Rd4 e5 43. Rd3 e4 44. Rd4 e3 45. Kd1 e2+ 46. Kxe2 Kc5 1/2-1/2

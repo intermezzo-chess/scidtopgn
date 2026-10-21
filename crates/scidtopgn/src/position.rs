@@ -1,609 +1,329 @@
-use crate::common::{piece_make, Color, Piece, Square};
+//! Chess positions with SCID's piece numbering.
+//!
+//! shakmaty provides the chess rules. SCID's game format also names the moving
+//! piece by a number from 0 to 15 for each side, so [`ScidPosition`] keeps
+//! that numbering next to the position.
+
+use shakmaty::fen::Fen;
+use shakmaty::san::{San, SanPlus, Suffix};
+use shakmaty::{
+    Board, ByColor, CastlingMode, Chess, Color, EnPassantMode, File, FromSetup, Move, Position,
+    PositionError, Rank, Setup, Square,
+};
+
 use crate::error::{Error, Result};
+use crate::mov::GameMove;
 
-pub const WQ_CASTLE: u8 = 1;
-pub const WK_CASTLE: u8 = 2;
-pub const BQ_CASTLE: u8 = 4;
-pub const BK_CASTLE: u8 = 8;
+/// The most pieces one side can have in SCID's numbering.
+const MAX_PIECES: usize = 16;
 
-#[derive(Debug, Clone)]
+/// SCID's numbers for each side's pieces.
+///
+/// The king is always number 0. In the standard starting position, the other
+/// pieces on the back rank are numbered from the a-file to the h-file, then
+/// the pawns from 8 to 15. A position set up from a FEN numbers the pieces in
+/// FEN order, from a8 to h1, then gives the king number 0 by moving the piece
+/// that had it to the end. A capture gives the captured piece's number to its
+/// side's highest-numbered piece. A promoted pawn keeps its number.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PieceList {
-    pub list: [[Square; 16]; 2],
-    pub list_pos: [u8; 64],
-    pub count: [u32; 2],
-}
-
-impl Default for PieceList {
-    fn default() -> Self {
-        Self::new()
-    }
+    squares: ByColor<[Option<Square>; MAX_PIECES]>,
+    numbers: [Option<u8>; 64],
+    counts: ByColor<u8>,
 }
 
 impl PieceList {
-    pub fn new() -> Self {
+    fn empty() -> Self {
         PieceList {
-            list: [[Square::Null; 16]; 2],
-            list_pos: [255; 64],
-            count: [0; 2],
+            squares: ByColor::default(),
+            numbers: [None; 64],
+            counts: ByColor::default(),
         }
     }
 
-    pub fn get_king_square(&self, color: Color) -> Square {
-        self.list[color as usize][0]
-    }
-
-    pub fn get_piece_num(&self, square: Square) -> u8 {
-        if square == Square::Null || square.to_index() >= 64 {
-            return 255;
+    /// The numbering of the standard starting position.
+    pub fn standard() -> Self {
+        let mut list = PieceList::empty();
+        for color in Color::ALL {
+            let back = color.backrank();
+            let pawns = color.relative_rank(Rank::Second);
+            let king = Square::from_coords(File::E, back);
+            list.push(color, king);
+            for file in File::ALL.into_iter().filter(|&f| f != File::E) {
+                list.push(color, Square::from_coords(file, back));
+            }
+            for file in File::ALL {
+                list.push(color, Square::from_coords(file, pawns));
+            }
         }
-        self.list_pos[square.to_index()]
+        list
     }
 
-    pub fn get_square(&self, color: Color, piece_num: u8) -> Square {
-        if (piece_num as usize) < 16 {
-            self.list[color as usize][piece_num as usize]
-        } else {
-            Square::Null
-        }
-    }
-
-    pub fn add_piece(&mut self, square: Square, piece: Piece, color: Color) {
-        let color_idx = color as usize;
-        let count = self.count[color_idx] as usize;
-
-        if piece == Piece::King {
-            if count > 0 {
-                let old_sq = self.list[color_idx][0];
-                self.list[color_idx][count] = old_sq;
-                if old_sq != Square::Null && old_sq.to_index() < 64 {
-                    self.list_pos[old_sq.to_index()] = count as u8;
+    /// Numbers the pieces on `board` in FEN order, as SCID does for a game
+    /// that starts from a FEN.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidFen`] if a side has more than 16 pieces or
+    /// no king.
+    pub fn from_board(board: &Board) -> Result<Self> {
+        let mut list = PieceList::empty();
+        for rank in Rank::ALL.into_iter().rev() {
+            for file in File::ALL {
+                let square = Square::from_coords(file, rank);
+                let Some(piece) = board.piece_at(square) else {
+                    continue;
+                };
+                if usize::from(*list.counts.get(piece.color)) == MAX_PIECES {
+                    return Err(invalid_setup(
+                        board,
+                        "SCID allows at most 16 pieces per side",
+                    ));
+                }
+                list.push(piece.color, square);
+                if piece.role == shakmaty::Role::King {
+                    let last = usize::from(*list.counts.get(piece.color)) - 1;
+                    list.squares.get_mut(piece.color).swap(0, last);
+                    list.renumber(piece.color, 0);
+                    list.renumber(piece.color, last);
                 }
             }
-            self.list[color_idx][0] = square;
-            if square != Square::Null && square.to_index() < 64 {
-                self.list_pos[square.to_index()] = 0;
-            }
-        } else {
-            if square != Square::Null && square.to_index() < 64 {
-                self.list_pos[square.to_index()] = count as u8;
-            }
-            self.list[color_idx][count] = square;
         }
-        self.count[color_idx] += 1;
+        for color in Color::ALL {
+            if list.square(color, 0).and_then(|sq| board.role_at(sq)) != Some(shakmaty::Role::King)
+            {
+                return Err(invalid_setup(board, "each side needs one king"));
+            }
+        }
+        Ok(list)
     }
 
-    pub fn remove_piece(&mut self, square: Square, color: Color) -> u8 {
-        let color_idx = color as usize;
-        let captured_num = if square != Square::Null && square.to_index() < 64 {
-            self.list_pos[square.to_index()]
-        } else {
-            255
+    /// The number of pieces `color` has.
+    pub fn count(&self, color: Color) -> u8 {
+        *self.counts.get(color)
+    }
+
+    /// The square of `color`'s piece number `number`, if it has one.
+    pub fn square(&self, color: Color, number: u8) -> Option<Square> {
+        self.squares
+            .get(color)
+            .get(usize::from(number))
+            .copied()
+            .flatten()
+    }
+
+    /// The number of the piece on `square`, if there is one.
+    pub fn number(&self, square: Square) -> Option<u8> {
+        self.numbers[square.to_usize()]
+    }
+
+    fn push(&mut self, color: Color, square: Square) {
+        let number = *self.counts.get(color);
+        self.squares.get_mut(color)[usize::from(number)] = Some(square);
+        self.numbers[square.to_usize()] = Some(number);
+        *self.counts.get_mut(color) += 1;
+    }
+
+    /// Points the square of `color`'s piece `index` back at its number.
+    fn renumber(&mut self, color: Color, index: usize) {
+        if let Some(square) = self.squares.get(color)[index] {
+            // `index` is below MAX_PIECES, so it fits in a u8.
+            self.numbers[square.to_usize()] = Some(index as u8);
+        }
+    }
+
+    fn relocate(&mut self, color: Color, from: Square, to: Square) {
+        if let Some(number) = self.numbers[from.to_usize()].take() {
+            self.squares.get_mut(color)[usize::from(number)] = Some(to);
+            self.numbers[to.to_usize()] = Some(number);
+        }
+    }
+
+    fn remove(&mut self, color: Color, square: Square) {
+        let Some(number) = self.numbers[square.to_usize()].take() else {
+            return;
         };
-
-        self.count[color_idx] -= 1;
-        let last_idx = self.count[color_idx] as usize;
-        let last_piece_square = self.list[color_idx][last_idx];
-
-        if last_piece_square != Square::Null && last_piece_square.to_index() < 64 {
-            self.list_pos[last_piece_square.to_index()] = captured_num;
-        }
-        self.list[color_idx][captured_num as usize] = last_piece_square;
-
-        captured_num
+        let count = self.counts.get_mut(color);
+        *count -= 1;
+        let last = usize::from(*count);
+        let squares = self.squares.get_mut(color);
+        squares[usize::from(number)] = squares[last];
+        squares[last] = None;
+        self.renumber(color, usize::from(number));
     }
 
-    pub fn move_piece(&mut self, from: Square, to: Square, color: Color) {
-        let piece_num = self.list_pos[from.to_index()];
-        self.list[color as usize][piece_num as usize] = to;
-        self.list_pos[to.to_index()] = piece_num;
-        self.list_pos[from.to_index()] = 255;
+    /// Updates the numbering for `m`, a legal move by `color`.
+    fn play(&mut self, color: Color, m: Move) {
+        match m {
+            Move::Normal {
+                from, to, capture, ..
+            } => {
+                if capture.is_some() {
+                    self.remove(!color, to);
+                }
+                self.relocate(color, from, to);
+            }
+            Move::EnPassant { from, to } => {
+                self.remove(!color, Square::from_coords(to.file(), from.rank()));
+                self.relocate(color, from, to);
+            }
+            Move::Castle { king, rook } => {
+                let Some(side) = m.castling_side() else {
+                    return;
+                };
+                // Take both numbers first: the king's and the rook's
+                // destinations may be each other's origins.
+                let king_number = self.numbers[king.to_usize()].take();
+                let rook_number = self.numbers[rook.to_usize()].take();
+                for (number, to) in [
+                    (king_number, side.king_to(color)),
+                    (rook_number, side.rook_to(color)),
+                ] {
+                    if let Some(number) = number {
+                        self.squares.get_mut(color)[usize::from(number)] = Some(to);
+                        self.numbers[to.to_usize()] = Some(number);
+                    }
+                }
+            }
+            // Drops only exist in Crazyhouse.
+            Move::Put { .. } => {}
+        }
     }
 }
 
+/// A chess position together with SCID's numbering of its pieces.
 #[derive(Debug, Clone)]
-pub struct Board {
-    pub squares: [Option<(Piece, Color)>; 64],
-    pub to_move: Color,
-    pub castling: u8,
-    pub ep_target: Option<Square>,
-    pub halfmove_clock: u16,
-    pub fullmove_number: u16,
-    pub piece_list: PieceList,
-    pub material: [u8; 16],
+pub struct ScidPosition {
+    chess: Chess,
+    pieces: PieceList,
 }
 
-impl Default for Board {
+impl Default for ScidPosition {
     fn default() -> Self {
-        Self::new()
+        ScidPosition {
+            chess: Chess::default(),
+            pieces: PieceList::standard(),
+        }
     }
 }
 
-impl Board {
-    pub fn new() -> Self {
-        Board {
-            squares: [None; 64],
-            to_move: Color::White,
-            castling: 0,
-            ep_target: None,
-            halfmove_clock: 0,
-            fullmove_number: 1,
-            piece_list: PieceList::new(),
-            material: [0; 16],
-        }
+impl ScidPosition {
+    /// The standard starting position.
+    pub fn standard() -> Self {
+        Self::default()
     }
 
-    pub fn clear(&mut self) {
-        self.squares = [None; 64];
-        self.to_move = Color::White;
-        self.castling = 0;
-        self.ep_target = None;
-        self.halfmove_clock = 0;
-        self.fullmove_number = 1;
-        self.piece_list = PieceList::new();
-        self.material = [0; 16];
+    /// A position set up from a FEN, numbered in FEN order.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidFen`] if a side has more than 16 pieces.
+    pub fn from_setup_position(chess: Chess) -> Result<Self> {
+        let pieces = PieceList::from_board(chess.board())?;
+        Ok(ScidPosition { chess, pieces })
     }
 
-    pub fn std_start() -> Self {
-        let mut board = Board::new();
-        board.clear();
-
-        board.material[piece_make(Color::White, Piece::King) as usize] = 1;
-        board.material[piece_make(Color::Black, Piece::King) as usize] = 1;
-        board.material[piece_make(Color::White, Piece::Queen) as usize] = 1;
-        board.material[piece_make(Color::Black, Piece::Queen) as usize] = 1;
-        board.material[piece_make(Color::White, Piece::Rook) as usize] = 2;
-        board.material[piece_make(Color::Black, Piece::Rook) as usize] = 2;
-        board.material[piece_make(Color::White, Piece::Bishop) as usize] = 2;
-        board.material[piece_make(Color::Black, Piece::Bishop) as usize] = 2;
-        board.material[piece_make(Color::White, Piece::Knight) as usize] = 2;
-        board.material[piece_make(Color::Black, Piece::Knight) as usize] = 2;
-        board.material[piece_make(Color::White, Piece::Pawn) as usize] = 8;
-        board.material[piece_make(Color::Black, Piece::Pawn) as usize] = 8;
-
-        board.add_to_board(Piece::King, Color::White, Square::E1);
-        board.piece_list.list[0][0] = Square::E1;
-        board.piece_list.list_pos[Square::E1.to_index()] = 0;
-
-        board.add_to_board(Piece::King, Color::Black, Square::E8);
-        board.piece_list.list[1][0] = Square::E8;
-        board.piece_list.list_pos[Square::E8.to_index()] = 0;
-
-        board.add_to_board(Piece::Rook, Color::White, Square::A1);
-        board.piece_list.list[0][1] = Square::A1;
-        board.piece_list.list_pos[Square::A1.to_index()] = 1;
-
-        board.add_to_board(Piece::Rook, Color::Black, Square::A8);
-        board.piece_list.list[1][1] = Square::A8;
-        board.piece_list.list_pos[Square::A8.to_index()] = 1;
-
-        board.add_to_board(Piece::Knight, Color::White, Square::B1);
-        board.piece_list.list[0][2] = Square::B1;
-        board.piece_list.list_pos[Square::B1.to_index()] = 2;
-
-        board.add_to_board(Piece::Knight, Color::Black, Square::B8);
-        board.piece_list.list[1][2] = Square::B8;
-        board.piece_list.list_pos[Square::B8.to_index()] = 2;
-
-        board.add_to_board(Piece::Bishop, Color::White, Square::C1);
-        board.piece_list.list[0][3] = Square::C1;
-        board.piece_list.list_pos[Square::C1.to_index()] = 3;
-
-        board.add_to_board(Piece::Bishop, Color::Black, Square::C8);
-        board.piece_list.list[1][3] = Square::C8;
-        board.piece_list.list_pos[Square::C8.to_index()] = 3;
-
-        board.add_to_board(Piece::Queen, Color::White, Square::D1);
-        board.piece_list.list[0][4] = Square::D1;
-        board.piece_list.list_pos[Square::D1.to_index()] = 4;
-
-        board.add_to_board(Piece::Queen, Color::Black, Square::D8);
-        board.piece_list.list[1][4] = Square::D8;
-        board.piece_list.list_pos[Square::D8.to_index()] = 4;
-
-        board.add_to_board(Piece::Bishop, Color::White, Square::F1);
-        board.piece_list.list[0][5] = Square::F1;
-        board.piece_list.list_pos[Square::F1.to_index()] = 5;
-
-        board.add_to_board(Piece::Bishop, Color::Black, Square::F8);
-        board.piece_list.list[1][5] = Square::F8;
-        board.piece_list.list_pos[Square::F8.to_index()] = 5;
-
-        board.add_to_board(Piece::Knight, Color::White, Square::G1);
-        board.piece_list.list[0][6] = Square::G1;
-        board.piece_list.list_pos[Square::G1.to_index()] = 6;
-
-        board.add_to_board(Piece::Knight, Color::Black, Square::G8);
-        board.piece_list.list[1][6] = Square::G8;
-        board.piece_list.list_pos[Square::G8.to_index()] = 6;
-
-        board.add_to_board(Piece::Rook, Color::White, Square::H1);
-        board.piece_list.list[0][7] = Square::H1;
-        board.piece_list.list_pos[Square::H1.to_index()] = 7;
-
-        board.add_to_board(Piece::Rook, Color::Black, Square::H8);
-        board.piece_list.list[1][7] = Square::H8;
-        board.piece_list.list_pos[Square::H8.to_index()] = 7;
-
-        for i in 0..8u8 {
-            let white_sq = Square::from_index((8 + i) as usize);
-            let black_sq = Square::from_index((48 + i) as usize);
-
-            board.add_to_board(Piece::Pawn, Color::White, white_sq);
-            board.piece_list.list[0][(8 + i) as usize] = white_sq;
-            board.piece_list.list_pos[white_sq.to_index()] = 8 + i;
-
-            board.add_to_board(Piece::Pawn, Color::Black, black_sq);
-            board.piece_list.list[1][(8 + i) as usize] = black_sq;
-            board.piece_list.list_pos[black_sq.to_index()] = 8 + i;
-        }
-
-        board.piece_list.count[0] = 16;
-        board.piece_list.count[1] = 16;
-
-        board.castling = WQ_CASTLE | WK_CASTLE | BQ_CASTLE | BK_CASTLE;
-        board.to_move = Color::White;
-        board.fullmove_number = 1;
-        board.halfmove_clock = 0;
-
-        board
+    pub fn chess(&self) -> &Chess {
+        &self.chess
     }
 
-    pub fn add_to_board(&mut self, piece: Piece, color: Color, square: Square) {
-        self.squares[square.to_index()] = Some((piece, color));
+    pub fn pieces(&self) -> &PieceList {
+        &self.pieces
     }
 
-    pub fn remove_from_board(&mut self, square: Square) {
-        self.squares[square.to_index()] = None;
-    }
-
-    pub fn get_piece(&self, square: Square) -> Option<(Piece, Color)> {
-        if square.to_index() >= 64 {
-            return None;
-        }
-        self.squares[square.to_index()]
-    }
-
-    pub fn add_piece(&mut self, piece: Piece, color: Color, square: Square) -> Result<()> {
-        let color_idx = color as usize;
-
-        if self.piece_list.count[color_idx] >= 16 {
-            return Err(Error::InvalidMove {
-                move_str: "Too many pieces for one side".to_string(),
-            });
-        }
-
-        if piece == Piece::King && self.material[piece_make(color, piece) as usize] > 0 {
-            return Err(Error::InvalidMove {
-                move_str: "Cannot have more than one king per side".to_string(),
-            });
-        }
-
-        self.material[piece_make(color, piece) as usize] += 1;
-        self.piece_list.add_piece(square, piece, color);
-        self.add_to_board(piece, color, square);
-
-        Ok(())
-    }
-
-    pub fn from_fen(fen: &str) -> Result<Self> {
-        let mut board = Board::new();
-        board.clear();
-
-        let parts: Vec<&str> = fen.split_whitespace().collect();
-        if parts.is_empty() {
-            return Err(Error::InvalidMove {
-                move_str: "Empty FEN string".to_string(),
-            });
-        }
-
-        let ranks: Vec<&str> = parts[0].split('/').collect();
-        if ranks.len() != 8 {
-            return Err(Error::InvalidMove {
-                move_str: format!("Invalid FEN: expected 8 ranks, got {}", ranks.len()),
-            });
-        }
-
-        for (rank_idx, rank_str) in ranks.iter().enumerate() {
-            let rank = 7 - rank_idx;
-            let mut file = 0;
-
-            for c in rank_str.chars() {
-                if file >= 8 {
+    /// Plays `mv` and returns its SAN in the position before it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidMove`] if the move is illegal, or if it is a
+    /// null move while the side to move is in check.
+    pub fn play(&mut self, mv: GameMove) -> Result<SanPlus> {
+        let color = self.chess.turn();
+        match mv {
+            GameMove::Move(m) => {
+                if !self.chess.is_legal(m) {
                     return Err(Error::InvalidMove {
-                        move_str: format!("Invalid FEN: too many squares in rank {}", rank + 1),
+                        move_str: format!(
+                            "{} is illegal in {}",
+                            m.to_uci(CastlingMode::Standard),
+                            fen(&self.chess)
+                        ),
                     });
                 }
-
-                if c.is_ascii_digit() {
-                    let skip = c.to_digit(10).unwrap() as u8;
-                    file += skip;
-                } else {
-                    let color = if c.is_uppercase() {
-                        Color::White
-                    } else {
-                        Color::Black
-                    };
-                    let piece = Piece::from_char(c.to_ascii_uppercase());
-
-                    if piece == Piece::Empty {
-                        return Err(Error::InvalidMove {
-                            move_str: format!("Invalid FEN piece character: {}", c),
-                        });
-                    }
-
-                    let square = Square::make(file, rank as u8);
-                    board.add_piece(piece, color, square)?;
-                    file += 1;
-                }
+                let san = SanPlus::from_move_and_play_unchecked(&mut self.chess, m);
+                self.pieces.play(color, m);
+                Ok(san)
+            }
+            GameMove::Null => {
+                self.chess = play_null(&self.chess)?;
+                Ok(SanPlus {
+                    san: San::Null,
+                    suffix: Suffix::from_position(&self.chess),
+                })
             }
         }
-
-        if parts.len() > 1 {
-            board.to_move = match parts[1] {
-                "w" => Color::White,
-                "b" => Color::Black,
-                _ => {
-                    return Err(Error::InvalidMove {
-                        move_str: format!("Invalid side to move: {}", parts[1]),
-                    })
-                }
-            };
-        }
-
-        if parts.len() > 2 {
-            let castling = parts[2];
-            if castling != "-" {
-                if castling.contains('K') {
-                    board.castling |= WK_CASTLE;
-                }
-                if castling.contains('Q') {
-                    board.castling |= WQ_CASTLE;
-                }
-                if castling.contains('k') {
-                    board.castling |= BK_CASTLE;
-                }
-                if castling.contains('q') {
-                    board.castling |= BQ_CASTLE;
-                }
-            }
-        }
-
-        if parts.len() > 3 && parts[3] != "-" {
-            let ep = parts[3];
-            if ep.len() == 2 {
-                board.ep_target = Some(Square::from_chars(
-                    ep.chars().next().unwrap(),
-                    ep.chars().nth(1).unwrap(),
-                )?);
-            }
-        }
-
-        if parts.len() > 4 {
-            board.halfmove_clock = parts[4].parse().unwrap_or(0);
-        }
-
-        if parts.len() > 5 {
-            board.fullmove_number = parts[5].parse().unwrap_or(1);
-        }
-
-        Ok(board)
     }
+}
 
-    pub fn to_fen(&self) -> String {
-        let mut fen = String::new();
-
-        for rank in (0..8).rev() {
-            let mut empty_count = 0;
-            for file in 0..8 {
-                let sq = Square::make(file, rank);
-                match self.get_piece(sq) {
-                    Some((piece, color)) => {
-                        if empty_count > 0 {
-                            fen.push_str(&empty_count.to_string());
-                            empty_count = 0;
-                        }
-                        let c = piece.to_char();
-                        fen.push(if color == Color::White {
-                            c
-                        } else {
-                            c.to_ascii_lowercase()
-                        });
-                    }
-                    None => {
-                        empty_count += 1;
-                    }
-                }
-            }
-            if empty_count > 0 {
-                fen.push_str(&empty_count.to_string());
-            }
-            if rank > 0 {
-                fen.push('/');
-            }
-        }
-
-        fen.push(' ');
-        fen.push(if self.to_move == Color::White {
-            'w'
-        } else {
-            'b'
-        });
-
-        fen.push(' ');
-        let mut castling = String::new();
-        if self.castling & WK_CASTLE != 0 {
-            castling.push('K');
-        }
-        if self.castling & WQ_CASTLE != 0 {
-            castling.push('Q');
-        }
-        if self.castling & BK_CASTLE != 0 {
-            castling.push('k');
-        }
-        if self.castling & BQ_CASTLE != 0 {
-            castling.push('q');
-        }
-        if castling.is_empty() {
-            castling.push('-');
-        }
-        fen.push_str(&castling);
-
-        fen.push(' ');
-        match self.ep_target {
-            Some(sq) => fen.push_str(&sq.to_string()),
-            None => fen.push('-'),
-        }
-
-        fen.push(' ');
-        fen.push_str(&self.halfmove_clock.to_string());
-
-        fen.push(' ');
-        fen.push_str(&self.fullmove_number.to_string());
-
-        fen
+/// Swaps the side to move like SCID's null move: the en passant square is
+/// cleared, the halfmove clock advances, and the fullmove number advances
+/// after Black's turn.
+fn play_null(chess: &Chess) -> Result<Chess> {
+    let null_in_check = || Error::InvalidMove {
+        move_str: format!("a null move is illegal in check in {}", fen(chess)),
+    };
+    if chess.is_check() {
+        return Err(null_in_check());
     }
-
-    pub fn get_king_square(&self, color: Color) -> Square {
-        self.piece_list.get_king_square(color)
+    let mut setup = chess.to_setup(EnPassantMode::Legal);
+    setup.swap_turn();
+    setup.halfmoves = setup.halfmoves.saturating_add(1);
+    if chess.turn() == Color::Black {
+        setup.fullmoves = setup.fullmoves.saturating_add(1);
     }
+    // The side to move isn't in check, so the side that moves next can't
+    // capture a king.
+    chess_from_setup(setup).map_err(|_| null_in_check())
+}
 
-    pub fn get_piece_count(&self, color: Color) -> u32 {
-        self.piece_list.count[color as usize]
-    }
+/// Sets up a standard chess position like SCID does. Invalid castling rights
+/// and en passant squares are dropped. Checks that couldn't arise in a game
+/// and more material than a game allows are accepted. Missing kings, pawns
+/// on the back rank, and a side not to move in check are rejected.
+fn chess_from_setup(setup: Setup) -> std::result::Result<Chess, Box<PositionError<Chess>>> {
+    Chess::from_setup(setup, CastlingMode::Standard)
+        .or_else(PositionError::ignore_invalid_castling_rights)
+        .or_else(PositionError::ignore_invalid_ep_square)
+        .or_else(PositionError::ignore_impossible_check)
+        .or_else(PositionError::ignore_too_much_material)
+        .map_err(Box::new)
+}
 
-    pub fn total_material(&self) -> u32 {
-        self.piece_list.count[0] + self.piece_list.count[1]
-    }
+/// Parses a standard chess position from a FEN.
+///
+/// # Errors
+///
+/// Returns [`Error::InvalidFen`] if the FEN is malformed or the position
+/// can't be played. See [`chess_from_setup`] for what is accepted.
+pub(crate) fn chess_from_fen(fen: &str) -> Result<Chess> {
+    let invalid = |source: Box<dyn std::error::Error + Send + Sync>| Error::InvalidFen {
+        fen: fen.to_string(),
+        source,
+    };
+    let parsed: Fen = fen.trim().parse().map_err(|e| invalid(Box::new(e)))?;
+    chess_from_setup(parsed.into_setup()).map_err(|e| invalid(e))
+}
 
-    pub fn set_castling(&mut self, color: Color, kingside: bool, value: bool) {
-        let flag: u8 = match (color, kingside) {
-            (Color::White, true) => WK_CASTLE,
-            (Color::White, false) => WQ_CASTLE,
-            (Color::Black, true) => BK_CASTLE,
-            (Color::Black, false) => BQ_CASTLE,
-        };
-        if value {
-            self.castling |= flag;
-        } else {
-            self.castling &= !flag;
-        }
-    }
+/// The FEN of `chess`, with an en passant square only when an en passant
+/// capture is legal.
+pub(crate) fn fen(chess: &Chess) -> String {
+    Fen::from_position(chess, EnPassantMode::Legal).to_string()
+}
 
-    pub fn get_castling(&self, color: Color, kingside: bool) -> bool {
-        let flag: u8 = match (color, kingside) {
-            (Color::White, true) => WK_CASTLE,
-            (Color::White, false) => WQ_CASTLE,
-            (Color::Black, true) => BK_CASTLE,
-            (Color::Black, false) => BQ_CASTLE,
-        };
-        self.castling & flag != 0
-    }
-
-    pub fn is_attacked(&self, square: Square, by_color: Color) -> bool {
-        let file = square.file() as i8;
-        let rank = square.rank() as i8;
-
-        for i in 0..self.piece_list.count[by_color as usize] as u8 {
-            let from_sq = self.piece_list.get_square(by_color, i);
-            if from_sq == Square::Null {
-                continue;
-            }
-
-            if let Some((piece, color)) = self.get_piece(from_sq) {
-                if color != by_color {
-                    continue;
-                }
-
-                let from_file = from_sq.file() as i8;
-                let from_rank = from_sq.rank() as i8;
-                let file_diff = file - from_file;
-                let rank_diff = rank - from_rank;
-
-                match piece {
-                    Piece::Pawn => {
-                        let direction = if by_color == Color::White { 1 } else { -1 };
-                        if rank_diff == direction && file_diff.abs() == 1 {
-                            return true;
-                        }
-                    }
-                    Piece::Knight => {
-                        if (file_diff.abs() == 2 && rank_diff.abs() == 1)
-                            || (file_diff.abs() == 1 && rank_diff.abs() == 2)
-                        {
-                            return true;
-                        }
-                    }
-                    Piece::Bishop => {
-                        if file_diff.abs() == rank_diff.abs()
-                            && file_diff != 0
-                            && self.is_path_clear(from_sq, square)
-                        {
-                            return true;
-                        }
-                    }
-                    Piece::Rook => {
-                        if (file_diff == 0 || rank_diff == 0)
-                            && (file_diff != 0 || rank_diff != 0)
-                            && self.is_path_clear(from_sq, square)
-                        {
-                            return true;
-                        }
-                    }
-                    Piece::Queen => {
-                        if (file_diff.abs() == rank_diff.abs() || file_diff == 0 || rank_diff == 0)
-                            && (file_diff != 0 || rank_diff != 0)
-                            && self.is_path_clear(from_sq, square)
-                        {
-                            return true;
-                        }
-                    }
-                    Piece::King => {
-                        if file_diff.abs() <= 1
-                            && rank_diff.abs() <= 1
-                            && (file_diff != 0 || rank_diff != 0)
-                        {
-                            return true;
-                        }
-                    }
-                    Piece::Empty => {}
-                }
-            }
-        }
-
-        false
-    }
-
-    pub fn is_path_clear(&self, from: Square, to: Square) -> bool {
-        let from_file = from.file() as i8;
-        let from_rank = from.rank() as i8;
-        let to_file = to.file() as i8;
-        let to_rank = to.rank() as i8;
-
-        let file_step = (to_file - from_file).signum();
-        let rank_step = (to_rank - from_rank).signum();
-
-        let mut cur_file = from_file + file_step;
-        let mut cur_rank = from_rank + rank_step;
-
-        while cur_file != to_file || cur_rank != to_rank {
-            let sq = Square::make(cur_file as u8, cur_rank as u8);
-            if self.get_piece(sq).is_some() {
-                return false;
-            }
-            cur_file += file_step;
-            cur_rank += rank_step;
-        }
-
-        true
-    }
-
-    pub fn is_in_check(&self, color: Color) -> bool {
-        let king_sq = self.get_king_square(color);
-        if king_sq == Square::Null {
-            return false;
-        }
-        let opponent = color.flip();
-        self.is_attacked(king_sq, opponent)
+fn invalid_setup(board: &Board, reason: &str) -> Error {
+    Error::InvalidFen {
+        fen: board.board_fen().to_string(),
+        source: reason.into(),
     }
 }
 
@@ -612,126 +332,111 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_piece_list_new() {
-        let pl = PieceList::new();
-        assert_eq!(pl.count[0], 0);
-        assert_eq!(pl.count[1], 0);
+    fn standard_numbering() {
+        let list = PieceList::standard();
+        for color in Color::ALL {
+            assert_eq!(list.count(color), 16);
+        }
+        assert_eq!(list.number(Square::E1), Some(0));
+        assert_eq!(list.number(Square::A1), Some(1));
+        assert_eq!(list.number(Square::D1), Some(4));
+        assert_eq!(list.number(Square::F1), Some(5));
+        assert_eq!(list.number(Square::H1), Some(7));
+        assert_eq!(list.number(Square::A2), Some(8));
+        assert_eq!(list.number(Square::H2), Some(15));
+        assert_eq!(list.number(Square::E8), Some(0));
+        assert_eq!(list.number(Square::H7), Some(15));
+        assert_eq!(list.square(Color::Black, 1), Some(Square::A8));
+        assert_eq!(list.number(Square::E4), None);
     }
 
     #[test]
-    fn test_piece_list_add_piece() {
-        let mut pl = PieceList::new();
-
-        pl.add_piece(Square::E1, Piece::King, Color::White);
-        assert_eq!(pl.count[0], 1);
-        assert_eq!(pl.get_king_square(Color::White), Square::E1);
-        assert_eq!(pl.get_piece_num(Square::E1), 0);
+    fn fen_numbering_moves_the_king_to_zero() {
+        let chess = chess_from_fen("4k3/8/8/8/8/8/8/R3K2R w KQ - 0 1").unwrap();
+        let list = PieceList::from_board(chess.board()).unwrap();
+        assert_eq!(list.number(Square::E1), Some(0));
+        assert_eq!(list.number(Square::A1), Some(1));
+        assert_eq!(list.number(Square::H1), Some(2));
+        assert_eq!(list.number(Square::E8), Some(0));
+        assert_eq!(list.count(Color::White), 3);
     }
 
     #[test]
-    fn test_piece_list_king_swap() {
-        let mut pl = PieceList::new();
-
-        pl.add_piece(Square::A1, Piece::Rook, Color::White);
-        assert_eq!(pl.list[0][0], Square::A1);
-        assert_eq!(pl.list_pos[Square::A1.to_index()], 0);
-        assert_eq!(pl.count[0], 1);
-
-        pl.add_piece(Square::E1, Piece::King, Color::White);
-        assert_eq!(pl.get_king_square(Color::White), Square::E1);
-        assert_eq!(pl.get_piece_num(Square::E1), 0);
-        assert_eq!(pl.list[0][1], Square::A1);
-        assert_eq!(pl.list_pos[Square::A1.to_index()], 1);
-        assert_eq!(pl.count[0], 2);
+    fn capture_gives_the_number_to_the_last_piece() {
+        let mut list = PieceList::standard();
+        list.remove(Color::Black, Square::D7);
+        assert_eq!(list.count(Color::Black), 15);
+        assert_eq!(list.number(Square::H7), Some(11));
+        assert_eq!(list.square(Color::Black, 11), Some(Square::H7));
+        assert_eq!(list.square(Color::Black, 15), None);
+        assert_eq!(list.number(Square::D7), None);
     }
 
     #[test]
-    fn test_piece_list_remove_piece() {
-        let mut pl = PieceList::new();
-
-        pl.add_piece(Square::A1, Piece::Rook, Color::White);
-        pl.add_piece(Square::B1, Piece::Knight, Color::White);
-        pl.add_piece(Square::C1, Piece::Bishop, Color::White);
-
-        assert_eq!(pl.count[0], 3);
-
-        let captured_num = pl.remove_piece(Square::B1, Color::White);
-
-        assert_eq!(captured_num, 1);
-        assert_eq!(pl.count[0], 2);
-        assert_eq!(pl.list[0][1], Square::C1);
-        assert_eq!(pl.list_pos[Square::C1.to_index()], 1);
+    fn castling_moves_king_and_rook() {
+        let chess = chess_from_fen("4k3/8/8/8/8/8/8/R3K2R w KQ - 0 1").unwrap();
+        let mut pos = ScidPosition::from_setup_position(chess).unwrap();
+        let castle = Move::Castle {
+            king: Square::E1,
+            rook: Square::A1,
+        };
+        let san = pos.play(GameMove::Move(castle)).unwrap();
+        assert_eq!(san.to_string(), "O-O-O");
+        assert_eq!(pos.pieces().number(Square::C1), Some(0));
+        assert_eq!(pos.pieces().number(Square::D1), Some(1));
+        assert_eq!(pos.pieces().number(Square::E1), None);
+        assert_eq!(pos.pieces().number(Square::A1), None);
     }
 
     #[test]
-    fn test_board_std_start() {
-        let board = Board::std_start();
-
-        assert_eq!(board.to_move, Color::White);
-        assert_eq!(board.get_piece_count(Color::White), 16);
-        assert_eq!(board.get_piece_count(Color::Black), 16);
-        assert_eq!(board.get_king_square(Color::White), Square::E1);
-        assert_eq!(board.get_king_square(Color::Black), Square::E8);
-
-        assert!(board.get_castling(Color::White, true));
-        assert!(board.get_castling(Color::White, false));
-        assert!(board.get_castling(Color::Black, true));
-        assert!(board.get_castling(Color::Black, false));
-
-        assert_eq!(board.piece_list.get_piece_num(Square::A1), 1);
-        assert_eq!(board.piece_list.get_piece_num(Square::H1), 7);
-        assert_eq!(board.piece_list.get_piece_num(Square::A2), 8);
-        assert_eq!(board.piece_list.get_piece_num(Square::H2), 15);
+    fn too_many_pieces() {
+        let chess = chess_from_fen("QQQQQQQQ/QQQQQQQQ/8/8/8/8/8/K6k b - - 0 1").unwrap();
+        assert!(matches!(
+            ScidPosition::from_setup_position(chess),
+            Err(Error::InvalidFen { .. })
+        ));
     }
 
     #[test]
-    fn test_board_from_fen_std_start() {
-        let fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-        let board = Board::from_fen(fen).unwrap();
-
-        assert_eq!(board.to_move, Color::White);
-        assert_eq!(board.get_piece_count(Color::White), 16);
-        assert_eq!(board.get_piece_count(Color::Black), 16);
-        assert_eq!(board.get_king_square(Color::White), Square::E1);
-        assert_eq!(board.get_king_square(Color::Black), Square::E8);
+    fn null_move_swaps_turn_and_advances_clocks() {
+        let chess = chess_from_fen("4k3/8/8/8/4P3/8/8/4K3 b - e3 3 20").unwrap();
+        let mut pos = ScidPosition::from_setup_position(chess).unwrap();
+        let san = pos.play(GameMove::Null).unwrap();
+        assert_eq!(san.to_string(), "--");
+        assert_eq!(fen(pos.chess()), "4k3/8/8/8/4P3/8/8/4K3 w - - 4 21");
     }
 
     #[test]
-    fn test_board_fen_roundtrip() {
-        let board = Board::std_start();
-        let fen = board.to_fen();
-        let board2 = Board::from_fen(&fen).unwrap();
-        let fen2 = board2.to_fen();
-
-        assert_eq!(fen, fen2);
+    fn null_move_in_check_is_illegal() {
+        let chess = chess_from_fen("4k3/8/8/8/8/8/8/4R1K1 b - - 0 1").unwrap();
+        let mut pos = ScidPosition::from_setup_position(chess).unwrap();
+        assert!(matches!(
+            pos.play(GameMove::Null),
+            Err(Error::InvalidMove { .. })
+        ));
     }
 
     #[test]
-    fn test_capture_swap_algorithm() {
-        let mut board = Board::std_start();
-
-        assert_eq!(board.piece_list.get_piece_num(Square::D7), 11);
-        assert_eq!(board.piece_list.get_piece_num(Square::H7), 15);
-        assert_eq!(board.get_piece_count(Color::Black), 16);
-
-        board.remove_from_board(Square::D7);
-        board.material[piece_make(Color::Black, Piece::Pawn) as usize] -= 1;
-        board.piece_list.remove_piece(Square::D7, Color::Black);
-
-        assert_eq!(board.get_piece_count(Color::Black), 15);
-        assert_eq!(board.piece_list.get_piece_num(Square::H7), 11);
-        assert_eq!(board.piece_list.get_square(Color::Black, 11), Square::H7);
+    fn invalid_fens() {
+        for fen in [
+            "",
+            "not a fen",
+            "8/8/8/8/8/8/8/8 w - - 0 1",
+            "4k3/8/8/8/8/8/8/4K2P w - - 0 1",
+            "4k3/8/8/8/8/8/8/4R1K1 w - - 0 1",
+        ] {
+            assert!(
+                matches!(chess_from_fen(fen), Err(Error::InvalidFen { .. })),
+                "{fen:?} should be rejected"
+            );
+        }
     }
 
     #[test]
-    fn test_fen_king_swap() {
-        let fen = "8/8/8/8/8/8/8/R3K2R w KQ - 0 1";
-        let board = Board::from_fen(fen).unwrap();
-
-        assert_eq!(board.get_king_square(Color::White), Square::E1);
-        assert_eq!(board.piece_list.get_piece_num(Square::E1), 0);
-
-        assert_eq!(board.piece_list.get_piece_num(Square::A1), 1);
-        assert_eq!(board.piece_list.get_piece_num(Square::H1), 2);
+    fn lenient_fens() {
+        // Castling rights without the rook, and an en passant square without
+        // a pawn that could have moved there, are dropped.
+        let chess = chess_from_fen("4k3/8/8/8/8/8/8/4K3 w KQkq e6 0 1").unwrap();
+        assert_eq!(fen(&chess), "4k3/8/8/8/8/8/8/4K3 w - - 0 1");
     }
 }
