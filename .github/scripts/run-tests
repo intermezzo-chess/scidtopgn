@@ -197,6 +197,50 @@ expect "sync-release-assets: setup for a missing archive" 0 sync
 echo "extra build" > "$dist/scidtopgn-v0.1.0-aarch64-apple-darwin.tar.gz"
 expect "sync-release-assets: SHA256SUMS lacks a built archive" 1 sync
 
+# rust-std-licenses and copy-rust-std-notices ---------------------------------
+
+# A toolchain whose COPYRIGHT-library.html has the format of Rust 1.99.1's.
+# The out-of-tree section names a license that the in-tree section doesn't.
+sysroot="$work/sysroot"
+rust_docs="$sysroot/share/doc/rust"
+mkdir -p "$rust_docs/licenses"
+cat > "$rust_docs/COPYRIGHT-library.html" <<'HTML'
+<h2 id="in-tree-files">In-tree files</h2>
+    <p><b>File/Directory:</b> <code>.</code></p>
+    <p><b>License:</b> Apache-2.0 OR MIT</p>
+    <p><b>File/Directory:</b> <code>library/core/src/unicode</code></p>
+    <p><b>License:</b> Unicode-3.0</p>
+    <p><b>License:</b> BSD-2-Clause AND (Apache-2.0 OR MIT)</p>
+<h2 id="out-of-tree-dependencies">Out-of-tree dependencies</h2>
+    <p><b>License:</b> Unlicense OR MIT</p>
+    <pre>Copyright (c) Some Crate Author</pre>
+HTML
+for id in Apache-2.0 MIT Unicode-3.0 BSD-2-Clause Unlicense; do
+  echo "Text of $id" > "$rust_docs/licenses/$id.txt"
+done
+cat > "$work/bin/rustc" <<'STUB'
+#!/usr/bin/env bash
+[ "$*" = "--print sysroot" ] && echo "$FAKE_SYSROOT"
+STUB
+chmod +x "$work/bin/rustc"
+export FAKE_SYSROOT="$sysroot"
+
+expect "rust-std-licenses: in-tree licenses" 0 \
+  test "$("$scripts/rust-std-licenses" "$rust_docs/COPYRIGHT-library.html" | tr '\n' ' ')" = "Apache-2.0 BSD-2-Clause MIT Unicode-3.0 "
+printf '<h2 id="in-tree-files">In-tree files</h2>\n<p>Nothing</p>\n' > "$work/no-licenses.html"
+expect "rust-std-licenses: no in-tree licenses" 1 "$scripts/rust-std-licenses" "$work/no-licenses.html"
+
+expect "copy-rust-std-notices: copies the notices" 0 "$scripts/copy-rust-std-notices" "$work/std-copy"
+expect "copy-rust-std-notices: copies COPYRIGHT-library.html" 0 \
+  cmp "$rust_docs/COPYRIGHT-library.html" "$work/std-copy/COPYRIGHT-library.html"
+expect "copy-rust-std-notices: copies only the in-tree licenses" 0 \
+  test "$(ls "$work/std-copy/licenses" | tr '\n' ' ')" = "Apache-2.0.txt BSD-2-Clause.txt MIT.txt Unicode-3.0.txt "
+mv "$rust_docs/licenses/Unicode-3.0.txt" "$work/Unicode-3.0.txt"
+expect "copy-rust-std-notices: toolchain lacks a license text" 1 "$scripts/copy-rust-std-notices" "$work/std-missing"
+mv "$work/Unicode-3.0.txt" "$rust_docs/licenses/Unicode-3.0.txt"
+FAKE_SYSROOT="$work/no-sysroot" expect "copy-rust-std-notices: toolchain without notices" 1 \
+  "$scripts/copy-rust-std-notices" "$work/std-none"
+
 # check-archive-notices -------------------------------------------------------
 
 sources="$work/sources"
@@ -207,22 +251,27 @@ printf '    MIT License\n\n    Copyright (c) Beta Corporation.\n\n    The above 
 crates=$'scidtopgn-cli v0.1.0 (/src/crates/scidtopgn-cli)\nalpha v1.0.0\nbeta_rs v0.2.1\nalpha v1.0.0\nbeta_rs v0.2.1 (*)\n'
 notices_full=$'Crate        License used\nalpha 1.0.0  MIT\nbeta_rs 0.2.1  MIT\n\n====\n\nalpha 1.0.0\n\nCopyright (c) 2020 Alpha Author\n\nPermission is hereby granted,\nfree of charge.\n\n====\n\nbeta_rs 0.2.1\n\nMIT License\nCopyright (c) Beta Corporation.\nThe above copyright notice shall be included.\n'
 
-# archive <name> <notices> writes <name>.tar.gz with <name>/THIRD_PARTY_LICENSES,
-# or no notices file when <notices> is "-".
+# archive <name> <notices> [no-std] writes <name>.tar.gz with
+# <name>/THIRD_PARTY_LICENSES, or none when <notices> is "-", and the
+# toolchain's rust-std-licenses unless no-std is given.
 archive() {
   mkdir -p "$work/archives/$1"
   if [ "$2" != - ]; then
     printf '%s' "$2" > "$work/archives/$1/THIRD_PARTY_LICENSES"
   fi
+  if [ "${3:-}" != no-std ]; then
+    "$scripts/copy-rust-std-notices" "$work/archives/$1/rust-std-licenses"
+  fi
   tar -czf "$work/$1.tar.gz" -C "$work/archives" "$1"
 }
 check_notices() {
-  printf '%s' "$crates" | "$scripts/check-archive-notices" "$work/$1" "$sources"
+  printf '%s' "$crates" | "$scripts/check-archive-notices" "$work/$1" "$sources" "$rust_docs"
 }
 
 archive full "$notices_full"
-expect "check-archive-notices: every crate covered" 0 check_notices full.tar.gz
-expect_output "check-archive-notices: skips workspace and repeated crates" "covers 2 crates"
+expect "check-archive-notices: everything covered" 0 check_notices full.tar.gz
+expect_output "check-archive-notices: skips workspace and repeated crates" "the notices of 2 crates"
+expect_output "check-archive-notices: lists the standard library's licenses" "Apache-2.0 BSD-2-Clause MIT Unicode-3.0"
 
 unlisted=${notices_full/beta_rs 0.2.1  MIT/}
 archive unlisted "${unlisted/$'\nbeta_rs 0.2.1\n'/$'\n'}"
@@ -242,14 +291,29 @@ expect "check-archive-notices: crate without a license file" 1 check_notices gam
 expect_output "check-archive-notices: names the crate without a license file" "No MIT license file for gamma 3.0.0"
 crates=${crates%$'gamma v3.0.0\n'}
 
+archive no-std "$notices_full" no-std
+expect "check-archive-notices: archive without rust-std-licenses" 1 check_notices no-std.tar.gz
+expect_output "check-archive-notices: names the missing standard library notices" "rust-std-licenses/COPYRIGHT-library.html is missing"
+
+archive std-other "$notices_full"
+echo "<!-- another toolchain -->" >> "$work/archives/std-other/rust-std-licenses/COPYRIGHT-library.html"
+tar -czf "$work/std-other.tar.gz" -C "$work/archives" std-other
+expect "check-archive-notices: COPYRIGHT-library.html from another toolchain" 1 check_notices std-other.tar.gz
+
+archive no-unicode "$notices_full"
+rm "$work/archives/no-unicode/rust-std-licenses/licenses/Unicode-3.0.txt"
+tar -czf "$work/no-unicode.tar.gz" -C "$work/archives" no-unicode
+expect "check-archive-notices: Unicode license text missing" 1 check_notices no-unicode.tar.gz
+expect_output "check-archive-notices: names the missing license text" "rust-std-licenses/licenses/Unicode-3.0.txt is missing"
+
 if command -v zip > /dev/null; then
   (cd "$work/archives" && zip -qr "$work/full.zip" full)
   expect "check-archive-notices: zip archive" 0 check_notices full.zip
 fi
 
 expect "check-archive-notices: no crates on stdin" 2 \
-  "$scripts/check-archive-notices" "$work/full.tar.gz" "$sources" < /dev/null
-expect "check-archive-notices: missing argument" 2 "$scripts/check-archive-notices" "$work/full.tar.gz"
+  "$scripts/check-archive-notices" "$work/full.tar.gz" "$sources" "$rust_docs" < /dev/null
+expect "check-archive-notices: missing argument" 2 "$scripts/check-archive-notices" "$work/full.tar.gz" "$sources"
 
 if [ "$failures" -gt 0 ]; then
   echo "$failures failed."

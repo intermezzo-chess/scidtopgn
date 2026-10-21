@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# Usage: check-archive-notices <archive> <crate-sources> < crates
+# Usage: check-archive-notices <archive> <crate-sources> <rust-docs> < crates
 #
-# Checks that the THIRD_PARTY_LICENSES file in a release archive covers the
-# crates compiled into its executable. stdin lists one crate per line as
+# Checks that a release archive has the notices of the code compiled into its
+# executable besides scidtopgn itself: the crates it depends on, in
+# THIRD_PARTY_LICENSES, and the Rust standard library, in rust-std-licenses/.
+#
+# For the crates, stdin lists one crate per line as
 # `<name> v<version>`, the format of `cargo tree --format '{p}'`. Repeated
 # crates and lines with anything after the version, such as workspace crates,
 # are skipped. <crate-sources> holds each crate's source in a
@@ -10,18 +13,29 @@
 #
 # Each crate must be listed as `<name> <version>` at the start of a line, and
 # its MIT license file must appear in full. Whitespace is compared loosely.
-# Exits 0 if every crate is covered, 1 if one isn't, and 2 if the arguments or
-# the archive can't be used.
+#
+# For the standard library, rust-std-licenses/ must hold the same
+# COPYRIGHT-library.html as <rust-docs>, the share/doc/rust directory of the
+# toolchain that built the executable, and licenses/<id>.txt for each license
+# its in-tree section names.
+#
+# Exits 0 if everything is covered, 1 if something isn't, and 2 if the
+# arguments or the archive can't be used.
 set -euo pipefail
 
-if [ "$#" -ne 2 ]; then
-  echo "Usage: check-archive-notices <archive> <crate-sources> < crates" >&2
+if [ "$#" -ne 3 ]; then
+  echo "Usage: check-archive-notices <archive> <crate-sources> <rust-docs> < crates" >&2
   exit 2
 fi
 archive=$1
 sources=$2
+rust_docs=$3
 if [ ! -d "$sources" ]; then
   echo "No crate sources at $sources." >&2
+  exit 2
+fi
+if [ ! -f "$rust_docs/COPYRIGHT-library.html" ]; then
+  echo "No COPYRIGHT-library.html in $rust_docs." >&2
   exit 2
 fi
 
@@ -99,7 +113,25 @@ if [ "$checked" -eq 0 ]; then
   echo "No crates to check." >&2
   exit 2
 fi
+
+std="$work/$dir/rust-std-licenses"
+ids=""
+if ! cmp -s "$rust_docs/COPYRIGHT-library.html" "$std/COPYRIGHT-library.html"; then
+  echo "rust-std-licenses/COPYRIGHT-library.html is missing or differs from the toolchain's." >&2
+  failures=$((failures + 1))
+elif ! ids=$("$(dirname "$0")/rust-std-licenses" "$std/COPYRIGHT-library.html"); then
+  failures=$((failures + 1))
+fi
+for id in $ids; do
+  if ! cmp -s "$rust_docs/licenses/$id.txt" "$std/licenses/$id.txt"; then
+    echo "rust-std-licenses/licenses/$id.txt is missing or differs from the toolchain's." >&2
+    failures=$((failures + 1))
+  fi
+done
+
 if [ "$failures" -gt 0 ]; then
   exit 1
 fi
-echo "THIRD_PARTY_LICENSES in $archive covers $checked crates."
+# Word splitting joins the identifiers with spaces.
+# shellcheck disable=SC2086
+echo "$archive has the notices of $checked crates and of the Rust standard library, with license texts:" $ids

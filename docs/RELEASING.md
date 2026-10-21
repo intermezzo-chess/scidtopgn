@@ -126,7 +126,7 @@ The first release, `0.1.0`, is already prepared in `Cargo.toml` and `CHANGELOG.m
 2. Before anything waits for approval, the run:
    - fails on any branch other than `main`, when changesets are pending, when `CHANGELOG.md` has no section for the version, when the tag already points to another commit, or when the version is already fully released
    - runs CI on the commit
-   - builds the `scidtopgn` binary for `x86_64-unknown-linux-gnu`, `aarch64-apple-darwin`, `x86_64-apple-darwin`, and `x86_64-pc-windows-msvc`, each on a runner that can run it, and checks that `scidtopgn --version` prints the version and that the archive's `THIRD_PARTY_LICENSES` covers the binary's crates
+   - builds the `scidtopgn` binary for `x86_64-unknown-linux-gnu`, `aarch64-apple-darwin`, `x86_64-apple-darwin`, and `x86_64-pc-windows-msvc`, each on a runner that can run it, and checks that `scidtopgn --version` prints the version and that the archive has the notices of the binary's crates and of the Rust standard library
    - runs `cargo publish --dry-run` for the crates that aren't on crates.io yet
 3. The **check** job's summary shows the version, the commit, the release notes, and which release steps are already done. Once every other job passes, the `release` job waits. Open the run, choose **Review deployments**, select `release`, and approve it. To stop instead, reject it. Nothing has been tagged or published at that point.
 4. After approval, the `release` job:
@@ -135,11 +135,21 @@ The first release, `0.1.0`, is already prepared in `Cargo.toml` and `CHANGELOG.m
    3. Publishes `scidtopgn`, waits until the crates.io index serves it, and then publishes `scidtopgn-cli`. crates.io comes last because a published version can't be deleted.
 5. [Verify the release](#verify-a-release).
 
-Each archive contains a `scidtopgn-vX.Y.Z-<target>` directory with the binary, `LICENSE`, `THIRD_PARTY_LICENSES`, and `README.md`.
+Each archive contains a `scidtopgn-vX.Y.Z-<target>` directory with the binary, `LICENSE`, `THIRD_PARTY_LICENSES`, `rust-std-licenses/`, and `README.md`.
 
 ## Third-party notices
 
-`THIRD_PARTY_LICENSES` holds the license notices of the crates compiled into the `scidtopgn` binary. The MIT License requires that its copyright and permission notice go with every copy, including binaries. The file is maintained by hand. Review it whenever a dependency is added, removed, or changes version in `Cargo.lock`, and before every release.
+The `scidtopgn` binary contains code from its dependencies and from the Rust standard library. Their licenses, including MIT and Unicode-3.0, require that their copyright and permission notices go with every copy, including binaries. Each archive carries them in two places.
+
+### Rust standard library
+
+`rust-std-licenses/` is copied from the toolchain that builds the binary, `STABLE_TOOLCHAIN` in `release.yml`, by `.github/scripts/copy-rust-std-notices`. It holds the toolchain's `share/doc/rust/COPYRIGHT-library.html`, which lists the standard library's files and the crates it's built from with their notices. It also holds `licenses/<id>.txt` for each license that the file's "In-tree files" section names without including, currently Apache-2.0, BSD-2-Clause, MIT, and Unicode-3.0, the last for the Unicode data in `core`.
+
+Nothing is maintained by hand. When you change `STABLE_TOOLCHAIN`, open the new toolchain's `COPYRIGHT-library.html` and check that every license it names is one the project can comply with. A new kind of license, or a change to the file's format, needs a maintainer decision before it's released.
+
+### Dependencies
+
+`THIRD_PARTY_LICENSES` holds the license notices of the crates compiled into the `scidtopgn` binary. It is maintained by hand. Review it whenever a dependency is added, removed, or changes version in `Cargo.lock`, and before every release.
 
 1. List the crates in each target's binary. Proc macros run only at build time, so they're left out:
 
@@ -152,7 +162,9 @@ Each archive contains a `scidtopgn-vX.Y.Z-<target>` directory with the binary, `
 2. For each crate other than `scidtopgn` and `scidtopgn-cli`, list `<name> <version>` at the start of a line, with the targets and the license used. Copy its MIT license file unchanged from the crate as published, such as from `~/.cargo/registry/src/index.crates.io-*/<name>-<version>/`. When a crate offers MIT or Apache-2.0, use MIT. A crate under any other license, or with a `NOTICE` file, needs a maintainer decision before it's released.
 3. Remove crates that are no longer in any binary.
 
-The Release workflow's **Check the archive's notices** step fails, before anything waits for approval, when the archive lacks a crate's listing or the full text of its MIT license file. Run the same check locally with `.github/scripts/check-archive-notices`; the step in `release.yml` shows how.
+### The check
+
+The Release workflow's **Check the archive's notices** step fails, before anything waits for approval, when the archive lacks a crate's listing or the full text of its MIT license file, or when `rust-std-licenses/` doesn't match the toolchain that built the binary. Run the same check locally with `.github/scripts/check-archive-notices`; the step in `release.yml` shows how.
 
 ## Recover from a partial failure
 

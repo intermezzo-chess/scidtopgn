@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Usage: copy-rust-std-notices <dest>
+#
+# Copies the license notices of the Rust standard library, which is compiled
+# into every Rust executable, from the active toolchain into <dest>:
+#
+# - COPYRIGHT-library.html lists the library's files and the crates it's built
+#   from, with the crates' notices.
+# - licenses/<id>.txt holds the text of each license that the file's in-tree
+#   section names without including, such as Unicode-3.0 for the Unicode data
+#   in `core`.
+#
+# Exits 1 if the toolchain lacks one of these files.
+set -euo pipefail
+
+if [ "$#" -ne 1 ]; then
+  echo "Usage: copy-rust-std-notices <dest>" >&2
+  exit 2
+fi
+dest=$1
+
+sysroot=$(rustc --print sysroot)
+if command -v cygpath > /dev/null; then
+  sysroot=$(cygpath -u "$sysroot")
+fi
+docs="$sysroot/share/doc/rust"
+if [ ! -f "$docs/COPYRIGHT-library.html" ]; then
+  echo "The Rust toolchain at $sysroot has no share/doc/rust/COPYRIGHT-library.html." >&2
+  exit 1
+fi
+
+ids=$("$(dirname "$0")/rust-std-licenses" "$docs/COPYRIGHT-library.html")
+mkdir -p "$dest/licenses"
+cp "$docs/COPYRIGHT-library.html" "$dest/"
+for id in $ids; do
+  if [ ! -f "$docs/licenses/$id.txt" ]; then
+    echo "The Rust toolchain has no share/doc/rust/licenses/$id.txt." >&2
+    exit 1
+  fi
+  cp "$docs/licenses/$id.txt" "$dest/licenses/"
+done

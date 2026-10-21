@@ -1,9 +1,14 @@
 Third-party notices for the scidtopgn executable
 
 The scidtopgn executable in each release archive is built from scidtopgn
-(see LICENSE) and the Rust crates listed below. Crates offered under a choice
-of MIT or Apache-2.0 are used under the MIT License. Each crate's notice
-follows the list, copied from the crate as published on crates.io.
+(see LICENSE), the Rust crates listed below, and the Rust standard library.
+Crates offered under a choice of MIT or Apache-2.0 are used under the MIT
+License. Each crate's notice follows the list, copied from the crate as
+published on crates.io.
+
+The Rust standard library's notices, including the Unicode-3.0 license of the
+Unicode data in its `core` crate, are in the rust-std-licenses directory. They
+are copied from the Rust toolchain that built the executable.
 
 Crate                        Targets                 License used
 anstream 0.6.21              all targets             MIT, chosen from MIT OR Apache-2.0
