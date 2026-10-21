@@ -92,6 +92,12 @@ impl PgnParser {
         }
     }
 
+    /// Moves back to `pos`, on line `line`.
+    fn rewind(&mut self, pos: usize, line: u32) {
+        self.pos = pos;
+        self.line = line;
+    }
+
     fn skip_to_end_of_line(&mut self) {
         while let Some(c) = self.peek() {
             self.advance();
@@ -116,8 +122,8 @@ impl PgnParser {
 
     /// Skips the rest of a game that failed to parse, up to the next tag
     /// line outside a comment. If the game failed in its tags, its remaining
-    /// tag lines are skipped first. A tag never spans lines, so a failed tag
-    /// leaves the parser on its own line.
+    /// tag lines are skipped first; a failed tag leaves the parser just after
+    /// its `[`.
     fn skip_to_next_game(&mut self) {
         if !self.in_movetext {
             if !self.at_line_start() {
@@ -131,21 +137,25 @@ impl PgnParser {
                 self.skip_to_end_of_line();
             }
         }
+        // Comments are read as the movetext parser reads them, so a brace in
+        // a line comment doesn't hide the following games.
         while let Some(c) = self.peek() {
             if self.at_tag_line() {
                 return;
             }
-            if c == '{' {
-                self.skip_comment();
-            } else {
-                self.advance();
+            match c {
+                '{' => self.skip_comment(),
+                ';' | '%' => self.skip_to_end_of_line(),
+                _ => {
+                    self.advance();
+                }
             }
         }
     }
 
     /// Reads a tag value, which must end on its line.
     fn read_string(&mut self) -> Result<String> {
-        self.skip_line_whitespace();
+        self.skip_whitespace();
         if self.peek() != Some('"') {
             return Err(self.error("Expected '\"'"));
         }
@@ -189,7 +199,13 @@ impl PgnParser {
             match self.peek() {
                 None => break,
                 Some('[') => {
-                    let (name, value) = self.read_tag()?;
+                    let (pos, line) = (self.pos, self.line);
+                    let (name, value) = self.read_tag().inspect_err(|_| {
+                        // A malformed tag may have read past its line, into
+                        // the next game. Recovery starts from the tag.
+                        self.rewind(pos, line);
+                        self.advance();
+                    })?;
                     if name == "FEN" {
                         fen = Some(value);
                     } else {
@@ -238,15 +254,16 @@ impl PgnParser {
         Ok(game)
     }
 
+    /// Reads a tag pair. Its tokens may be on separate lines.
     fn read_tag(&mut self) -> Result<(String, String)> {
         self.advance();
 
-        self.skip_line_whitespace();
+        self.skip_whitespace();
         let name = self.read_tag_name();
 
         let value = self.read_string()?;
 
-        self.skip_line_whitespace();
+        self.skip_whitespace();
         if self.peek() != Some(']') {
             return Err(self.error("Expected ']'"));
         }

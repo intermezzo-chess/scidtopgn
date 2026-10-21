@@ -502,3 +502,48 @@ fn test_cli_import_recovers_at_indented_tags() {
         assert_eq!(imported_events(&db_path), ["First", "Last"]);
     }
 }
+
+#[test]
+fn test_cli_import_recovers_past_line_comments() {
+    for comment in ["; brace in a line comment: {", "% note {"] {
+        let temp = TempDir::new().expect("Failed to create temp dir");
+        let pgn = format!(
+            "[Event \"Bad\"]\n\n1. Ke3 *\n{comment}\n\n[Event \"Good\"]\n[Result \"1-0\"]\n\n1. e4 e5 1-0\n"
+        );
+        let (db_path, stderr) = import_pgn(temp.path(), &pgn);
+        assert!(stderr.contains("Warning: skipping PGN game 1"), "{stderr}");
+        assert!(stderr.contains("1 games imported, 1 skipped"), "{stderr}");
+        assert_eq!(imported_events(&db_path), ["Good"]);
+    }
+}
+
+#[test]
+fn test_cli_import_accepts_tag_pairs_across_lines() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let pgn_path = temp.path().join("split.pgn");
+    std::fs::write(
+        &pgn_path,
+        "[Event\r\n \"Good\"]\r\n[Result \"1-0\"\r\n]\r\n\r\n1. e4 e5 1-0\r\n",
+    )
+    .expect("Failed to write PGN");
+    let db_path = temp.path().join("split");
+    let output = cli()
+        .arg("import")
+        .arg(&pgn_path)
+        .arg("-o")
+        .arg(&db_path)
+        .args(["--on-error", "abort"])
+        .output()
+        .expect("Failed to run CLI");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(imported_events(&db_path), ["Good"]);
+    let mut db = scidtopgn::Database::open(&db_path).expect("Failed to open database");
+    assert_eq!(
+        db.get_game(0).expect("Failed to read game").result,
+        scidtopgn::GameResult::White
+    );
+}

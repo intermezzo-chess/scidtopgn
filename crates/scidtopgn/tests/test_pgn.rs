@@ -406,3 +406,30 @@ fn test_recovery_finds_indented_tags() {
         assert_eq!(events(&pgn), ["A", "B"], "{indent:?}");
     }
 }
+
+#[test]
+fn test_recovery_skips_line_comments() {
+    let good = "[Event \"Good\"]\n[Result \"1-0\"]\n\n1. e4 e5 1-0\n";
+    for comment in ["; this brace is ordinary line-comment text: {", "% note {"] {
+        let pgn = format!("[Event \"Bad\"]\n\n1. Ke3 *\n{comment}\n\n{good}");
+        assert_eq!(events(&pgn), ["error", "Good"], "{comment}");
+        assert_eq!(events(&pgn.replace('\n', "\r\n")), ["error", "Good"]);
+    }
+}
+
+#[test]
+fn test_tag_pairs_may_span_lines() {
+    for event in [
+        "[Event\n \"Good\"]",
+        "[Event \"Good\"\n]",
+        "[\nEvent\n\"Good\"\n]",
+    ] {
+        let pgn = format!("{event}\n[Result \"1-0\"]\n\n1. e4 e5 1-0\n");
+        for pgn in [pgn.clone(), pgn.replace('\n', "\r\n")] {
+            let games = parse_pgn(&pgn).unwrap();
+            assert_eq!(games.len(), 1, "{event:?}");
+            assert_eq!(games[0].event, "Good", "{event:?}");
+            assert_eq!(games[0].result, GameResult::White, "{event:?}");
+        }
+    }
+}
