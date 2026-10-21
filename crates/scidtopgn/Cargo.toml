@@ -13,6 +13,7 @@ categories = ["parser-implementations", "game-development"]
 
 [dependencies]
 anyhow = { workspace = true }
+shakmaty = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

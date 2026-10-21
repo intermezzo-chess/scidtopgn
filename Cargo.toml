@@ -9,10 +9,11 @@ authors = ["Nathan Loding"]
 license = "GPL-3.0-or-later"
 repository = "https://github.com/intermezzo-chess/scidtopgn"
 readme = "README.md"
-rust-version = "1.70"
+rust-version = "1.97"
 
 [workspace.dependencies]
 anyhow = "1.0"
+shakmaty = "0.30.2"
 thiserror = "1.0"
 tempfile = "3"
 

@@ -291,6 +291,23 @@ expect "check-archive-notices: crate without a license file" 1 check_notices gam
 expect_output "check-archive-notices: names the crate without a license file" "No MIT license file for gamma 3.0.0"
 crates=${crates%$'gamma v3.0.0\n'}
 
+# delta has no license file. It is under GPL-3.0-or-later, whose text is the
+# archive's LICENSE.
+mkdir -p "$sources/delta-4.0.0"
+crates+=$'delta v4.0.0\n'
+archive delta-gpl "$notices_full"$'delta 4.0.0  GPL-3.0-or-later\n'
+printf '                    GNU GENERAL PUBLIC LICENSE\n                       Version 3, 29 June 2007\n' > "$work/archives/delta-gpl/LICENSE"
+tar -czf "$work/delta-gpl.tar.gz" -C "$work/archives" delta-gpl
+expect "check-archive-notices: GPL crate covered by LICENSE" 0 check_notices delta-gpl.tar.gz
+archive delta-no-license "$notices_full"$'delta 4.0.0  GPL-3.0-or-later\n'
+expect "check-archive-notices: GPL crate without LICENSE" 1 check_notices delta-no-license.tar.gz
+expect_output "check-archive-notices: names the GPL crate without LICENSE" "No MIT license file for delta 4.0.0"
+archive delta-mit "$notices_full"$'delta 4.0.0  MIT\n'
+printf 'Version 3, 29 June 2007\n' > "$work/archives/delta-mit/LICENSE"
+tar -czf "$work/delta-mit.tar.gz" -C "$work/archives" delta-mit
+expect "check-archive-notices: crate without a license file listed as MIT" 1 check_notices delta-mit.tar.gz
+crates=${crates%$'delta v4.0.0\n'}
+
 archive no-std "$notices_full" no-std
 expect "check-archive-notices: archive without rust-std-licenses" 1 check_notices no-std.tar.gz
 expect_output "check-archive-notices: names the missing standard library notices" "rust-std-licenses/COPYRIGHT-library.html is missing"

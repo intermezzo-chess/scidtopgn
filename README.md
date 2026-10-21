@@ -8,7 +8,7 @@ A Rust library and CLI for converting between SCID (.si4/.sn4/.sg4) and PGN form
 
 Download an archive for your platform from [GitHub Releases](https://github.com/intermezzo-chess/scidtopgn/releases). Each release lists SHA-256 checksums in `SHA256SUMS`.
 
-Or install from [crates.io](https://crates.io/crates/scidtopgn-cli) with Rust 1.70 or later:
+Or install from [crates.io](https://crates.io/crates/scidtopgn-cli) with Rust 1.97 or later:
 
 ```bash
 cargo install scidtopgn-cli --locked

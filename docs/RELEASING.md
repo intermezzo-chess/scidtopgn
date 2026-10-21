@@ -160,11 +160,14 @@ Nothing is maintained by hand. When you change `STABLE_TOOLCHAIN`, open the new 
    ```
 
 2. For each crate other than `scidtopgn` and `scidtopgn-cli`, list `<name> <version>` at the start of a line, with the targets and the license used. Copy its MIT license file unchanged from the crate as published, such as from `~/.cargo/registry/src/index.crates.io-*/<name>-<version>/`. When a crate offers MIT or Apache-2.0, use MIT. A crate under any other license, or with a `NOTICE` file, needs a maintainer decision before it's released.
+
+   shakmaty is the one approved exception. It is under GPL-3.0-or-later, like scidtopgn, and its published crate has no license file. List its license as `GPL-3.0-or-later`, and keep its section, which points to the GPL text in `LICENSE`.
+
 3. Remove crates that are no longer in any binary.
 
 ### The check
 
-The Release workflow's **Check the archive's notices** step fails, before anything waits for approval, when the archive lacks a crate's listing or the full text of its MIT license file, or when `rust-std-licenses/` doesn't match the toolchain that built the binary. Run the same check locally with `.github/scripts/check-archive-notices`; the step in `release.yml` shows how.
+The Release workflow's **Check the archive's notices** step fails, before anything waits for approval, when the archive lacks a crate's listing or the full text of its MIT license file, when a crate without a license file isn't listed as `GPL-3.0-or-later` with the GPL text in `LICENSE`, or when `rust-std-licenses/` doesn't match the toolchain that built the binary. Run the same check locally with `.github/scripts/check-archive-notices`; the step in `release.yml` shows how.
 
 ## Recover from a partial failure
 
@@ -219,7 +222,7 @@ After the run succeeds, check each part. Replace `X.Y.Z` with the version.
 4. Optionally, install it with the minimum supported Rust version, and run it:
 
    ```sh
-   cargo +1.70 install scidtopgn-cli --version X.Y.Z --locked
+   cargo +1.97 install scidtopgn-cli --version X.Y.Z --locked
    scidtopgn --version
    ```
 

@@ -59,7 +59,7 @@ fn export_command(args: &ExportArgs) -> Result<()> {
     let mut exported = 0u32;
     for i in 0..total {
         // Skip logically deleted games, matching the reference converter.
-        if db.get_entry(i).map_or(true, |e| e.get_delete_flag()) {
+        if db.get_entry(i).is_none_or(|e| e.get_delete_flag()) {
             continue;
         }
 
@@ -139,7 +139,7 @@ fn import_command(args: &ImportArgs) -> Result<()> {
             }
         }
 
-        if args.verbose && added % 100 == 0 && added > 0 {
+        if args.verbose && added.is_multiple_of(100) && added > 0 {
             eprintln!("Imported {} games...", added);
         }
     }

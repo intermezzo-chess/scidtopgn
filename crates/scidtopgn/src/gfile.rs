@@ -92,7 +92,7 @@ impl GFile {
         let num_blocks = if file_size == 0 {
             0
         } else {
-            (file_size + GF_BLOCKSIZE - 1) / GF_BLOCKSIZE
+            file_size.div_ceil(GF_BLOCKSIZE)
         };
 
         let last_block_size = if num_blocks == 0 {
