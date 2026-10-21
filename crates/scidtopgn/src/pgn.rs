@@ -191,6 +191,7 @@ impl PgnParser {
     pub fn parse_game(&mut self) -> Result<Game> {
         let mut game = Game::new();
         let mut fen = None;
+        let mut variant = None;
         self.in_movetext = false;
 
         loop {
@@ -209,6 +210,9 @@ impl PgnParser {
                     if name == "FEN" {
                         fen = Some(value);
                     } else {
+                        if name == "Variant" {
+                            variant = Some(value.clone());
+                        }
                         apply_tag(&mut game, &name, value);
                     }
                 }
@@ -227,12 +231,10 @@ impl PgnParser {
             }
         }
 
-        if let Some(variant) = game.find_tag("Variant") {
-            if !is_standard_chess(variant) {
-                return Err(Error::UnsupportedVariant {
-                    variant: variant.clone(),
-                });
-            }
+        // Checked here rather than in `game.tags`, which keeps at most
+        // MAX_TAGS tags.
+        if let Some(variant) = variant.filter(|v| !is_standard_chess(v)) {
+            return Err(Error::UnsupportedVariant { variant });
         }
         // Like SCID, a FEN tag sets the start position whether or not the
         // game also has a SetUp tag.
@@ -374,7 +376,7 @@ impl PgnParser {
                     }
 
                     let san = strip_move_number(&token);
-                    if !is_move_token(san) {
+                    if !is_move_token(san.trim_end_matches(['+', '#', '!', '?'])) {
                         continue;
                     }
 

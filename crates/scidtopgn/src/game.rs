@@ -565,8 +565,12 @@ impl Game {
         if let Some(start_idx) = self.first_move {
             let mut lines: Vec<String> = Vec::new();
             let mut current_line = String::new();
+            // A FEN's move number can be u32::MAX, so count in u64.
             let (mut move_num, mut is_white_move) = match self.start_position {
-                Some(ref start) => (start.fullmoves().get(), start.turn() == Color::White),
+                Some(ref start) => (
+                    u64::from(start.fullmoves().get()),
+                    start.turn() == Color::White,
+                ),
                 None => (1, true),
             };
             let mut first_move = true;

@@ -237,3 +237,31 @@ fn read_database_record(record: &[u8]) -> Vec<String> {
     .unwrap();
     main_line(&game)
 }
+
+#[test]
+fn test_index_start_flags_match_scid() {
+    let start_flags = |path: &std::path::Path| -> Vec<bool> {
+        let db = Database::open(path).unwrap();
+        (0..db.num_games())
+            .map(|i| db.get_entry(i).unwrap().get_start_flag())
+            .collect()
+    };
+    let expected = start_flags(&data_path("edge"));
+    assert_eq!(expected, [false, true, false, true]);
+
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().join("edge");
+    let mut db = Database::create(&path).unwrap();
+    for game in read_pgn("edge.pgn") {
+        db.add_game(&game).unwrap();
+    }
+    db.flush().unwrap();
+    assert_eq!(start_flags(&path), expected);
+}
+
+#[test]
+fn test_annotated_null_moves_round_trip() {
+    let games = parse_pgn("[Event \"Nulls\"]\n\n1. Z0! null? 2. e4 *\n").unwrap();
+    let records = write_records(&games);
+    assert_eq!(read_database_record(&records[0]), ["--", "--", "e4"]);
+}

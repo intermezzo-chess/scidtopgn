@@ -152,6 +152,7 @@ impl Database {
         let mut entry = IndexEntry::new();
         entry.set_offset(offset);
         entry.set_length(encoded_data.len() as u32);
+        entry.set_start_flag(game.start_position.is_some());
 
         let nb = self.nfile.namebase_mut();
 

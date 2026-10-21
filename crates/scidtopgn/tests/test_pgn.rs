@@ -433,3 +433,43 @@ fn test_tag_pairs_may_span_lines() {
         }
     }
 }
+
+#[test]
+fn test_annotated_null_moves() {
+    assert_eq!(
+        parse_sans("1. Z0! null? 2. e4 --+ 3. -- #?! *"),
+        ["--", "--", "e4", "--", "--"]
+    );
+    assert_illegal("", "1. e4 e5 2. Qh5 Nc6 3. Qxf7+ --! *", "--!");
+}
+
+#[test]
+fn test_unsupported_variant_after_many_tags() {
+    let custom: String = (0..40).map(|i| format!("[Custom{i} \"x\"]\n")).collect();
+    let variant = "[Variant \"Chess960\"]";
+    for tags in [format!("{custom}{variant}"), format!("{variant}\n{custom}")] {
+        let pgn = format!("[Event \"Test\"]\n{tags}\n\n1. e4 *\n");
+        assert!(
+            matches!(
+                parse_single_game(&pgn),
+                Err(Error::UnsupportedVariant { ref variant }) if variant == "Chess960"
+            ),
+            "{tags}"
+        );
+        let next = "[Event \"Next\"]\n\n1. d4 *\n";
+        assert_eq!(events(&format!("{pgn}\n{next}")), ["error", "Next"]);
+    }
+}
+
+#[test]
+fn test_largest_fen_move_number() {
+    let tags = "[FEN \"4k3/8/8/8/8/8/8/4K3 b - - 0 4294967295\"]";
+    let game = parse_single_game(&pgn_game(tags, "4294967295... Kd7 4294967296. Ke2 *")).unwrap();
+    assert_eq!(sans(&game), ["Kd7", "Ke2"]);
+    assert!(
+        game.to_pgn()
+            .contains("\n4294967295... Kd7 4294967296. Ke2\n"),
+        "{}",
+        game.to_pgn()
+    );
+}
