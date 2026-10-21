@@ -449,3 +449,56 @@ fn test_cli_export_names_corrupt_game() {
     assert!(stderr.contains("Failed to read game 1"), "{stderr}");
     assert!(stderr.contains("invalid move byte 0xc2"), "{stderr}");
 }
+
+/// Imports `pgn` with `--verbose` and returns the database and stderr.
+fn import_pgn(dir: &Path, pgn: &str) -> (PathBuf, String) {
+    let pgn_path = dir.join("input.pgn");
+    std::fs::write(&pgn_path, pgn).expect("Failed to write PGN");
+    let db_path = dir.join("imported");
+    let output = cli()
+        .arg("import")
+        .arg(&pgn_path)
+        .arg("-o")
+        .arg(&db_path)
+        .arg("--verbose")
+        .output()
+        .expect("Failed to run CLI");
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    assert!(output.status.success(), "{stderr}");
+    (db_path, stderr)
+}
+
+fn imported_events(db_path: &Path) -> Vec<String> {
+    let mut db = scidtopgn::Database::open(db_path).expect("Failed to open database");
+    db.games()
+        .map(|game| game.expect("Failed to read game").event)
+        .collect()
+}
+
+#[test]
+fn test_cli_import_keeps_game_after_unterminated_tag() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let pgn =
+        "[Event \"Broken]\n\n1. d4 d5 *\n\n[Event \"Good\"]\n[Result \"1-0\"]\n\n1. e4 e5 1-0\n";
+    let (db_path, stderr) = import_pgn(temp.path(), pgn);
+    assert!(stderr.contains("Warning: skipping PGN game 1"), "{stderr}");
+    assert!(stderr.contains("1 games imported, 1 skipped"), "{stderr}");
+    assert_eq!(imported_events(&db_path), ["Good"]);
+}
+
+#[test]
+fn test_cli_import_recovers_at_indented_tags() {
+    for indent in ["  ", "\t"] {
+        let temp = TempDir::new().expect("Failed to create temp dir");
+        let pgn = [
+            format!("{indent}[Event \"First\"]\n\n1. e4 e5 1-0\n"),
+            format!("{indent}[Event \"Illegal\"]\n\n1. Ke3 *\n"),
+            format!("{indent}[Event \"Last\"]\n{indent}[Result \"1-0\"]\n\n1. d4 d5 1-0\n"),
+        ]
+        .join("\n");
+        let (db_path, stderr) = import_pgn(temp.path(), &pgn);
+        assert!(stderr.contains("Warning: skipping PGN game 2"), "{stderr}");
+        assert!(stderr.contains("2 games imported, 1 skipped"), "{stderr}");
+        assert_eq!(imported_events(&db_path), ["First", "Last"]);
+    }
+}

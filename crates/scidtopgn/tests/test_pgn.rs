@@ -357,3 +357,52 @@ fn test_malformed_input_does_not_panic() {
         let _ = parse_single_game(input);
     }
 }
+
+/// The events of the games the parser yields, or "error" for a failed game.
+fn events(pgn: &str) -> Vec<String> {
+    PgnParser::new(pgn)
+        .map(|result| match result {
+            Ok(game) => game.event,
+            Err(_) => "error".to_string(),
+        })
+        .collect()
+}
+
+#[test]
+fn test_broken_last_tag_keeps_the_next_game() {
+    let good = "[Event \"Good\"]\n[Result \"1-0\"]\n\n1. e4 e5 1-0\n";
+    for broken in [
+        // A missing closing quote.
+        "[Event \"Broken]\n\n1. d4 d5 *\n",
+        // A missing closing bracket.
+        "[Event \"Broken\"\n\n1. d4 d5 *\n",
+        // A missing value.
+        "[Event\n\n1. d4 d5 *\n",
+    ] {
+        let pgn = [broken, good].join("\n");
+        assert_eq!(events(&pgn), ["error", "Good"], "{broken}");
+        assert_eq!(events(&pgn.replace('\n', "\r\n")), ["error", "Good"]);
+    }
+    // A tag value can't continue onto the next line.
+    assert!(matches!(
+        parse_single_game("[Event \"Broken\n\"]\n\n*\n"),
+        Err(Error::Parse { line: 1, .. })
+    ));
+}
+
+#[test]
+fn test_recovery_finds_indented_tags() {
+    for indent in ["  ", "\t", " \t "] {
+        let pgn = [
+            format!("{indent}[Event \"First\"]\n\n1. e4 e5 1-0\n"),
+            format!("{indent}[Event \"Illegal\"]\n\n1. Ke3 *\n"),
+            format!("{indent}[Event \"Last\"]\n{indent}[Result \"1-0\"]\n\n1. d4 d5 1-0\n"),
+        ]
+        .join("\n");
+        assert_eq!(events(&pgn), ["First", "error", "Last"], "{indent:?}");
+
+        // A game without a result ends at indented tags too.
+        let pgn = format!("{indent}[Event \"A\"]\n\n1. e4 e5\n{indent}[Event \"B\"]\n\n1. d4 *\n");
+        assert_eq!(events(&pgn), ["A", "B"], "{indent:?}");
+    }
+}

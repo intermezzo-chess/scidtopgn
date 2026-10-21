@@ -57,6 +57,17 @@ impl PgnParser {
         self.pos == 0 || self.input[self.pos - 1] == '\n'
     }
 
+    /// Whether the next character starts a tag line: a `[` with only spaces
+    /// or tabs before it on its line.
+    fn at_tag_line(&self) -> bool {
+        self.peek() == Some('[')
+            && self.input[..self.pos]
+                .iter()
+                .rev()
+                .find(|&&c| c != ' ' && c != '\t')
+                .is_none_or(|&c| c == '\n')
+    }
+
     fn error(&self, message: &str) -> Error {
         Error::Parse {
             line: self.line,
@@ -71,6 +82,13 @@ impl PgnParser {
             } else {
                 break;
             }
+        }
+    }
+
+    /// Skips spaces and tabs, but not line breaks.
+    fn skip_line_whitespace(&mut self) {
+        while matches!(self.peek(), Some(' ' | '\t')) {
+            self.advance();
         }
     }
 
@@ -96,20 +114,25 @@ impl PgnParser {
         }
     }
 
-    /// Skips the rest of a game that failed to parse, up to the next line
-    /// that starts with `[` outside a comment. If the game failed in its
-    /// tags, its remaining tag lines are skipped first.
+    /// Skips the rest of a game that failed to parse, up to the next tag
+    /// line outside a comment. If the game failed in its tags, its remaining
+    /// tag lines are skipped first. A tag never spans lines, so a failed tag
+    /// leaves the parser on its own line.
     fn skip_to_next_game(&mut self) {
         if !self.in_movetext {
             if !self.at_line_start() {
                 self.skip_to_end_of_line();
             }
-            while self.peek() == Some('[') {
+            loop {
+                self.skip_line_whitespace();
+                if self.peek() != Some('[') {
+                    break;
+                }
                 self.skip_to_end_of_line();
             }
         }
         while let Some(c) = self.peek() {
-            if c == '[' && self.at_line_start() {
+            if self.at_tag_line() {
                 return;
             }
             if c == '{' {
@@ -120,22 +143,29 @@ impl PgnParser {
         }
     }
 
+    /// Reads a tag value, which must end on its line.
     fn read_string(&mut self) -> Result<String> {
-        self.skip_whitespace();
+        self.skip_line_whitespace();
         if self.peek() != Some('"') {
             return Err(self.error("Expected '\"'"));
         }
         self.advance();
 
         let mut result = String::new();
-        while let Some(c) = self.advance() {
+        while let Some(c) = self.peek() {
+            if c == '\n' {
+                break;
+            }
+            self.advance();
             match c {
                 '"' => return Ok(result),
-                '\\' => {
-                    if let Some(escaped) = self.advance() {
+                '\\' => match self.peek() {
+                    Some(escaped) if escaped != '\n' => {
                         result.push(escaped);
+                        self.advance();
                     }
-                }
+                    _ => break,
+                },
                 _ => result.push(c),
             }
         }
@@ -211,13 +241,12 @@ impl PgnParser {
     fn read_tag(&mut self) -> Result<(String, String)> {
         self.advance();
 
-        self.skip_whitespace();
+        self.skip_line_whitespace();
         let name = self.read_tag_name();
 
-        self.skip_whitespace();
         let value = self.read_string()?;
 
-        self.skip_whitespace();
+        self.skip_line_whitespace();
         if self.peek() != Some(']') {
             return Err(self.error("Expected ']'"));
         }
@@ -306,7 +335,7 @@ impl PgnParser {
                     return Ok(());
                 }
                 // The next game's tags: this game has no result.
-                '[' if depth == 0 && self.at_line_start() => {
+                '[' if depth == 0 && self.at_tag_line() => {
                     return Ok(());
                 }
                 '[' => {
