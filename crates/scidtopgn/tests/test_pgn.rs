@@ -473,3 +473,18 @@ fn test_largest_fen_move_number() {
         game.to_pgn()
     );
 }
+
+#[test]
+fn test_delimiters_attached_to_moves() {
+    for movetext in [
+        "1. e4; comment\n e5 *",
+        "1. e4$1 e5 *",
+        "1. e4 e5*",
+        "1. e4{c}e5 *",
+    ] {
+        assert_eq!(parse_sans(movetext), ["e4", "e5"], "{movetext:?}");
+        let pgn = pgn_game("", movetext).replace('\n', "\r\n");
+        assert_eq!(sans(&parse_single_game(&pgn).unwrap()), ["e4", "e5"]);
+    }
+    assert_eq!(parse_sans("1. e4*"), ["e4"]);
+}

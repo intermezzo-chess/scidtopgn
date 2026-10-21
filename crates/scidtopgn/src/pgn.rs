@@ -313,6 +313,13 @@ impl PgnParser {
                 ';' | '%' => {
                     self.skip_to_end_of_line();
                 }
+                '*' => {
+                    self.advance();
+                    if depth > 0 {
+                        return Err(self.error("Unterminated variation"));
+                    }
+                    return Ok(());
+                }
                 '{' => {
                     let comment = self.read_brace_comment()?;
                     if depth == 0 {
@@ -446,7 +453,9 @@ impl PgnParser {
     fn read_token(&mut self) -> String {
         let mut token = String::new();
         while let Some(c) = self.peek() {
-            if c.is_whitespace() || matches!(c, '(' | ')' | '{' | '}' | '[' | ']') {
+            // A comment, NAG, or `*` may follow a move without a space.
+            if c.is_whitespace() || matches!(c, '(' | ')' | '{' | '}' | '[' | ']' | ';' | '$' | '*')
+            {
                 break;
             }
             token.push(c);

@@ -547,3 +547,31 @@ fn test_cli_import_accepts_tag_pairs_across_lines() {
         scidtopgn::GameResult::White
     );
 }
+
+#[test]
+fn test_cli_import_accepts_delimiters_attached_to_moves() {
+    let pgn = "[Event \"A\"]\n\n1. e4; comment\n e5 *\n\n[Event \"B\"]\n\n1. d4$1 d5*\n";
+    for mode in ["skip", "abort"] {
+        let temp = TempDir::new().expect("Failed to create temp dir");
+        let pgn_path = temp.path().join("adjacent.pgn");
+        std::fs::write(&pgn_path, pgn).expect("Failed to write PGN");
+        let db_path = temp.path().join("adjacent");
+        let output = cli()
+            .arg("import")
+            .arg(&pgn_path)
+            .arg("-o")
+            .arg(&db_path)
+            .args(["--on-error", mode])
+            .output()
+            .expect("Failed to run CLI");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{mode}: {stderr}");
+        assert!(!stderr.contains("Warning"), "{mode}: {stderr}");
+        let exported = cli().arg(&db_path).output().expect("Failed to run CLI");
+        assert_eq!(
+            main_lines(&String::from_utf8_lossy(&exported.stdout)),
+            [["e4", "e5"], ["d4", "d5"]],
+            "{mode}"
+        );
+    }
+}
