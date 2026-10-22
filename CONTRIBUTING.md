@@ -54,6 +54,8 @@ reference the issue the PR addresses.
   from the original SCID encoding and decoding sources. When there is a
   question about how SCID or PGN import and export should behave, such as
   which games to skip or how to encode a move, match `scid-cpp/src/main.cpp`.
+  [docs/PGN_IMPORT.md](docs/PGN_IMPORT.md) records where PGN import
+  deliberately differs, and why. Update it when you change how PGN is read.
   `scidvspc/` is a local reference checkout and is not tracked.
 - **The library uses structured errors.** It returns `scidtopgn::Error`, which
   is defined with `thiserror` in `error.rs`. Only the CLI uses `anyhow`. Don't
@@ -61,9 +63,11 @@ reference the issue the PR addresses.
 
 ## Test data
 
-The fixtures in `tests/data/` (`one`, `five`, and `edge`, each with `.si4`,
-`.sn4`, `.sg4`, and a matching `.pgn`) are shared by both crates' integration
-tests. `.gitignore` excludes `*.si4`, `*.sn4`, and `*.sg4` everywhere, so new
+The fixtures in `tests/data/` (`one`, `five`, `edge`, and `castling`, each
+with `.si4`, `.sn4`, `.sg4`, and a matching `.pgn`) are shared by both crates'
+integration tests. `castling` was written by the C++ reference converter from
+`castling.pgn`, like `edge`. `notation.pgn` has one game per case in
+[docs/PGN_IMPORT.md](docs/PGN_IMPORT.md). `.gitignore` excludes `*.si4`, `*.sn4`, and `*.sg4` everywhere, so new
 fixtures must be added with `git add -f`.
 
 `edge` covers variations, null moves, promotions, en passant, castling, and
