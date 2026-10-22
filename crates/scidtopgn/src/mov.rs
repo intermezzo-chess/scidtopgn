@@ -6,7 +6,7 @@
 //! 15, which no king move uses, mark NAGs, comments, and the ends of
 //! variations and the game.
 
-use shakmaty::{CastlingMode, Color, Move, Position, Role, Square};
+use shakmaty::{CastlingMode, CastlingSide, Color, Move, Position, Role, Square};
 
 use crate::bytebuf::ByteBuffer;
 use crate::error::{Error, Result};
@@ -83,8 +83,9 @@ fn square_diff(from: Square, to: Square) -> i32 {
 /// # Errors
 ///
 /// Returns [`Error::Decode`] if the piece number or value is invalid, or if
-/// the move isn't legal in `pos`. A null move is returned without checking;
-/// [`ScidPosition::play`] rejects it in check.
+/// the move can't be played in `pos` (see [`ScidPosition::can_play`]). A null
+/// move is returned without checking; [`ScidPosition::play`] rejects it in
+/// check.
 pub fn decode_move(buf: &mut ByteBuffer, pos: &ScidPosition, byte: u8) -> Result<GameMove> {
     let (number, value) = parse_move_byte(byte);
     let chess = pos.chess();
@@ -142,10 +143,15 @@ pub fn decode_move(buf: &mut ByteBuffer, pos: &ScidPosition, byte: u8) -> Result
         }
     };
 
+    // SCID also writes castling after the king or rook has moved and
+    // returned.
+    let castles_without_right = [CastlingSide::KingSide, CastlingSide::QueenSide]
+        .into_iter()
+        .filter_map(|side| pos.castle_without_right(side));
     chess
         .legal_moves()
-        .iter()
-        .copied()
+        .into_iter()
+        .chain(castles_without_right)
         .find(|&m| {
             m.from() == Some(from) && destination(m, color) == to && m.promotion() == promotion
         })
@@ -162,11 +168,12 @@ fn rook_destination(from: Square, value: u8) -> Square {
     }
 }
 
-/// Encodes `mv`, which must be legal in `pos`.
+/// Encodes `mv`, which must be playable in `pos` (see
+/// [`ScidPosition::can_play`]).
 ///
 /// # Errors
 ///
-/// Returns [`Error::InvalidMove`] if the move isn't legal in `pos`.
+/// Returns [`Error::InvalidMove`] if the move can't be played in `pos`.
 pub fn encode_move(buf: &mut ByteBuffer, pos: &ScidPosition, mv: GameMove) -> Result<()> {
     let chess = pos.chess();
     let illegal = |m: &str| Error::InvalidMove {
@@ -178,7 +185,7 @@ pub fn encode_move(buf: &mut ByteBuffer, pos: &ScidPosition, mv: GameMove) -> Re
         GameMove::Null => return buf.put_byte(make_move_byte(0, 0)),
         GameMove::Move(m) => m,
     };
-    let (Some(from), true) = (m.from(), chess.is_legal(m)) else {
+    let (Some(from), true) = (m.from(), pos.can_play(m)) else {
         return Err(illegal(&m.to_uci(CastlingMode::Standard).to_string()));
     };
     let color = chess.turn();
@@ -333,6 +340,23 @@ mod tests {
     }
 
     #[test]
+    fn castling_without_the_castling_right() {
+        // SCID writes castling after the king or rook has moved and returned.
+        let pos = position("r3k2r/8/8/8/8/8/8/R3K2R w - - 0 1");
+        for (byte, side) in [
+            (0x0A, CastlingSide::KingSide),
+            (0x09, CastlingSide::QueenSide),
+        ] {
+            let castle = pos.castle_without_right(side).unwrap();
+            let decoded = decode_move(&mut ByteBuffer::new(), &pos, byte).unwrap();
+            assert_eq!(decoded, GameMove::Move(castle));
+            let mut buf = ByteBuffer::new();
+            encode_move(&mut buf, &pos, decoded).unwrap();
+            assert_eq!(buf.as_slice(), &[byte]);
+        }
+    }
+
+    #[test]
     fn null_move() {
         let pos = ScidPosition::standard();
         let mut buf = ByteBuffer::new();
@@ -356,8 +380,11 @@ mod tests {
                 "{byte:#04x} should be rejected"
             );
         }
-        // Lost castling rights.
-        let pos = position("r3k2r/8/8/8/8/8/8/R3K2R w kq - 0 1");
+        // Castling with no rook on its square.
+        let pos = position("r3k2r/8/8/8/8/8/8/R3K3 w kq - 0 1");
+        assert!(decode_move(&mut ByteBuffer::new(), &pos, 0x0A).is_err());
+        // Castling through check, even with the castling right.
+        let pos = position("r3k1r1/8/8/8/8/8/8/R3K2R w KQ - 0 1");
         assert!(decode_move(&mut ByteBuffer::new(), &pos, 0x0A).is_err());
         // A piece number past the end of the list.
         let pos = position("4k3/8/8/8/8/8/8/4K3 w - - 0 1");

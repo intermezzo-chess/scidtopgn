@@ -7,8 +7,8 @@
 use shakmaty::fen::Fen;
 use shakmaty::san::{San, SanPlus, Suffix};
 use shakmaty::{
-    Board, ByColor, CastlingMode, Chess, Color, EnPassantMode, File, FromSetup, Move, Position,
-    PositionError, Rank, Setup, Square,
+    Bitboard, Board, ByColor, CastlingMode, CastlingSide, Chess, Color, EnPassantMode, File,
+    FromSetup, Move, Position, PositionError, Rank, Setup, Square,
 };
 
 use crate::error::{Error, Result};
@@ -231,7 +231,27 @@ impl ScidPosition {
         &self.pieces
     }
 
+    /// Whether `m` can be played: it is legal, or it is castling that would
+    /// be legal with the castling right.
+    ///
+    /// SCID plays castling after the king or rook has moved and returned,
+    /// so databases it writes can contain such a move.
+    pub fn can_play(&self, m: Move) -> bool {
+        self.chess.is_legal(m) || with_castling_right_for(&self.chess, m).is_some()
+    }
+
+    /// The castling move on `side`, if the side to move has lost the
+    /// castling right but castling would otherwise be legal: the king and
+    /// rook are on their original squares, the squares between them are
+    /// empty, and the king isn't in or passing through check.
+    pub fn castle_without_right(&self, side: CastlingSide) -> Option<Move> {
+        castle_without_right(&self.chess, side).map(|(m, _)| m)
+    }
+
     /// Plays `mv` and returns its SAN in the position before it.
+    ///
+    /// Castling without the castling right is played if
+    /// [`castle_without_right`](Self::castle_without_right) allows it.
     ///
     /// # Errors
     ///
@@ -242,13 +262,18 @@ impl ScidPosition {
         match mv {
             GameMove::Move(m) => {
                 if !self.chess.is_legal(m) {
-                    return Err(Error::InvalidMove {
-                        move_str: format!(
-                            "{} is illegal in {}",
-                            m.to_uci(CastlingMode::Standard),
-                            fen(&self.chess)
-                        ),
-                    });
+                    match with_castling_right_for(&self.chess, m) {
+                        Some(chess) => self.chess = chess,
+                        None => {
+                            return Err(Error::InvalidMove {
+                                move_str: format!(
+                                    "{} is illegal in {}",
+                                    m.to_uci(CastlingMode::Standard),
+                                    fen(&self.chess)
+                                ),
+                            })
+                        }
+                    }
                 }
                 let san = SanPlus::from_move_and_play_unchecked(&mut self.chess, m);
                 self.pieces.play(color, m);
@@ -263,6 +288,42 @@ impl ScidPosition {
             }
         }
     }
+}
+
+/// The castling move on `side` for the side to move, and `chess` with the
+/// castling right that makes it legal, if the side to move has lost that
+/// right but castling would otherwise be legal.
+fn castle_without_right(chess: &Chess, side: CastlingSide) -> Option<(Move, Chess)> {
+    let color = chess.turn();
+    if chess.castles().has(color, side) {
+        return None;
+    }
+    let rook_file = match side {
+        CastlingSide::KingSide => File::H,
+        CastlingSide::QueenSide => File::A,
+    };
+    let mut setup = chess.to_setup(EnPassantMode::Legal);
+    setup
+        .castling_rights
+        .add(Square::from_coords(rook_file, color.backrank()));
+    // An invalid castling right is dropped, so the right only survives if
+    // the king and rook are on their original squares.
+    let with_right = chess_from_setup(setup).ok()?;
+    if !with_right.castles().has(color, side) {
+        return None;
+    }
+    let m = with_right
+        .legal_moves()
+        .into_iter()
+        .find(|m| m.castling_side() == Some(side))?;
+    Some((m, with_right))
+}
+
+/// `chess` with the castling right that makes `m` legal, if `m` is castling
+/// without the castling right.
+fn with_castling_right_for(chess: &Chess, m: Move) -> Option<Chess> {
+    let (castle, with_right) = castle_without_right(chess, m.castling_side()?)?;
+    (castle == m).then_some(with_right)
 }
 
 /// Swaps the side to move like SCID's null move: the en passant square is
@@ -306,12 +367,37 @@ fn chess_from_setup(setup: Setup) -> std::result::Result<Chess, Box<PositionErro
 /// Returns [`Error::InvalidFen`] if the FEN is malformed or the position
 /// can't be played. See [`chess_from_setup`] for what is accepted.
 pub(crate) fn chess_from_fen(fen: &str) -> Result<Chess> {
+    chess_from_fen_reporting_drops(fen).map(|(chess, _)| chess)
+}
+
+/// What a FEN set but the position couldn't keep.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct DroppedFromFen {
+    /// The rook squares of castling rights that don't fit the position.
+    pub castling_rights: Bitboard,
+    /// An en passant square that no pawn could have just moved past.
+    pub ep_square: Option<Square>,
+}
+
+/// Parses a standard chess position from a FEN, like [`chess_from_fen`],
+/// and reports the castling rights and en passant square it dropped.
+pub(crate) fn chess_from_fen_reporting_drops(fen: &str) -> Result<(Chess, DroppedFromFen)> {
     let invalid = |source: Box<dyn std::error::Error + Send + Sync>| Error::InvalidFen {
         fen: fen.to_string(),
         source,
     };
-    let parsed: Fen = fen.trim().parse().map_err(|e| invalid(Box::new(e)))?;
-    chess_from_setup(parsed.into_setup()).map_err(|e| invalid(e))
+    let setup = fen
+        .trim()
+        .parse::<Fen>()
+        .map_err(|e| invalid(Box::new(e)))?
+        .into_setup();
+    let (castling_rights, ep_square) = (setup.castling_rights, setup.ep_square);
+    let chess = chess_from_setup(setup).map_err(|e| invalid(e))?;
+    let dropped = DroppedFromFen {
+        castling_rights: castling_rights & !chess.castles().castling_rights(),
+        ep_square: ep_square.filter(|_| chess.ep_square(EnPassantMode::Always).is_none()),
+    };
+    Ok((chess, dropped))
 }
 
 /// The FEN of `chess`, with an en passant square only when an en passant
@@ -386,6 +472,62 @@ mod tests {
         assert_eq!(pos.pieces().number(Square::D1), Some(1));
         assert_eq!(pos.pieces().number(Square::E1), None);
         assert_eq!(pos.pieces().number(Square::A1), None);
+    }
+
+    #[test]
+    fn castling_without_the_castling_right() {
+        // The king and rook are on their original squares, but the FEN gives
+        // White no castling rights.
+        let chess = chess_from_fen("r3k2r/8/8/8/8/8/8/R3K2R w kq - 0 1").unwrap();
+        let mut pos = ScidPosition::from_setup_position(chess).unwrap();
+        let castle = pos.castle_without_right(CastlingSide::KingSide).unwrap();
+        assert!(!pos.chess().is_legal(castle));
+        assert!(pos.can_play(castle));
+        let san = pos.play(GameMove::Move(castle)).unwrap();
+        assert_eq!(san.to_string(), "O-O");
+        assert_eq!(fen(pos.chess()), "r3k2r/8/8/8/8/8/8/R4RK1 b kq - 1 1");
+        assert_eq!(pos.pieces().number(Square::G1), Some(0));
+    }
+
+    #[test]
+    fn castling_without_the_castling_right_needs_the_rest_of_the_rules() {
+        for (fen, side) in [
+            // No rook.
+            ("4k3/8/8/8/8/8/8/4K3 w - - 0 1", CastlingSide::KingSide),
+            ("4k3/8/8/8/8/8/8/4K3 w - - 0 1", CastlingSide::QueenSide),
+            // The king isn't on its original square.
+            ("4k3/8/8/8/8/8/8/R2K3R w - - 0 1", CastlingSide::KingSide),
+            // A piece between the king and rook.
+            ("4k3/8/8/8/8/8/8/R3KB1R w - - 0 1", CastlingSide::KingSide),
+            // Through check.
+            ("4k1r1/8/8/8/8/8/8/R3K2R w - - 0 1", CastlingSide::KingSide),
+            // In check.
+            ("4r1k1/8/8/8/8/8/8/R3K2R w - - 0 1", CastlingSide::QueenSide),
+            // The castling right is still there, so the move is simply legal.
+            ("4k3/8/8/8/8/8/8/R3K2R w K - 0 1", CastlingSide::KingSide),
+        ] {
+            let chess = chess_from_fen(fen).unwrap();
+            let pos = ScidPosition::from_setup_position(chess).unwrap();
+            assert_eq!(pos.castle_without_right(side), None, "{fen} {side:?}");
+        }
+    }
+
+    #[test]
+    fn reports_what_a_fen_drops() {
+        let (_, dropped) =
+            chess_from_fen_reporting_drops("4k3/8/8/8/8/8/8/R3K3 w KQkq e3 0 1").unwrap();
+        assert_eq!(
+            dropped.castling_rights,
+            Bitboard::from(Square::H1) | Square::A8 | Square::H8
+        );
+        assert_eq!(dropped.ep_square, Some(Square::E3));
+
+        // An en passant square that a pawn just moved past is kept, even if
+        // no capture is possible.
+        let (chess, dropped) =
+            chess_from_fen_reporting_drops("4k3/8/8/8/4P3/8/8/4K3 b - e3 0 1").unwrap();
+        assert_eq!(dropped, DroppedFromFen::default());
+        assert_eq!(fen(&chess), "4k3/8/8/8/4P3/8/8/4K3 b - - 0 1");
     }
 
     #[test]
