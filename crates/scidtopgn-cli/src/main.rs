@@ -99,7 +99,13 @@ fn import_command(args: &ImportArgs) -> Result<()> {
     let mut skipped = 0u32;
     for result in PgnParser::new(&pgn) {
         match result {
-            Ok(game) => games.push(game),
+            Ok(game) => {
+                // Warnings don't stop the game from being imported.
+                for warning in &game.warnings {
+                    eprintln!("Warning: {warning}");
+                }
+                games.push(game);
+            }
             Err(e) if abort_on_error => return Err(e.into()),
             Err(e) => {
                 eprintln!("Warning: skipping {:#}", anyhow::Error::new(e));
