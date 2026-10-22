@@ -7,6 +7,7 @@ use crate::mov::{
     decode_move, GameMove, ENCODE_COMMENT, ENCODE_END_GAME, ENCODE_END_MARKER, ENCODE_NAG,
     ENCODE_START_MARKER,
 };
+use crate::pgn::PgnWarning;
 use crate::position::{chess_from_fen, fen, ScidPosition};
 use crate::Date;
 
@@ -116,6 +117,9 @@ pub struct Game {
     pub start_position: Option<Chess>,
     /// The number of half-moves in the main line.
     pub num_half_moves: u16,
+    /// Problems found while reading the game from PGN that didn't stop it
+    /// from being read. Empty for a game read from a SCID database.
+    pub warnings: Vec<PgnWarning>,
 }
 
 impl Default for Game {
@@ -144,6 +148,7 @@ impl Game {
             tags: Vec::new(),
             start_position: None,
             num_half_moves: 0,
+            warnings: Vec::new(),
         }
     }
 
@@ -165,6 +170,7 @@ impl Game {
         self.tags.clear();
         self.start_position = None;
         self.num_half_moves = 0;
+        self.warnings.clear();
     }
 
     pub fn add_tag(&mut self, name: &str, value: &str) {

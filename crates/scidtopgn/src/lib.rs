@@ -36,7 +36,7 @@ pub use mov::{
 };
 pub use namebase::{NameBase, NameEntry, NameType, NAMEBASE_MAGIC, NUM_NAME_TYPES};
 pub use nfile::NFile;
-pub use pgn::{parse_pgn, parse_single_game, PgnParser};
+pub use pgn::{parse_pgn, parse_single_game, PgnParser, PgnWarning, PgnWarningKind};
 pub use position::{PieceList, ScidPosition};
 /// The chess library that provides the rules, positions, and moves.
 pub use shakmaty;
