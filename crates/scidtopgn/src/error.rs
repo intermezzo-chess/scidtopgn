@@ -8,11 +8,36 @@ pub enum Error {
     #[error("Parse error at line {line}: {message}")]
     Parse { line: u32, message: String },
 
+    /// A PGN move that can't be read or played in its position.
+    #[error("Invalid move {san:?} at line {line}")]
+    PgnMove {
+        line: u32,
+        san: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// A game in a PGN file that failed to parse. Games are numbered from 1.
+    #[error("PGN game {number}, starting at line {line}")]
+    PgnGame {
+        number: usize,
+        line: u32,
+        #[source]
+        source: Box<Error>,
+    },
+
+    #[error("Unsupported variant: {variant}")]
+    UnsupportedVariant { variant: String },
+
     #[error("Invalid move: {move_str}")]
     InvalidMove { move_str: String },
 
     #[error("Invalid FEN: {fen}")]
-    InvalidFen { fen: String },
+    InvalidFen {
+        fen: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
 
     #[error("Buffer error: {0}")]
     Buffer(String),

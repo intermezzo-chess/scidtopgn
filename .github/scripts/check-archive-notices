@@ -12,7 +12,10 @@
 # `<name>-<version>` directory, as Cargo's registry/src/<index> does.
 #
 # Each crate must be listed as `<name> <version>` at the start of a line, and
-# its MIT license file must appear in full. Whitespace is compared loosely.
+# its MIT license file must appear in full. Whitespace is compared loosely. A
+# crate without a license file passes only when its listing ends with
+# GPL-3.0-or-later, the license of scidtopgn, and the archive's LICENSE has
+# the GPL-3.0 text.
 #
 # For the standard library, rust-std-licenses/ must hold the same
 # COPYRIGHT-library.html as <rust-docs>, the share/doc/rust directory of the
@@ -101,6 +104,10 @@ while read -r crate version rest; do
     fi
   done
   if [ -z "$license" ]; then
+    if awk -v n="$crate" -v v="$version" '$1 == n && $2 == v && $NF == "GPL-3.0-or-later" { found = 1 } END { exit !found }' "$notices" &&
+      grep -qF "Version 3, 29 June 2007" "$work/$dir/LICENSE" 2> /dev/null; then
+      continue
+    fi
     echo "No MIT license file for $crate $version in $sources. Add its notice by hand and update this script." >&2
     failures=$((failures + 1))
   elif [[ "$all" != *"$(squeeze "$license")"* ]]; then

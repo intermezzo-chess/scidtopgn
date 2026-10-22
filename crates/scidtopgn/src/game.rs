@@ -1,12 +1,13 @@
+use shakmaty::{Chess, Color, Position};
+
 use crate::bytebuf::ByteBuffer;
-use crate::common::{Color, GameResult, Piece, Square};
+use crate::common::GameResult;
 use crate::error::{Error, Result};
 use crate::mov::{
-    decode_bishop, decode_king, decode_knight, decode_pawn, decode_queen, decode_rook,
-    parse_move_byte, SimpleMove, ENCODE_COMMENT, ENCODE_END_GAME, ENCODE_END_MARKER, ENCODE_NAG,
+    decode_move, GameMove, ENCODE_COMMENT, ENCODE_END_GAME, ENCODE_END_MARKER, ENCODE_NAG,
     ENCODE_START_MARKER,
 };
-use crate::position::Board;
+use crate::position::{chess_from_fen, fen, ScidPosition};
 use crate::Date;
 
 pub const MAX_TAGS: usize = 40;
@@ -46,7 +47,9 @@ pub enum Marker {
 
 #[derive(Debug, Clone)]
 pub struct MoveNode {
-    pub move_data: SimpleMove,
+    /// The move, or `None` for a marker node.
+    pub move_data: Option<GameMove>,
+    /// The move in SAN, generated from the position before it.
     pub san: String,
     pub comment: Option<String>,
     pub nags: Vec<u8>,
@@ -67,7 +70,7 @@ impl Default for MoveNode {
 impl MoveNode {
     pub fn new() -> Self {
         MoveNode {
-            move_data: SimpleMove::new(),
+            move_data: None,
             san: String::new(),
             comment: None,
             nags: Vec::new(),
@@ -81,7 +84,7 @@ impl MoveNode {
     }
 
     pub fn is_null_move(&self) -> bool {
-        self.move_data.from == self.move_data.to
+        self.move_data == Some(GameMove::Null)
     }
 }
 
@@ -108,11 +111,11 @@ pub struct Game {
     pub first_move: Option<usize>,
     pub current_move: Option<usize>,
     pub tags: Vec<Tag>,
-    pub start_board: Option<Board>,
-    pub current_board: Board,
-    pub var_depth: u32,
+    /// The position the game starts from, or `None` for the standard
+    /// starting position.
+    pub start_position: Option<Chess>,
+    /// The number of half-moves in the main line.
     pub num_half_moves: u16,
-    pub non_standard_start: bool,
 }
 
 impl Default for Game {
@@ -139,11 +142,8 @@ impl Game {
             first_move: None,
             current_move: None,
             tags: Vec::new(),
-            start_board: None,
-            current_board: Board::std_start(),
-            var_depth: 0,
+            start_position: None,
             num_half_moves: 0,
-            non_standard_start: false,
         }
     }
 
@@ -163,11 +163,8 @@ impl Game {
         self.first_move = None;
         self.current_move = None;
         self.tags.clear();
-        self.start_board = None;
-        self.current_board = Board::std_start();
-        self.var_depth = 0;
+        self.start_position = None;
         self.num_half_moves = 0;
-        self.non_standard_start = false;
     }
 
     pub fn add_tag(&mut self, name: &str, value: &str) {
@@ -191,20 +188,32 @@ impl Game {
 
     pub fn decode_start(&mut self, buf: &mut ByteBuffer) -> Result<()> {
         self.decode_tags(buf, false)?;
+        self.decode_start_position(buf)
+    }
 
+    /// Reads the game flags and, if the game doesn't start from the standard
+    /// position, its starting FEN.
+    fn decode_start_position(&mut self, buf: &mut ByteBuffer) -> Result<()> {
         let flags = buf.get_byte()?;
-
-        self.non_standard_start = (flags & 1) != 0;
-
-        if self.non_standard_start {
-            let fen = buf.get_terminated_string()?;
-            self.start_board = Some(Board::from_fen(&fen)?);
-            self.current_board = self.start_board.clone().unwrap();
+        self.start_position = if flags & 1 != 0 {
+            Some(chess_from_fen(&buf.get_terminated_string()?)?)
         } else {
-            self.current_board = Board::std_start();
-        }
-
+            None
+        };
         Ok(())
+    }
+
+    /// The starting position with SCID's piece numbering.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidFen`] if `start_position` has more than 16
+    /// pieces of one color.
+    pub fn initial_position(&self) -> Result<ScidPosition> {
+        match &self.start_position {
+            Some(chess) => ScidPosition::from_setup_position(chess.clone()),
+            None => Ok(ScidPosition::standard()),
+        }
     }
 
     pub fn decode_tags(&mut self, buf: &mut ByteBuffer, store_tags: bool) -> Result<()> {
@@ -258,20 +267,14 @@ impl Game {
             self.skip_tags(buf)?;
         }
 
-        let game_flags = buf.get_byte()?;
-        self.non_standard_start = (game_flags & 1) != 0;
-
-        if self.non_standard_start {
-            let fen = buf.get_terminated_string()?;
-            self.start_board = Some(Board::from_fen(&fen)?);
-            self.current_board = self.start_board.clone().unwrap();
-        }
+        self.decode_start_position(buf)?;
 
         let start_node_idx = self.add_marker_node(Marker::StartMarker, None);
         self.first_move = Some(start_node_idx);
         self.current_move = Some(start_node_idx);
 
-        self.decode_variation(buf, flags, 0)?;
+        let position = self.initial_position()?;
+        self.decode_variation(buf, flags, position, 0)?;
 
         if flags & GAME_DECODE_COMMENTS != 0 {
             self.decode_comments(buf)?;
@@ -309,16 +312,29 @@ impl Game {
         idx
     }
 
-    fn decode_variation(&mut self, buf: &mut ByteBuffer, flags: u8, level: u32) -> Result<()> {
+    /// Decodes a line of moves played from `position`, with its
+    /// variations, up to the marker that ends it.
+    fn decode_variation(
+        &mut self,
+        buf: &mut ByteBuffer,
+        flags: u8,
+        mut position: ScidPosition,
+        level: u32,
+    ) -> Result<()> {
+        // The position before the last move, where its variations start.
+        let mut before_last: Option<ScidPosition> = None;
         let mut b = buf.get_byte()?;
 
         while b != ENCODE_END_GAME && b != ENCODE_END_MARKER {
             match b {
                 ENCODE_START_MARKER => {
+                    let start = before_last
+                        .clone()
+                        .ok_or_else(|| Error::Decode("Variation before any move".to_string()))?;
+                    let parent = self.current_move;
                     self.add_variation()?;
-                    self.decode_variation(buf, flags, level + 1)?;
-                    self.exit_variation()?;
-                    self.move_forward()?;
+                    self.decode_variation(buf, flags, start, level + 1)?;
+                    self.current_move = parent;
                 }
                 ENCODE_NAG => {
                     let nag = buf.get_byte()?;
@@ -335,9 +351,10 @@ impl Game {
                     }
                 }
                 _ => {
-                    let mut sm = SimpleMove::new();
-                    self.decode_move(buf, &mut sm, b)?;
-                    self.add_move_from_simple(&sm)?;
+                    let mv = decode_move(buf, &position, b)?;
+                    before_last = Some(position.clone());
+                    let san = position.play(mv)?;
+                    self.append_move(mv, san.to_string(), level == 0);
                 }
             }
 
@@ -354,76 +371,12 @@ impl Game {
         Ok(())
     }
 
-    fn decode_move(&mut self, buf: &mut ByteBuffer, sm: &mut SimpleMove, b: u8) -> Result<()> {
-        let (piece_num, move_val) = parse_move_byte(b);
-
-        sm.piece_num = piece_num;
-        sm.from = self
-            .current_board
-            .piece_list
-            .get_square(self.current_board.to_move, piece_num);
-
-        if !sm.from.is_valid() {
-            return Err(Error::Decode(format!(
-                "Invalid piece number: {}",
-                piece_num
-            )));
-        }
-
-        let board_piece = self.current_board.get_piece(sm.from);
-        let piece = match board_piece {
-            Some((p, _)) => p,
-            None => return Err(Error::Decode("No piece on square".to_string())),
-        };
-
-        sm.promote = Piece::Empty;
-        sm.captured_piece = Piece::Empty;
-        sm.captured_square = Square::Null;
-
-        match piece {
-            Piece::King => decode_king(move_val, sm)?,
-            Piece::Queen => decode_queen(buf, move_val, sm)?,
-            Piece::Rook => decode_rook(move_val, sm)?,
-            Piece::Bishop => decode_bishop(move_val, sm)?,
-            Piece::Knight => decode_knight(move_val, sm)?,
-            Piece::Pawn => decode_pawn(move_val, sm, self.current_board.to_move)?,
-            Piece::Empty => return Err(Error::Decode("Empty piece".to_string())),
-        }
-
-        if sm.to != sm.from {
-            if let Some((cap_piece, cap_color)) = self.current_board.get_piece(sm.to) {
-                if cap_color != self.current_board.to_move {
-                    sm.captured_piece = cap_piece;
-                    sm.captured_square = sm.to;
-                }
-            }
-
-            if piece == Piece::Pawn && sm.captured_piece == Piece::Empty {
-                let ep_target = self.current_board.ep_target;
-                if sm.to == ep_target.unwrap_or(Square::Null) {
-                    sm.captured_piece = Piece::Pawn;
-                    let ep_rank = sm.to.rank();
-                    let ep_file = sm.to.file();
-                    let captured_rank = if self.current_board.to_move == Color::White {
-                        ep_rank - 1
-                    } else {
-                        ep_rank + 1
-                    };
-                    sm.captured_square = Square::make(ep_file, captured_rank);
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    fn add_move_from_simple(&mut self, sm: &SimpleMove) -> Result<()> {
-        let san = self.generate_san(sm)?;
-
+    /// Adds `mv` after the current move and makes it the current move.
+    pub(crate) fn append_move(&mut self, mv: GameMove, san: String, main_line: bool) {
         let new_idx = self.moves.len();
         let mut node = MoveNode::new();
-        node.move_data = sm.clone();
-        node.san = san.clone();
+        node.move_data = Some(mv);
+        node.san = san;
 
         if let Some(current_idx) = self.current_move {
             node.prev = Some(current_idx);
@@ -432,310 +385,8 @@ impl Game {
 
         self.moves.push(node);
         self.current_move = Some(new_idx);
-
-        self.make_move_on_board(sm)?;
-        self.num_half_moves += 1;
-
-        Ok(())
-    }
-
-    pub fn make_move_on_board(&mut self, sm: &SimpleMove) -> Result<()> {
-        if sm.from == sm.to {
-            return Ok(());
-        }
-
-        let board = &mut self.current_board;
-        let color = board.to_move;
-
-        if let Some((cap_piece, cap_color)) = board.get_piece(sm.captured_square) {
-            if cap_color != color {
-                board.remove_from_board(sm.captured_square);
-                board.piece_list.remove_piece(sm.captured_square, cap_color);
-                board.material[crate::common::piece_make(cap_color, cap_piece) as usize] -= 1;
-            }
-        }
-
-        if let Some((piece, _)) = board.get_piece(sm.from) {
-            board.remove_from_board(sm.from);
-
-            if sm.promote != Piece::Empty {
-                board.material[crate::common::piece_make(color, piece) as usize] -= 1;
-                board.material[crate::common::piece_make(color, sm.promote) as usize] += 1;
-                board.squares[sm.to.to_index()] = Some((sm.promote, color));
-            } else {
-                board.add_to_board(piece, color, sm.to);
-            }
-
-            board.piece_list.move_piece(sm.from, sm.to, color);
-
-            if piece == Piece::King {
-                let diff = sm.to.to_index() as i32 - sm.from.to_index() as i32;
-                if diff == 2 {
-                    let rook_from = Square::make(7, sm.from.rank());
-                    let rook_to = Square::make(5, sm.from.rank());
-                    board.remove_from_board(rook_from);
-                    board.add_to_board(Piece::Rook, color, rook_to);
-                    board.piece_list.move_piece(rook_from, rook_to, color);
-                } else if diff == -2 {
-                    let rook_from = Square::make(0, sm.from.rank());
-                    let rook_to = Square::make(3, sm.from.rank());
-                    board.remove_from_board(rook_from);
-                    board.add_to_board(Piece::Rook, color, rook_to);
-                    board.piece_list.move_piece(rook_from, rook_to, color);
-                }
-            }
-
-            if piece == Piece::Pawn
-                && sm.captured_piece == Piece::Empty
-                && sm.captured_square != sm.to
-            {
-                let ep_rank = sm.to.rank();
-                let from_rank = sm.from.rank();
-                if (ep_rank as i8 - from_rank as i8).abs() == 2 {
-                    let ep_rank = if color == Color::White {
-                        ep_rank - 1
-                    } else {
-                        ep_rank + 1
-                    };
-                    board.ep_target = Some(Square::make(sm.to.file(), ep_rank));
-                } else {
-                    board.ep_target = None;
-                }
-            } else {
-                board.ep_target = None;
-            }
-        }
-
-        board.to_move = board.to_move.flip();
-        if color == Color::White {
-            board.fullmove_number += 1;
-        }
-
-        Ok(())
-    }
-
-    fn generate_san(&self, sm: &SimpleMove) -> Result<String> {
-        let piece_opt = self.current_board.get_piece(sm.from);
-        let piece = match piece_opt {
-            Some((p, _)) => p,
-            None => return Err(Error::Decode("No piece".to_string())),
-        };
-
-        let mut san = String::new();
-
-        if piece == Piece::King {
-            let diff = sm.to.to_index() as i32 - sm.from.to_index() as i32;
-            if diff == 2 {
-                let mut result = "O-O".to_string();
-                let mut test_board = self.current_board.clone();
-                self.apply_move_to_board(&mut test_board, sm)?;
-                if test_board.is_in_check(test_board.to_move) {
-                    if self.is_checkmate(&test_board) {
-                        result.push('#');
-                    } else {
-                        result.push('+');
-                    }
-                }
-                return Ok(result);
-            } else if diff == -2 {
-                let mut result = "O-O-O".to_string();
-                let mut test_board = self.current_board.clone();
-                self.apply_move_to_board(&mut test_board, sm)?;
-                if test_board.is_in_check(test_board.to_move) {
-                    if self.is_checkmate(&test_board) {
-                        result.push('#');
-                    } else {
-                        result.push('+');
-                    }
-                }
-                return Ok(result);
-            }
-        }
-
-        if piece != Piece::Pawn {
-            san.push(piece.to_char());
-
-            let mut ambiguous_file = false;
-            let mut ambiguous_rank = false;
-            let mut ambiguous_other = false;
-
-            for i in
-                0..self.current_board.piece_list.count[self.current_board.to_move as usize] as u8
-            {
-                let other_sq = self
-                    .current_board
-                    .piece_list
-                    .get_square(self.current_board.to_move, i);
-                if other_sq == sm.from || other_sq == Square::Null {
-                    continue;
-                }
-
-                if let Some((other_piece, other_color)) = self.current_board.get_piece(other_sq) {
-                    if other_color != self.current_board.to_move || other_piece != piece {
-                        continue;
-                    }
-
-                    if self.can_piece_reach(other_piece, other_sq, sm.to)
-                        && self.current_board.is_path_clear(other_sq, sm.to)
-                    {
-                        if other_sq.file() != sm.from.file() {
-                            ambiguous_file = true;
-                        } else if other_sq.rank() != sm.from.rank() {
-                            ambiguous_rank = true;
-                        } else {
-                            ambiguous_other = true;
-                        }
-                    }
-                }
-            }
-
-            if ambiguous_other || (ambiguous_file && ambiguous_rank) {
-                san.push(sm.from.file_char());
-                san.push(sm.from.rank_char());
-            } else if ambiguous_file {
-                san.push(sm.from.file_char());
-            } else if ambiguous_rank {
-                san.push(sm.from.rank_char());
-            }
-        }
-
-        let is_capture = sm.captured_piece != Piece::Empty
-            || (piece == Piece::Pawn && sm.from.file() != sm.to.file());
-
-        if is_capture {
-            if piece == Piece::Pawn {
-                san.push(sm.from.file_char());
-            }
-            san.push('x');
-        }
-
-        if piece == Piece::Pawn && sm.promote != Piece::Empty {
-            san.push_str(&sm.to.to_string());
-            san.push('=');
-            san.push(sm.promote.to_char());
-        } else {
-            san.push_str(&sm.to.to_string());
-        }
-
-        let mut test_board = self.current_board.clone();
-        self.apply_move_to_board(&mut test_board, sm)?;
-        if test_board.is_in_check(test_board.to_move) {
-            if self.is_checkmate(&test_board) {
-                san.push('#');
-            } else {
-                san.push('+');
-            }
-        }
-
-        Ok(san)
-    }
-
-    fn apply_move_to_board(&self, board: &mut Board, sm: &SimpleMove) -> Result<()> {
-        if sm.from == sm.to {
-            return Ok(());
-        }
-
-        let color = board.to_move;
-
-        if let Some((cap_piece, cap_color)) = board.get_piece(sm.captured_square) {
-            if cap_color != color {
-                board.remove_from_board(sm.captured_square);
-                board.piece_list.remove_piece(sm.captured_square, cap_color);
-                board.material[crate::common::piece_make(cap_color, cap_piece) as usize] -= 1;
-            }
-        }
-
-        if let Some((piece, _)) = board.get_piece(sm.from) {
-            board.remove_from_board(sm.from);
-
-            if sm.promote != Piece::Empty {
-                board.material[crate::common::piece_make(color, piece) as usize] -= 1;
-                board.material[crate::common::piece_make(color, sm.promote) as usize] += 1;
-                board.squares[sm.to.to_index()] = Some((sm.promote, color));
-            } else {
-                board.add_to_board(piece, color, sm.to);
-            }
-
-            board.piece_list.move_piece(sm.from, sm.to, color);
-
-            if piece == Piece::King {
-                let diff = sm.to.to_index() as i32 - sm.from.to_index() as i32;
-                if diff == 2 {
-                    let rook_from = Square::make(7, sm.from.rank());
-                    let rook_to = Square::make(5, sm.from.rank());
-                    board.remove_from_board(rook_from);
-                    board.add_to_board(Piece::Rook, color, rook_to);
-                    board.piece_list.move_piece(rook_from, rook_to, color);
-                } else if diff == -2 {
-                    let rook_from = Square::make(0, sm.from.rank());
-                    let rook_to = Square::make(3, sm.from.rank());
-                    board.remove_from_board(rook_from);
-                    board.add_to_board(Piece::Rook, color, rook_to);
-                    board.piece_list.move_piece(rook_from, rook_to, color);
-                }
-            }
-        }
-
-        board.to_move = board.to_move.flip();
-
-        Ok(())
-    }
-
-    fn is_checkmate(&self, board: &Board) -> bool {
-        if !board.is_in_check(board.to_move) {
-            return false;
-        }
-
-        let color = board.to_move;
-        let king_sq = board.get_king_square(color);
-
-        for king_file_delta in -1i8..=1 {
-            for king_rank_delta in -1i8..=1 {
-                if king_file_delta == 0 && king_rank_delta == 0 {
-                    continue;
-                }
-
-                let new_file = king_sq.file() as i8 + king_file_delta;
-                let new_rank = king_sq.rank() as i8 + king_rank_delta;
-
-                if !(0..=7).contains(&new_file) || !(0..=7).contains(&new_rank) {
-                    continue;
-                }
-
-                let to_sq = Square::make(new_file as u8, new_rank as u8);
-
-                if let Some((_, sq_color)) = board.get_piece(to_sq) {
-                    if sq_color == color {
-                        continue;
-                    }
-                }
-
-                let mut test_board = board.clone();
-                test_board.remove_from_board(king_sq);
-                test_board.add_to_board(Piece::King, color, to_sq);
-                test_board.piece_list.move_piece(king_sq, to_sq, color);
-
-                if !test_board.is_attacked(to_sq, color.flip()) {
-                    return false;
-                }
-            }
-        }
-
-        true
-    }
-
-    fn can_piece_reach(&self, piece: Piece, from: Square, to: Square) -> bool {
-        let rank_diff = (to.rank() as i8 - from.rank() as i8).abs();
-        let file_diff = (to.file() as i8 - from.file() as i8).abs();
-
-        match piece {
-            Piece::Knight => rank_diff == 2 && file_diff == 1 || rank_diff == 1 && file_diff == 2,
-            Piece::Bishop => rank_diff == file_diff && rank_diff > 0,
-            Piece::Rook => rank_diff == 0 || file_diff == 0,
-            Piece::Queen => rank_diff == file_diff || rank_diff == 0 || file_diff == 0,
-            Piece::King => rank_diff <= 1 && file_diff <= 1,
-            Piece::Pawn => false,
-            Piece::Empty => false,
+        if main_line {
+            self.num_half_moves += 1;
         }
     }
 
@@ -761,44 +412,7 @@ impl Game {
 
         self.moves[current_idx].num_variations += 1;
         self.current_move = Some(start_idx);
-        self.var_depth += 1;
 
-        Ok(())
-    }
-
-    fn exit_variation(&mut self) -> Result<()> {
-        let current_idx = self
-            .current_move
-            .ok_or(Error::Decode("No current move".to_string()))?;
-
-        let var_start = loop {
-            let node = &self.moves[current_idx];
-            if node.marker == Marker::StartMarker && node.var_parent.is_some() {
-                break current_idx;
-            }
-            let prev = node
-                .prev
-                .ok_or(Error::Decode("No prev in variation".to_string()))?;
-            self.current_move = Some(prev);
-        };
-
-        let var_parent = self.moves[var_start]
-            .var_parent
-            .ok_or(Error::Decode("No var parent".to_string()))?;
-        self.current_move = Some(var_parent);
-        self.var_depth -= 1;
-
-        Ok(())
-    }
-
-    fn move_forward(&mut self) -> Result<()> {
-        let current_idx = self
-            .current_move
-            .ok_or(Error::Decode("No current move".to_string()))?;
-        let next = self.moves[current_idx]
-            .next
-            .ok_or(Error::Decode("No next move".to_string()))?;
-        self.current_move = Some(next);
         Ok(())
     }
 
@@ -931,6 +545,8 @@ impl Game {
             "Opening",
             "Variation",
             "EventDate",
+            "SetUp",
+            "FEN",
         ];
 
         for tag in &self.tags {
@@ -939,13 +555,25 @@ impl Game {
             }
         }
 
+        if let Some(ref start) = self.start_position {
+            pgn.push_str("[SetUp \"1\"]\n");
+            pgn.push_str(&format!("[FEN \"{}\"]\n", fen(start)));
+        }
+
         pgn.push('\n');
 
         if let Some(start_idx) = self.first_move {
             let mut lines: Vec<String> = Vec::new();
             let mut current_line = String::new();
-            let mut move_num = 1;
-            let mut is_white_move = true;
+            // A FEN's move number can be u32::MAX, so count in u64.
+            let (mut move_num, mut is_white_move) = match self.start_position {
+                Some(ref start) => (
+                    u64::from(start.fullmoves().get()),
+                    start.turn() == Color::White,
+                ),
+                None => (1, true),
+            };
+            let mut first_move = true;
 
             let mut current_idx = start_idx;
             while let Some(next_idx) = self.moves[current_idx].next {
@@ -961,7 +589,10 @@ impl Game {
 
                 if is_white_move {
                     token.push_str(&format!("{}. ", move_num));
+                } else if first_move {
+                    token.push_str(&format!("{}... ", move_num));
                 }
+                first_move = false;
 
                 token.push_str(&self.moves[current_idx].san);
 

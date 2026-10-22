@@ -3,11 +3,11 @@ mod args;
 use std::fs::File;
 use std::io::{BufWriter, Read, Write};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
 
 use args::{Cli, Command, ExportArgs, ImportArgs};
-use scidtopgn::{parse_pgn, Database};
+use scidtopgn::{Database, PgnParser};
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -59,11 +59,13 @@ fn export_command(args: &ExportArgs) -> Result<()> {
     let mut exported = 0u32;
     for i in 0..total {
         // Skip logically deleted games, matching the reference converter.
-        if db.get_entry(i).map_or(true, |e| e.get_delete_flag()) {
+        if db.get_entry(i).is_none_or(|e| e.get_delete_flag()) {
             continue;
         }
 
-        let game = db.get_game(i)?;
+        let game = db
+            .get_game(i)
+            .with_context(|| format!("Failed to read game {}", i + 1))?;
         let pgn = game.to_pgn();
         writeln!(writer, "{}", pgn)?;
         exported += 1;
@@ -91,16 +93,20 @@ fn import_command(args: &ImportArgs) -> Result<()> {
 
     let abort_on_error = args.on_error == "abort";
 
-    let games = match parse_pgn(&pgn) {
-        Ok(g) => g,
-        Err(e) if abort_on_error => {
-            anyhow::bail!("Parse error: {}", e);
+    // Parse every game before touching the database, so that aborting on a
+    // parse error leaves it unchanged.
+    let mut games = Vec::new();
+    let mut skipped = 0u32;
+    for result in PgnParser::new(&pgn) {
+        match result {
+            Ok(game) => games.push(game),
+            Err(e) if abort_on_error => return Err(e.into()),
+            Err(e) => {
+                eprintln!("Warning: skipping {:#}", anyhow::Error::new(e));
+                skipped += 1;
+            }
         }
-        Err(e) => {
-            eprintln!("Warning: Parse error (skipping all): {}", e);
-            vec![]
-        }
-    };
+    }
 
     if args.verbose {
         eprintln!("Parsed {} games from PGN", games.len());
@@ -123,7 +129,6 @@ fn import_command(args: &ImportArgs) -> Result<()> {
 
     let initial_count = db.num_games();
     let mut added = 0u32;
-    let mut skipped = 0u32;
 
     for game in &games {
         match db.add_game(game) {
@@ -139,7 +144,7 @@ fn import_command(args: &ImportArgs) -> Result<()> {
             }
         }
 
-        if args.verbose && added % 100 == 0 && added > 0 {
+        if args.verbose && added.is_multiple_of(100) && added > 0 {
             eprintln!("Imported {} games...", added);
         }
     }

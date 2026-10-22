@@ -46,6 +46,10 @@ reference the issue the PR addresses.
   `mov.rs`, `position.rs`, and `private/decoding.rs`. `database.rs` ties the
   three files together. See [SCID_DATABASE_FORMAT.md](SCID_DATABASE_FORMAT.md)
   for the binary layout.
+- **Chess rules come from [shakmaty](https://crates.io/crates/shakmaty).**
+  Legality, SAN, check and mate, and FEN all use it. `position.rs` adds only
+  SCID's piece numbering to a shakmaty position, and `mov.rs` only SCID's move
+  encoding. Don't add chess rules to the crate.
 - **The C++ converter in `scid-cpp/` is the behavioral reference.** It is built
   from the original SCID encoding and decoding sources. When there is a
   question about how SCID or PGN import and export should behave, such as
@@ -57,10 +61,23 @@ reference the issue the PR addresses.
 
 ## Test data
 
-The fixtures in `tests/data/` (`one` and `five`, each with `.si4`, `.sn4`,
-`.sg4`, and a matching `.pgn`) are shared by both crates' integration tests.
-`.gitignore` excludes `*.si4`, `*.sn4`, and `*.sg4` everywhere, so new fixtures
-must be added with `git add -f`.
+The fixtures in `tests/data/` (`one`, `five`, and `edge`, each with `.si4`,
+`.sn4`, `.sg4`, and a matching `.pgn`) are shared by both crates' integration
+tests. `.gitignore` excludes `*.si4`, `*.sn4`, and `*.sg4` everywhere, so new
+fixtures must be added with `git add -f`.
+
+`edge` covers variations, null moves, promotions, en passant, castling, and
+games that start from a FEN. The C++ reference converter wrote it from
+`edge.pgn`, so the tests compare the Rust reader and writer with SCID's own
+encoding. To change it:
+
+1. Edit `edge.pgn`.
+2. Delete `edge.si4`, `edge.sn4`, and `edge.sg4`.
+3. From the repository root, run the converter (see below) as
+   `scidtopgn tests/data/edge tests/data/edge.pgn`.
+4. Update the expected movetext in `crates/scidtopgn/tests/test_interop.rs`.
+   It is python-chess's export of `edge.pgn`, with variations and without
+   line wrapping.
 
 Tests must not modify the tracked fixtures. To exercise an altered database,
 such as one with a deleted game or a corrupted record, copy the fixture into a

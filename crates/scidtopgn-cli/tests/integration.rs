@@ -316,3 +316,262 @@ fn test_cli_export_all_deleted() {
         "Export should not modify the database"
     );
 }
+
+/// The main lines of the games in `pgn`, in SAN.
+fn main_lines(pgn: &str) -> Vec<Vec<String>> {
+    scidtopgn::parse_pgn(pgn)
+        .expect("PGN should parse")
+        .iter()
+        .map(|game| {
+            let mut sans = Vec::new();
+            let mut idx = game.first_move;
+            while let Some(i) = idx {
+                if game.moves[i].move_data.is_some() {
+                    sans.push(game.moves[i].san.clone());
+                }
+                idx = game.moves[i].next;
+            }
+            sans
+        })
+        .collect()
+}
+
+#[test]
+fn test_cli_import_five_games() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let db_path = temp.path().join("five");
+
+    let output = cli()
+        .args(["import", "tests/data/five.pgn", "--on-error", "abort", "-o"])
+        .arg(&db_path)
+        .output()
+        .expect("Failed to run CLI");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let exported = cli().arg(&db_path).output().expect("Failed to run CLI");
+    let source = std::fs::read_to_string(get_workspace_root().join("tests/data/five.pgn"))
+        .expect("Failed to read five.pgn");
+    let exported = String::from_utf8_lossy(&exported.stdout);
+    assert_eq!(main_lines(&exported), main_lines(&source));
+    assert_eq!(main_lines(&exported).len(), 5);
+}
+
+const VALID_GAME: &str = "[Event \"Valid\"]\n[Result \"1-0\"]\n\n1. e4 e5 1-0\n";
+const ILLEGAL_GAME: &str = "[Event \"Illegal\"]\n[Result \"1-0\"]\n\n1. e4 e5 2. Ke3 1-0\n";
+
+fn write_mixed_pgn(dir: &Path) -> PathBuf {
+    let path = dir.join("mixed.pgn");
+    std::fs::write(&path, [VALID_GAME, ILLEGAL_GAME, VALID_GAME].join("\n"))
+        .expect("Failed to write PGN");
+    path
+}
+
+#[test]
+fn test_cli_import_skips_invalid_games() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let pgn = write_mixed_pgn(temp.path());
+    let db_path = temp.path().join("mixed");
+
+    let output = cli()
+        .arg("import")
+        .arg(&pgn)
+        .arg("-o")
+        .arg(&db_path)
+        .arg("--verbose")
+        .output()
+        .expect("Failed to run CLI");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+    assert!(
+        stderr.contains("Warning: skipping PGN game 2, starting at line 6"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("\"Ke3\""), "{stderr}");
+    assert!(stderr.contains("2 games imported, 1 skipped"), "{stderr}");
+
+    let db = scidtopgn::Database::open(&db_path).expect("Failed to open database");
+    assert_eq!(db.num_games(), 2);
+}
+
+#[test]
+fn test_cli_import_aborts_on_invalid_game() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let pgn = write_mixed_pgn(temp.path());
+    let db_path = temp.path().join("mixed");
+
+    let output = cli()
+        .arg("import")
+        .arg(&pgn)
+        .arg("-o")
+        .arg(&db_path)
+        .args(["--on-error", "abort"])
+        .output()
+        .expect("Failed to run CLI");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "{stderr}");
+    assert!(stderr.contains("PGN game 2"), "{stderr}");
+    assert!(
+        !db_path.with_extension("si4").exists(),
+        "an aborted import shouldn't create the database"
+    );
+}
+
+#[test]
+fn test_cli_export_names_corrupt_game() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let db = copy_with_deleted(temp.path(), "one", &[]);
+
+    // Replace 1.e4 (piece 12, value 15) with the illegal exf3.
+    let offset = scidtopgn::Database::open(&db)
+        .expect("Failed to open database")
+        .get_entry(0)
+        .expect("one has a game")
+        .get_offset() as usize;
+    let sg4 = db.with_extension("sg4");
+    let mut bytes = std::fs::read(&sg4).expect("Failed to read .sg4");
+    let mut record = scidtopgn::ByteBuffer::from_slice(&bytes[offset..]);
+    scidtopgn::private::skip_tags(&mut record).expect("Failed to skip tags");
+    // The flags byte comes before the first move.
+    let first_move = offset + record.position() + 1;
+    assert_eq!(bytes[first_move], 0xCF, "one starts with 1.e4");
+    bytes[first_move] = 0xC2;
+    std::fs::write(&sg4, bytes).expect("Failed to write .sg4");
+
+    let output = cli().arg(&db).output().expect("Failed to run CLI");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "{stderr}");
+    assert!(stderr.contains("Failed to read game 1"), "{stderr}");
+    assert!(stderr.contains("invalid move byte 0xc2"), "{stderr}");
+}
+
+/// Imports `pgn` with `--verbose` and returns the database and stderr.
+fn import_pgn(dir: &Path, pgn: &str) -> (PathBuf, String) {
+    let pgn_path = dir.join("input.pgn");
+    std::fs::write(&pgn_path, pgn).expect("Failed to write PGN");
+    let db_path = dir.join("imported");
+    let output = cli()
+        .arg("import")
+        .arg(&pgn_path)
+        .arg("-o")
+        .arg(&db_path)
+        .arg("--verbose")
+        .output()
+        .expect("Failed to run CLI");
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    assert!(output.status.success(), "{stderr}");
+    (db_path, stderr)
+}
+
+fn imported_events(db_path: &Path) -> Vec<String> {
+    let mut db = scidtopgn::Database::open(db_path).expect("Failed to open database");
+    db.games()
+        .map(|game| game.expect("Failed to read game").event)
+        .collect()
+}
+
+#[test]
+fn test_cli_import_keeps_game_after_unterminated_tag() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let pgn =
+        "[Event \"Broken]\n\n1. d4 d5 *\n\n[Event \"Good\"]\n[Result \"1-0\"]\n\n1. e4 e5 1-0\n";
+    let (db_path, stderr) = import_pgn(temp.path(), pgn);
+    assert!(stderr.contains("Warning: skipping PGN game 1"), "{stderr}");
+    assert!(stderr.contains("1 games imported, 1 skipped"), "{stderr}");
+    assert_eq!(imported_events(&db_path), ["Good"]);
+}
+
+#[test]
+fn test_cli_import_recovers_at_indented_tags() {
+    for indent in ["  ", "\t"] {
+        let temp = TempDir::new().expect("Failed to create temp dir");
+        let pgn = [
+            format!("{indent}[Event \"First\"]\n\n1. e4 e5 1-0\n"),
+            format!("{indent}[Event \"Illegal\"]\n\n1. Ke3 *\n"),
+            format!("{indent}[Event \"Last\"]\n{indent}[Result \"1-0\"]\n\n1. d4 d5 1-0\n"),
+        ]
+        .join("\n");
+        let (db_path, stderr) = import_pgn(temp.path(), &pgn);
+        assert!(stderr.contains("Warning: skipping PGN game 2"), "{stderr}");
+        assert!(stderr.contains("2 games imported, 1 skipped"), "{stderr}");
+        assert_eq!(imported_events(&db_path), ["First", "Last"]);
+    }
+}
+
+#[test]
+fn test_cli_import_recovers_past_line_comments() {
+    for comment in ["; brace in a line comment: {", "% note {"] {
+        let temp = TempDir::new().expect("Failed to create temp dir");
+        let pgn = format!(
+            "[Event \"Bad\"]\n\n1. Ke3 *\n{comment}\n\n[Event \"Good\"]\n[Result \"1-0\"]\n\n1. e4 e5 1-0\n"
+        );
+        let (db_path, stderr) = import_pgn(temp.path(), &pgn);
+        assert!(stderr.contains("Warning: skipping PGN game 1"), "{stderr}");
+        assert!(stderr.contains("1 games imported, 1 skipped"), "{stderr}");
+        assert_eq!(imported_events(&db_path), ["Good"]);
+    }
+}
+
+#[test]
+fn test_cli_import_accepts_tag_pairs_across_lines() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let pgn_path = temp.path().join("split.pgn");
+    std::fs::write(
+        &pgn_path,
+        "[Event\r\n \"Good\"]\r\n[Result \"1-0\"\r\n]\r\n\r\n1. e4 e5 1-0\r\n",
+    )
+    .expect("Failed to write PGN");
+    let db_path = temp.path().join("split");
+    let output = cli()
+        .arg("import")
+        .arg(&pgn_path)
+        .arg("-o")
+        .arg(&db_path)
+        .args(["--on-error", "abort"])
+        .output()
+        .expect("Failed to run CLI");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(imported_events(&db_path), ["Good"]);
+    let mut db = scidtopgn::Database::open(&db_path).expect("Failed to open database");
+    assert_eq!(
+        db.get_game(0).expect("Failed to read game").result,
+        scidtopgn::GameResult::White
+    );
+}
+
+#[test]
+fn test_cli_import_accepts_delimiters_attached_to_moves() {
+    let pgn = "[Event \"A\"]\n\n1. e4; comment\n e5 *\n\n[Event \"B\"]\n\n1. d4$1 d5*\n";
+    for mode in ["skip", "abort"] {
+        let temp = TempDir::new().expect("Failed to create temp dir");
+        let pgn_path = temp.path().join("adjacent.pgn");
+        std::fs::write(&pgn_path, pgn).expect("Failed to write PGN");
+        let db_path = temp.path().join("adjacent");
+        let output = cli()
+            .arg("import")
+            .arg(&pgn_path)
+            .arg("-o")
+            .arg(&db_path)
+            .args(["--on-error", mode])
+            .output()
+            .expect("Failed to run CLI");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{mode}: {stderr}");
+        assert!(!stderr.contains("Warning"), "{mode}: {stderr}");
+        let exported = cli().arg(&db_path).output().expect("Failed to run CLI");
+        assert_eq!(
+            main_lines(&String::from_utf8_lossy(&exported.stdout)),
+            [["e4", "e5"], ["d4", "d5"]],
+            "{mode}"
+        );
+    }
+}

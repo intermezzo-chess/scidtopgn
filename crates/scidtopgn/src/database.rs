@@ -3,17 +3,14 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use crate::bytebuf::ByteBuffer;
-use crate::common::{Piece, Square};
 use crate::error::{Error, Result};
-use crate::game::{Game, GAME_DECODE_ALL};
+use crate::game::{Game, Marker, GAME_DECODE_ALL};
 use crate::gfile::GFile;
 use crate::index::{Index, IndexEntry};
-use crate::mov::{
-    encode_bishop, encode_king, encode_knight, encode_pawn, encode_queen, encode_rook,
-};
+use crate::mov::encode_move;
 use crate::namebase::NameType;
 use crate::nfile::NFile;
-use crate::position::Board;
+use crate::position::{fen, ScidPosition};
 use crate::Date;
 
 pub struct Database {
@@ -155,6 +152,7 @@ impl Database {
         let mut entry = IndexEntry::new();
         entry.set_offset(offset);
         entry.set_length(encoded_data.len() as u32);
+        entry.set_start_flag(game.start_position.is_some());
 
         let nb = self.nfile.namebase_mut();
 
@@ -215,21 +213,16 @@ impl Database {
 
         buf.put_byte(0)?;
 
-        let mut flags: u8 = 0;
-        if game.non_standard_start {
-            flags |= 1;
-        }
-        buf.put_byte(flags)?;
-
-        if game.non_standard_start {
-            if let Some(ref board) = game.start_board {
-                let fen = board.to_fen();
-                buf.put_terminated_string(&fen)?;
+        match game.start_position {
+            Some(ref start) => {
+                buf.put_byte(1)?;
+                buf.put_terminated_string(&fen(start))?;
             }
+            None => buf.put_byte(0)?,
         }
 
         if let Some(start_idx) = game.first_move {
-            Self::encode_moves(&mut buf, game, start_idx)?;
+            Self::encode_moves(&mut buf, game, start_idx, game.initial_position()?)?;
         }
 
         buf.put_byte(crate::mov::ENCODE_END_GAME)?;
@@ -261,13 +254,15 @@ impl Database {
         Ok(())
     }
 
-    fn encode_moves(buf: &mut ByteBuffer, game: &Game, start_idx: usize) -> Result<()> {
+    /// Encodes the line that starts at `start_idx`, played from `position`,
+    /// with its variations.
+    fn encode_moves(
+        buf: &mut ByteBuffer,
+        game: &Game,
+        start_idx: usize,
+        mut position: ScidPosition,
+    ) -> Result<()> {
         let mut current_idx = Some(start_idx);
-        let mut board = if game.non_standard_start {
-            game.start_board.clone().unwrap_or_else(Board::std_start)
-        } else {
-            Board::std_start()
-        };
 
         while let Some(idx) = current_idx {
             if idx >= game.moves.len() {
@@ -276,72 +271,16 @@ impl Database {
 
             let node = &game.moves[idx];
 
-            match node.marker {
-                crate::game::Marker::EndMarker | crate::game::Marker::EndGame => {
-                    break;
-                }
-                crate::game::Marker::StartMarker => {}
-                crate::game::Marker::NoMarker => {}
+            if matches!(node.marker, Marker::EndMarker | Marker::EndGame) {
+                break;
             }
 
-            let sm = &node.move_data;
-            if sm.from != sm.to {
-                let piece = board
-                    .get_piece(sm.from)
-                    .map(|(p, _)| p)
-                    .unwrap_or(Piece::Empty);
-
-                match piece {
-                    Piece::King => encode_king(buf, sm)?,
-                    Piece::Queen => encode_queen(buf, sm)?,
-                    Piece::Rook => encode_rook(buf, sm)?,
-                    Piece::Bishop => encode_bishop(buf, sm)?,
-                    Piece::Knight => encode_knight(buf, sm)?,
-                    Piece::Pawn => encode_pawn(buf, sm)?,
-                    Piece::Empty => {}
-                }
-
-                let color = board.to_move;
-
-                if sm.captured_square.is_valid() {
-                    if let Some((_cap_piece, cap_color)) = board.get_piece(sm.captured_square) {
-                        if cap_color != color {
-                            board.remove_from_board(sm.captured_square);
-                            board.piece_list.remove_piece(sm.captured_square, cap_color);
-                        }
-                    }
-                }
-
-                if let Some((_, _)) = board.get_piece(sm.from) {
-                    board.remove_from_board(sm.from);
-
-                    if sm.promote != Piece::Empty {
-                        board.add_to_board(sm.promote, color, sm.to);
-                    } else {
-                        board.add_to_board(piece, color, sm.to);
-                    }
-
-                    board.piece_list.move_piece(sm.from, sm.to, color);
-
-                    if piece == Piece::King {
-                        let diff = sm.to.to_index() as i32 - sm.from.to_index() as i32;
-                        if diff == 2 {
-                            let rook_from = Square::make(7, sm.from.rank());
-                            let rook_to = Square::make(5, sm.from.rank());
-                            board.remove_from_board(rook_from);
-                            board.add_to_board(Piece::Rook, color, rook_to);
-                            board.piece_list.move_piece(rook_from, rook_to, color);
-                        } else if diff == -2 {
-                            let rook_from = Square::make(0, sm.from.rank());
-                            let rook_to = Square::make(3, sm.from.rank());
-                            board.remove_from_board(rook_from);
-                            board.add_to_board(Piece::Rook, color, rook_to);
-                            board.piece_list.move_piece(rook_from, rook_to, color);
-                        }
-                    }
-                }
-
-                board.to_move = board.to_move.flip();
+            // A variation replaces this node's move, so it starts from the
+            // position before it.
+            let before = position.clone();
+            if let Some(mv) = node.move_data {
+                encode_move(buf, &position, mv)?;
+                position.play(mv)?;
             }
 
             for nag in &node.nags {
@@ -353,9 +292,9 @@ impl Database {
                 buf.put_byte(crate::mov::ENCODE_COMMENT)?;
             }
 
-            if let Some(var_child) = node.var_child {
+            for var_start in Self::variations(game, idx) {
                 buf.put_byte(crate::mov::ENCODE_START_MARKER)?;
-                Self::encode_moves(buf, game, var_child)?;
+                Self::encode_moves(buf, game, var_start, before.clone())?;
                 buf.put_byte(crate::mov::ENCODE_END_MARKER)?;
             }
 
@@ -363,6 +302,22 @@ impl Database {
         }
 
         Ok(())
+    }
+
+    /// The start markers of the move at `idx`'s variations, in order. A
+    /// start marker's `var_child` links to the next variation of the same
+    /// move.
+    fn variations(game: &Game, idx: usize) -> impl Iterator<Item = usize> + '_ {
+        let node = &game.moves[idx];
+        let first = if node.marker == Marker::StartMarker {
+            None
+        } else {
+            node.var_child
+        };
+        let valid = move |idx: &usize| *idx < game.moves.len();
+        std::iter::successors(first.filter(valid), move |&start| {
+            game.moves[start].var_child.filter(valid)
+        })
     }
 
     fn encode_comments(&self, buf: &mut ByteBuffer, game: &Game) -> Result<()> {
@@ -397,8 +352,8 @@ impl Database {
                 buf.put_terminated_string(comment)?;
             }
 
-            if let Some(var_child) = node.var_child {
-                Self::encode_comments_recursive(buf, game, var_child)?;
+            for var_start in Self::variations(game, idx) {
+                Self::encode_comments_recursive(buf, game, var_start)?;
             }
 
             current_idx = node.next;
