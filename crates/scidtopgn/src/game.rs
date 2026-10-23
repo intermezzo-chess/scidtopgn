@@ -602,10 +602,12 @@ impl Game {
 
                 token.push_str(&self.moves[current_idx].san);
 
-                if !self.moves[current_idx].nags.is_empty() {
-                    for &nag in &self.moves[current_idx].nags {
-                        token.push(' ');
-                        token.push_str(nag_to_symbol(nag));
+                // NAG 0 means no annotation; SCID writes nothing for it.
+                for &nag in self.moves[current_idx].nags.iter().filter(|&&nag| nag != 0) {
+                    token.push(' ');
+                    match nag_to_symbol(nag) {
+                        "" => token.push_str(&format!("${nag}")),
+                        symbol => token.push_str(symbol),
                     }
                 }
 
@@ -647,6 +649,13 @@ impl Game {
     }
 }
 
+/// The symbol PGN export writes for `nag`, or `""` if it is written as
+/// `$n`.
+///
+/// These are the symbols SCID's converter writes (`evalNagsRegular` in
+/// `scid-cpp/scid/nagtext.h`) that both SCID and this crate read back as
+/// the same NAG. SCID writes other NAGs as symbols it can't read back, such
+/// as `→` for $40, so this crate writes them as `$n`.
 pub fn nag_to_symbol(nag: u8) -> &'static str {
     match nag {
         1 => "!",
@@ -656,23 +665,17 @@ pub fn nag_to_symbol(nag: u8) -> &'static str {
         5 => "!?",
         6 => "?!",
         10 => "=",
-        13 => "∞",
-        14 => "⩲",
-        15 => "⩱",
-        16 => "±",
-        17 => "∓",
-        18 => "+−",
-        19 => "−+",
-        22 => "⨀",
-        26 => "⟳",
-        36 => "↑",
-        40 => "⇗",
-        44 => "↮",
-        132 => "⇆",
-        136 => "⨁",
-        140 => "∆",
-        142 => "□",
-        145 => "RR",
+        13 => "~",
+        14 => "+=",
+        15 => "=+",
+        16 => "+/-",
+        17 => "-/+",
+        18 => "+-",
+        19 => "-+",
+        20 => "+--",
+        21 => "--+",
+        44 => "=/&",
+        144 => "R",
         146 => "N",
         201 => "D",
         _ => "",
@@ -705,6 +708,39 @@ mod tests {
         game.add_tag("Annotator", "Test");
         assert_eq!(game.tags.len(), 1);
         assert_eq!(game.find_tag("Annotator"), Some(&"Test".to_string()));
+    }
+
+    #[test]
+    fn test_every_nag_survives_export_and_import() {
+        for nag in 1..=u8::MAX {
+            let mut game =
+                crate::pgn::parse_single_game("[Event \"x\"]\n\n1. e4 e5 2. Nf3 *\n").unwrap();
+            // The node after the start marker and e4 is e5.
+            game.moves[2].nags = vec![nag];
+            let pgn = game.to_pgn();
+            assert!(pgn.is_ascii(), "${nag}: {pgn}");
+            let reread = crate::pgn::parse_single_game(&pgn).unwrap();
+            assert!(reread.warnings.is_empty(), "${nag}: {pgn}");
+            // Where the NAG attaches when read back is #38.
+            let nags: Vec<u8> = reread
+                .moves
+                .iter()
+                .flat_map(|node| node.nags.clone())
+                .collect();
+            assert_eq!(nags, [nag], "${nag}: {pgn}");
+        }
+    }
+
+    #[test]
+    fn test_nags_without_a_readable_symbol_are_written_as_numbers() {
+        let mut game =
+            crate::pgn::parse_single_game("[Event \"x\"]\n\n1. e4 e5 2. Nf3 *\n").unwrap();
+        game.moves[2].nags = vec![14, 20, 40, 41, 45, 145, 0];
+        let pgn = game.to_pgn();
+        assert!(
+            pgn.contains("1. e4 e5 += +-- $40 $41 $45 $145 2. Nf3"),
+            "{pgn}"
+        );
     }
 
     #[test]

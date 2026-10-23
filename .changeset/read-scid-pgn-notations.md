@@ -8,6 +8,8 @@ PGN import reads the notations SCID reads: a pawn capture without a rank (`ed`),
 
 Problems that don't stop a game from being imported are reported as warnings, which the CLI prints to stderr: castling without the castling right, `O-O` played as `O-O-O`, unknown text in the moves, castling rights and en passant squares dropped from a `FEN`, a result that replaces the `Result` tag, and moves that don't end with a result. Text that isn't a move, an annotation, or a result is skipped with a warning instead of being dropped silently or failing the game.
 
+PGN export writes each NAG as the symbol SCID writes when SCID and `scidtopgn` both read it back as the same NAG, such as `!`, `+=`, or `N`, and as `$n` otherwise. Previously most NAGs, such as $20 and $41, were dropped from the export, and others were written as Unicode symbols, such as `⩲`, that couldn't be imported again. `nag_to_symbol` returns these symbols, or `""` for a NAG written as `$n`.
+
 [docs/PGN_IMPORT.md](https://github.com/intermezzo-chess/scidtopgn/blob/main/docs/PGN_IMPORT.md) lists each notation and where `scidtopgn` differs from SCID.
 
 Breaking changes to the library API:
