@@ -806,10 +806,13 @@ fn classify_token(token: &str) -> MoveToken {
             MoveToken::Nags(nags)
         };
     }
-    if let Some(null) = ["--", "Z0", "null"]
-        .into_iter()
-        .find(|&n| token.starts_with(n))
-    {
+    // A null move may have symbols attached, as in `Z0!`, but a word such as
+    // `nullify` isn't a null move.
+    if let Some(null) = ["--", "Z0", "null"].into_iter().find(|&n| {
+        token
+            .strip_prefix(n)
+            .is_some_and(|rest| rest.is_empty() || starts_with_symbol(rest))
+    }) {
         return MoveToken::Move {
             text: null.to_string(),
             suffix: token[null.len()..].to_string(),
@@ -829,6 +832,12 @@ fn classify_token(token: &str) -> MoveToken {
         text: text.to_string(),
         suffix: suffix.to_string(),
     }
+}
+
+/// Whether `text` starts with an annotation symbol, a check sign, or a
+/// mate sign.
+fn starts_with_symbol(text: &str) -> bool {
+    text.starts_with(['!', '?', '+', '#', '=', '-', '~'])
 }
 
 /// Splits a move from the annotation symbols written directly after it,
@@ -1394,6 +1403,14 @@ mod tests {
         assert_eq!(classify_token("Z0!"), mv("Z0", "!"));
         assert_eq!(classify_token("null?"), mv("null", "?"));
         assert_eq!(classify_token("--+"), MoveToken::Nags(vec![21]));
+        assert_eq!(classify_token("--!"), mv("--", "!"));
+        for word in ["nullify", "Z0x", "--x"] {
+            assert_eq!(
+                classify_token(word),
+                MoveToken::Unknown(word.to_string()),
+                "{word}"
+            );
+        }
         assert_eq!(classify_token("1-0"), MoveToken::Result(GameResult::White));
         assert_eq!(classify_token("0:1"), MoveToken::Result(GameResult::Black));
         assert_eq!(classify_token("1/2"), MoveToken::Result(GameResult::Draw));

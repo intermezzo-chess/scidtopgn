@@ -707,6 +707,18 @@ fn test_annotation_symbols_match_nags() {
 }
 
 #[test]
+fn test_words_that_start_like_a_null_move_are_skipped() {
+    let game = parse_single_game(&pgn_game("", "1. e4 nullify e5 2. Nf3 *")).unwrap();
+    assert_eq!(sans(&game), ["e4", "e5", "Nf3"]);
+    assert_eq!(
+        warning_kinds(&game),
+        [PgnWarningKind::UnknownText {
+            text: "nullify".to_string()
+        }]
+    );
+}
+
+#[test]
 fn test_warnings_name_the_game_and_line() {
     let pgn = "[Event \"First\"]\n\n1. e4 *\n\n[Event \"Second\"]\n\n1. e4 e5 2. Nf3 Nf6 3. Bc4 Bc5\n4. Ke2 Ke7 5. Ke1 Ke8\n6. O-O zz *\n";
     let games: Vec<Game> = PgnParser::new(pgn).map(Result::unwrap).collect();
