@@ -28,6 +28,7 @@ The case numbers match [#37](https://github.com/intermezzo-chess/scidtopgn/issue
 - **#9** `a8=n` promotes to a knight. SCID promotes to a queen and warns.
 - **#15** `00` and `000` are castling. SCID drops them as move numbers, without a message.
 - **#22** A piece move with `-+` or `-/+` attached, such as `Bb5-+`, is read with its annotation. SCID drops the move, and usually fails at the next one.
+- **#22c** `e4--+` and `e4->` are read with the symbol written, $21 and $41. SCID reads `e4--+` as $19 and fails at `e4->`.
 - **#23** `e4~` is read with its annotation, `$13`. SCID fails at the move.
 - **#28** A game whose moves don't end with a result is imported with a warning. SCID skips it.
 
@@ -166,7 +167,7 @@ Before #37, `scidtopgn` couldn't export a SCID database containing such a castle
 | `D` on its own | 201 (diagram) |
 | `R` on its own | 144 (various moves) |
 
-`--` is a null move and `o-o` is castling, as in SCID, although `game_parseNag` also lists them as symbols. `--+` is NAG 21, as in SCID. Before #37, `scidtopgn` read `--+` as a null move with a check sign. Several symbols can follow a move, as in `e4!!+-`, which gives NAGs 3 and 18. Check and mate signs among them are ignored. Before #37, `scidtopgn` dropped these symbols without a message, or rejected the game when the symbol started with `=` or `-`.
+`--` is a null move and `o-o` is castling, as in SCID, although `game_parseNag` also lists them as symbols. `--+` is NAG 21, as in SCID. Before #37, `scidtopgn` read `--+` as a null move with a check sign. A null move can have symbols attached, as in `Z0!`, but a word that only starts like one, such as `nullify`, is skipped with a warning (#25c). Several symbols can follow a move, as in `e4!!+-`, which gives NAGs 3 and 18. Check and mate signs among them are ignored. Before #37, `scidtopgn` dropped these symbols without a message, or rejected the game when the symbol started with `=` or `-`.
 
 | # | Case | Example | SCID | scidtopgn | |
 | --- | --- | --- | --- | --- | --- |
@@ -176,12 +177,16 @@ Before #37, `scidtopgn` couldn't export a SCID database containing such a castle
 | 22a | Attached by `=` or `-` to a pawn move | `e4=+`, `Nf3=` | $15, $10 | $15, $10 | Same |
 | 22a | Attached by `-` to a piece move | `Bb5-+`, `Ba4-/+` | Logs `Unexpected symbol: Bb5` and drops the move. The next move then usually fails. | `Bb5` with $19, `Ba4` with $17 | **Differs** |
 | 22b | Several attached | `e4!!+-` | $3, $18 | $3, $18 | Same |
+| 22c | `--+` or `->` attached | `e4--+`, `Nf3->` | `e4` with $19, the symbol after the first `-`. `Nf3->` logs `Unexpected symbol: Nf3` and drops the move. | `e4` with $21, `Nf3` with $41 | **Differs** |
 | 23 | `~` attached | `e4~` | Logs `Unexpected symbol: e4`, drops the move, and then fails at the next move | `e4` with $13 | **Differs** |
 | 24 | Letters on their own | `N`, `D`, `R` | $146, $201, $144 | $146, $201, $144 | Same |
 | 25a | Unknown symbols | `zz`, `/\`, `Diagram` | Skips them; logs `Unexpected symbol` for `zz` and `/\` | Skips them with a warning for each | **Differs** (warning) |
 | 25b | A piece letter on its own | `B` | Skips it and logs `Invalid annotation symbol: B` | Skips it with a warning | Same |
+| 25c | A word that starts like a null move | `nullify` | Skips it and logs `Unexpected symbol: nullify` | Skips it with a warning | Same |
 
 **#22: a piece move with `-+` attached.** *What changes:* the move and its annotation are kept, instead of a game that breaks after the move. *Why:* SCID splits `-+` and `-/+` from a pawn move but not from a piece move, where its reader rejects the whole token. `scidtopgn` splits them the same way for every move.
+
+**#22c: `--+` or `->` attached.** *What changes:* `e4--+` keeps the symbol written, $21, instead of $19, and `Nf3->` keeps the move and $41 instead of breaking the game. *Why:* SCID ignores a `-` inside a move unless `+` or `/` follows it, so it drops the first `-` of `--+`, and its reader rejects the `>` of `->`. `scidtopgn` treats a `-` as part of the move only between squares, as in `e2-e4`, or at its end, so every symbol reads the same attached or separate.
 
 **#23: `e4~`.** *What changes:* the game is imported with the annotation, instead of being cut at the next move. *Why:* SCID's reader doesn't allow `~` directly after a move. `scidtopgn` reads every symbol either attached or separate.
 
@@ -326,36 +331,41 @@ game 49: OK | [Event "22a annotation symbols attached by equals or hyphen"] [Res
     logged: (game 49, line 217) Error reading move in game ? - ?, 0: a6
     logged: (game 49, line 217) Error: Unexpected symbol: Ba4
 game 50: OK | [Event "22b several annotation symbols attached"] [Result "*"] 1.e4 $3 $18 e5 *
-game 51: OK | [Event "23 tilde attached"] [Result "*"] {Error reading move: e5}  *
-    logged: (game 51, line 225) Error: Unexpected symbol: e4
-    logged: (game 51, line 225) Error reading move in game ? - ?, 0: e5
-game 52: OK | [Event "24 letter symbols"] [Result "*"] 1.e4 $146 e5 $201 2.Nf3 $144 Nc6 *
-game 53: OK | [Event "25a unknown symbols"] [Result "*"] 1.e4 e5 2.Nf3 Nc6 *
-    logged: (game 53, line 233) Error: Unexpected symbol: zz
-    logged: (game 53, line 233) Error: Unexpected symbol: /\
-game 54: OK | [Event "25b piece letter on its own"] [Result "*"] 1.e4 e5 *
-    logged: (game 54, line 237) Warning: Invalid annotation symbol: B
-game 55: OK | [Event "26a result 1:0"] [Result "1-0"] 1.e4 e5 1-0
-game 56: OK | [Event "26b result 0:1"] [Result "0-1"] 1.e4 e5 0-1
-game 57: OK | [Event "26c result 1/2"] [Result "1/2-1/2"] 1.e4 e5 1/2-1/2
-game 58: OK | [Event "26d result 1/2:1/2"] [Result "1/2-1/2"] 1.e4 e5 1/2-1/2
-game 59: OK | [Event "27a result differs from the tag"] [Result "0-1"] 1.e4 e5 0-1
-    logged: (game 59, line 262) Result did not match the header result
-game 60: OK | [Event "27b unknown result with a result tag"] [Result "*"] 1.e4 e5 *
-    logged: (game 60, line 267) Result did not match the header result
-game 61: OK | [Event "27c result with no result tag"] [Result "1-0"] 1.e4 e5 1-0
-    logged: (game 61, line 271) Result did not match the header result
-game 62: ERROR (SCID skips this game) | [Event "28a no result before the next game"] [Result "1-0"] 1.e4 e5 1-0
-    logged: (game 62, line 278) PGN header '[' seen inside game (result missing ?)
-game 63: OK | [Event "29 move that can't be read"] [Result "*"] 1.e4 e5 {Error reading move: Nf6} *
-    logged: (game 63, line 280) Error reading move in game ? - ?, 0: Nf6
-game 64: OK | [Event "30 SetUp without FEN"] [Result "*"] [SetUp "1"] 1.e4 *
-game 65: OK | [Event "31a FEN castling rights that don't fit"] [Result "*"] [FEN "4k3/8/8/8/8/8/8/4K3 w KQkq - 0 1"] 1.Kd1 *
-game 66: OK | [Event "31b FEN en passant square that doesn't fit"] [Result "*"] [FEN "4k3/8/8/8/8/8/8/4K3 w - e3 0 1"] 1.Kd1 *
-game 67: OK | [Event "31c FEN en passant square with no capture"] [Result "*"] [FEN "4k3/8/8/8/4P3/8/8/4K3 b - e3 0 1"] 1...Kd7 *
-game 68: OK | [Event "32 Variant tag"] [Result "*"] [Variant "Chess960"] 1.e4 *
-game 69: ERROR (SCID skips this game) | [Event "28b no result at the end of the input"] [Result "0-1"] 1.e4 e5 0-1
-    logged: (game 69, line 311) End of input reached in game (result missing ?)
+game 51: OK | [Event "22c symbols starting with two hyphens or an arrow attached"] [Result "*"] 1.e4 $19 e5 {Error reading move: Nc6} *
+    logged: (game 51, line 225) Error: Unexpected symbol: Nf3
+    logged: (game 51, line 225) Error reading move in game ? - ?, 0: Nc6
+game 52: OK | [Event "23 tilde attached"] [Result "*"] {Error reading move: e5}  *
+    logged: (game 52, line 229) Error: Unexpected symbol: e4
+    logged: (game 52, line 229) Error reading move in game ? - ?, 0: e5
+game 53: OK | [Event "24 letter symbols"] [Result "*"] 1.e4 $146 e5 $201 2.Nf3 $144 Nc6 *
+game 54: OK | [Event "25a unknown symbols"] [Result "*"] 1.e4 e5 2.Nf3 Nc6 *
+    logged: (game 54, line 237) Error: Unexpected symbol: zz
+    logged: (game 54, line 237) Error: Unexpected symbol: /\
+game 55: OK | [Event "25b piece letter on its own"] [Result "*"] 1.e4 e5 *
+    logged: (game 55, line 241) Warning: Invalid annotation symbol: B
+game 56: OK | [Event "25c word that starts like a null move"] [Result "*"] 1.e4 e5 *
+    logged: (game 56, line 245) Error: Unexpected symbol: nullify
+game 57: OK | [Event "26a result 1:0"] [Result "1-0"] 1.e4 e5 1-0
+game 58: OK | [Event "26b result 0:1"] [Result "0-1"] 1.e4 e5 0-1
+game 59: OK | [Event "26c result 1/2"] [Result "1/2-1/2"] 1.e4 e5 1/2-1/2
+game 60: OK | [Event "26d result 1/2:1/2"] [Result "1/2-1/2"] 1.e4 e5 1/2-1/2
+game 61: OK | [Event "27a result differs from the tag"] [Result "0-1"] 1.e4 e5 0-1
+    logged: (game 61, line 270) Result did not match the header result
+game 62: OK | [Event "27b unknown result with a result tag"] [Result "*"] 1.e4 e5 *
+    logged: (game 62, line 275) Result did not match the header result
+game 63: OK | [Event "27c result with no result tag"] [Result "1-0"] 1.e4 e5 1-0
+    logged: (game 63, line 279) Result did not match the header result
+game 64: ERROR (SCID skips this game) | [Event "28a no result before the next game"] [Result "1-0"] 1.e4 e5 1-0
+    logged: (game 64, line 286) PGN header '[' seen inside game (result missing ?)
+game 65: OK | [Event "29 move that can't be read"] [Result "*"] 1.e4 e5 {Error reading move: Nf6} *
+    logged: (game 65, line 288) Error reading move in game ? - ?, 0: Nf6
+game 66: OK | [Event "30 SetUp without FEN"] [Result "*"] [SetUp "1"] 1.e4 *
+game 67: OK | [Event "31a FEN castling rights that don't fit"] [Result "*"] [FEN "4k3/8/8/8/8/8/8/4K3 w KQkq - 0 1"] 1.Kd1 *
+game 68: OK | [Event "31b FEN en passant square that doesn't fit"] [Result "*"] [FEN "4k3/8/8/8/8/8/8/4K3 w - e3 0 1"] 1.Kd1 *
+game 69: OK | [Event "31c FEN en passant square with no capture"] [Result "*"] [FEN "4k3/8/8/8/4P3/8/8/4K3 b - e3 0 1"] 1...Kd7 *
+game 70: OK | [Event "32 Variant tag"] [Result "*"] [Variant "Chess960"] 1.e4 *
+game 71: ERROR (SCID skips this game) | [Event "28b no result at the end of the input"] [Result "0-1"] 1.e4 e5 0-1
+    logged: (game 71, line 319) End of input reached in game (result missing ?)
 ```
 
 </details>

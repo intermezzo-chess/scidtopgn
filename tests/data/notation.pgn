@@ -221,6 +221,10 @@
 
 1. e4!!+- e5 *
 
+[Event "22c symbols starting with two hyphens or an arrow attached"]
+
+1. e4--+ e5 2. Nf3-> Nc6 *
+
 [Event "23 tilde attached"]
 
 1. e4~ e5 *
@@ -236,6 +240,10 @@
 [Event "25b piece letter on its own"]
 
 1. e4 B e5 *
+
+[Event "25c word that starts like a null move"]
+
+1. e4 nullify e5 *
 
 [Event "26a result 1:0"]
 [Result "1-0"]

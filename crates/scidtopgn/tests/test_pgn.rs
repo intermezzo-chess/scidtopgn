@@ -607,6 +607,10 @@ fn test_notation_fixture() {
             "e4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6 | $15 $10 $19 $17 | * | ".into(),
         ),
         ("22b several annotation symbols attached", "e4 e5 | $3 $18 | * | ".into()),
+        (
+            "22c symbols starting with two hyphens or an arrow attached",
+            "e4 e5 Nf3 Nc6 | $21 $41 | * | ".into(),
+        ),
         ("23 tilde attached", "e4 e5 | $13 | * | ".into()),
         ("24 letter symbols", "e4 e5 Nf3 Nc6 | $146 $201 $144 | * | ".into()),
         (
@@ -614,6 +618,10 @@ fn test_notation_fixture() {
             "e4 e5 Nf3 Nc6 |  | * | skipped unknown text \"zz\"; skipped unknown text \"/\\\\\"; skipped unknown text \"Diagram\"".into(),
         ),
         ("25b piece letter on its own", "e4 e5 |  | * | skipped unknown text \"B\"".into()),
+        (
+            "25c word that starts like a null move",
+            "e4 e5 |  | * | skipped unknown text \"nullify\"".into(),
+        ),
         ("26a result 1:0", "e4 e5 |  | 1-0 | ".into()),
         ("26b result 0:1", "e4 e5 |  | 0-1 | ".into()),
         ("26c result 1/2", "e4 e5 |  | 1/2-1/2 | ".into()),
