@@ -1,4 +1,4 @@
-use scidtopgn::{ByteBuffer, Game, Index, NFile, GAME_DECODE_ALL};
+use scidtopgn::{parse_single_game, ByteBuffer, Game, Index, NFile, GAME_DECODE_ALL};
 use std::path::Path;
 
 fn get_test_data_path(filename: &str) -> std::path::PathBuf {
@@ -125,4 +125,74 @@ fn test_game_to_pgn() {
     assert!(pgn.contains("[Event \"47th ch-Bangahbandhu 2022\"]"));
     assert!(pgn.contains("[White \"Hossain, Enam\"]"));
     assert!(pgn.contains("[Black \"Murshed, N\"]"));
+}
+
+/// The movetext `Game::to_pgn` writes for `pgn`, with its lines joined.
+fn exported_movetext(pgn: &str) -> String {
+    let pgn = parse_single_game(pgn).unwrap().to_pgn();
+    let (_, movetext) = pgn.split_once("\n\n").unwrap();
+    movetext.lines().collect::<Vec<_>>().join(" ")
+}
+
+#[test]
+fn test_to_pgn_writes_variations_and_annotations() {
+    for (movetext, expected) in [
+        (
+            "1. e4 $1 e5 {after e5} 2. Nf3 $2 *",
+            "1. e4 ! e5 {after e5} 2. Nf3 ? *",
+        ),
+        (
+            "1. e4 e5 (1... c5 2. Nf3) 2. Nf3 Nc6 *",
+            "1. e4 e5 (1... c5 2. Nf3) 2. Nf3 Nc6 *",
+        ),
+        ("1. e4 (1. d4) e5 *", "1. e4 (1. d4) 1... e5 *"),
+        (
+            "1. e4 e5 {c} 2. Nf3 {d} Nc6 *",
+            "1. e4 e5 {c} 2. Nf3 {d} 2... Nc6 *",
+        ),
+        (
+            "1. e4 (1. d4 d5 (1... Nf6 2. c4) 2. c4) (1. c4) e5 *",
+            "1. e4 (1. d4 d5 (1... Nf6 2. c4) 2. c4) (1. c4) 1... e5 *",
+        ),
+        (
+            "{Intro} 1. e4 ({Or} 1. d4 $1) $14 e5 *",
+            "{Intro} 1. e4 += ({Or} 1. d4 !) 1... e5 *",
+        ),
+        ("1. e4 () e5 *", "1. e4 () 1... e5 *"),
+        (
+            "1. e4 e5 (1... -- 2. d4) 2. Nf3 *",
+            "1. e4 e5 (1... -- 2. d4) 2. Nf3 *",
+        ),
+    ] {
+        let pgn = format!("[Event \"x\"]\n\n{movetext}\n");
+        assert_eq!(exported_movetext(&pgn), expected, "{movetext}");
+        // The export reads back as the same game.
+        let exported = parse_single_game(&pgn).unwrap().to_pgn();
+        assert_eq!(parse_single_game(&exported).unwrap().to_pgn(), exported);
+    }
+}
+
+#[test]
+fn test_to_pgn_numbers_variations_from_the_fen() {
+    let pgn = "[Event \"x\"]\n[FEN \"r1bqkbnr/pppp1ppp/2n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3\"]\n\n3... a6 (3... Nf6 4. O-O) 4. Ba4 *\n";
+    assert_eq!(exported_movetext(pgn), "3... a6 (3... Nf6 4. O-O) 4. Ba4 *");
+}
+
+#[test]
+fn test_to_pgn_wraps_variations() {
+    let mut movetext = String::new();
+    for number in (1..40).step_by(2) {
+        let next = number + 1;
+        movetext.push_str(&format!(
+            "{number}. Nf3 {{out}} ({number}. Nc3 Nc6 ({number}... Nf6 {{a comment}}) {next}. Nb1) Nf6 {next}. Ng1 Ng8 "
+        ));
+    }
+    let pgn = format!("[Event \"x\"]\n\n{movetext}*\n");
+    let exported = parse_single_game(&pgn).unwrap().to_pgn();
+    let (_, lines) = exported.split_once("\n\n").unwrap();
+    assert!(lines.lines().count() > 1, "{exported}");
+    for line in lines.lines() {
+        assert!(line.len() <= 80, "{line}");
+    }
+    assert_eq!(parse_single_game(&exported).unwrap().to_pgn(), exported);
 }

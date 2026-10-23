@@ -2,7 +2,7 @@
 
 This document lists how `scidtopgn` reads PGN notation that isn't standard, and compares each case with SCID. It uses three PGN terms: SAN (standard algebraic notation) is how moves are written, such as `Nf3` or `exd5`. FEN is the notation for a position, used by the `FEN` tag to set a game's start position. A NAG (numeric annotation glyph) is an annotation written as `$n`, such as `$1` for a good move, or as a symbol, such as `!`. "SCID" means the original SCID sources in `scid-cpp/scid` (`pgnparse.cpp`, `Position::ReadMove` in `position.cpp`, and `game_parseNag` in `game.cpp`), together with the C++ reference converter in `scid-cpp/src/main.cpp`.
 
-Each case is marked **Same** or **Differs** in its **Comparison** column. "Same" means `scidtopgn` reads the input and stores the game the way SCID does, apart from the [general differences](#general-differences). **It doesn't mean that the game comes back unchanged when `scidtopgn` exports it to PGN.** Export drops variations and moves annotations, as [Export and round trips](#export-and-round-trips) explains. Each difference also says what changes for someone moving from SCID, and why `scidtopgn` behaves that way.
+Each case is marked **Same** or **Differs** in its **Comparison** column. "Same" means `scidtopgn` reads the input and stores the game the way SCID does, apart from the [general differences](#general-differences). **It doesn't mean that the game comes back unchanged when `scidtopgn` exports it to PGN.** Export writes moves in canonical SAN and can drop parts of the game, as [Export and round trips](#export-and-round-trips) explains. Each difference also says what changes for someone moving from SCID, and why `scidtopgn` behaves that way.
 
 The case numbers match [#37](https://github.com/intermezzo-chess/scidtopgn/issues/37). Most cases are games in [`tests/data/notation.pgn`](../tests/data/notation.pgn), where each game's `Event` tag starts with the case number. Both products' behavior was checked by running them on that file (see [How SCID's behavior was checked](#how-scids-behavior-was-checked)).
 
@@ -53,7 +53,7 @@ The case numbers match [#37](https://github.com/intermezzo-chess/scidtopgn/issue
 PGN export:
 
 - **#34** Each NAG is exported as the symbol SCID writes when both SCID and `scidtopgn` read it back as the same NAG, and as `$n` otherwise. SCID writes some NAGs as symbols it can't read back, such as `→` for $40.
-- Variations aren't exported, and annotations move to earlier moves ([#38](https://github.com/intermezzo-chess/scidtopgn/issues/38)). SCID exports both correctly.
+- **#38** Variations, NAGs, and comments are exported where SCID exports them, in the PGN standard's export format, such as `1. e4 ! (1. d4)`. SCID writes `1.e4! ( 1.d4 )`.
 
 Other known differences, which these cases don't cover, are listed in [Known differences outside these cases](#known-differences-outside-these-cases).
 
@@ -64,7 +64,13 @@ These apply to every case below.
 - **A move that can't be read.** SCID keeps the game up to that move and adds the comment `{Error reading move: ...}`. `scidtopgn` skips the game and reports which game and move failed (#29). When this document says that SCID rejects a move, SCID still keeps the game up to that move.
 - **Warnings.** SCID's parser logs warnings, but the SCID converter never prints them. `scidtopgn` prints each warning (#33). See [Warnings](#warnings).
 - **Canonical SAN.** `scidtopgn` stores and exports the SAN it generates, with `O-O`, `=` before a promotion piece, `x` for a capture, and check and mate signs only when they are correct. SCID does the same.
-- **Where annotations attach.** A NAG or comment attaches to the move before the one it follows, and NAGs and comments inside variations are dropped. This is [#38](https://github.com/intermezzo-chess/scidtopgn/issues/38). For example, in `1. e4 e5 2. Nf3 $14 {Develops} Nc6`, SCID stores `$14` and the comment on `2. Nf3`. `scidtopgn` imports them onto `1... e5`. When it reads the database back, it moves them one move earlier again, so its export shows `1. e4 += {Develops} e5 2. Nf3 Nc6`. An annotation symbol attaches the same way as the `$n` NAG it stands for.
+- **Where annotations attach (#38).** As in SCID, a NAG or comment attaches to the move it follows, in the main line and in variations. An annotation symbol attaches the same way as the `$n` NAG it stands for. Both products also handle these cases the same way:
+  - A NAG or comment after a variation's `)` attaches to the move the variation replaces. In `1. e4 (1. d4) $1`, `$1` is on `1. e4`.
+  - A comment before the first move of the game, or right after a variation's `(`, is kept at the start of the game or variation, and exported there.
+  - Several comments after one move are joined into one, with a space between them unless the first is empty or ends in whitespace. `1. e4 {a} {b}` stores `a b`.
+  - A comment between tags is ignored.
+  - **A NAG before the first move of the game or of a variation is dropped, without a warning.** In `$1 1. e4 ($2 1. d4)`, neither NAG is kept. SCID keeps such a NAG in memory, but it neither saves it to the database nor exports it, so the result is the same.
+  - `$0` means no annotation, and isn't stored.
 
 ## Warnings
 
@@ -251,19 +257,15 @@ A `FEN` tag sets the start position with or without `SetUp`, in both products.
 | `Result` tag with more text | `[Result "1-0 (time)"]` | Reads `1-0` | Reads it as `*`. The result after the moves is used, with a warning only when that result isn't `*` (#27d). |
 | Text that isn't UTF-8 | A Latin-1 `é` in a tag | Stores the bytes unchanged | The CLI fails for the whole file: `stream did not contain valid UTF-8` |
 | A `}` outside a comment | `1. e4 } e5` | Skips it and logs `"}" seen outside a comment` | Skips it, without a warning |
-| Annotations in variations, and where annotations attach | `1. e4 (1. d4 $1)` | Kept on the move they follow | Dropped or moved to the previous move ([#38](https://github.com/intermezzo-chess/scidtopgn/issues/38)) |
-| Variations on PGN export | `1. e4 e5 (1... c5)` | Exported | Dropped ([#38](https://github.com/intermezzo-chess/scidtopgn/issues/38)); see [Export and round trips](#export-and-round-trips) |
 
 ## Export and round trips
 
-The cases above compare how a game is imported and stored. Exporting the stored game to PGN is a separate step, and it doesn't always give back what was imported. These are the losses on export, with [#38](https://github.com/intermezzo-chess/scidtopgn/issues/38) tracking the first three:
+The cases above compare how a game is imported and stored. Exporting the stored game to PGN is a separate step, and it doesn't always give back what was imported. Variations, NAGs, and comments are exported where they were imported (#38). These are the losses:
 
-- **Variations** are dropped. Only the main line is exported.
-- **NAGs and comments** move one move earlier on import, and one more when the database is read back for export.
-- **NAGs and comments inside variations** are dropped on import.
+- **A NAG before the first move** of the game or of a variation is dropped on import, as in SCID. See [Where annotations attach](#general-differences).
 - **The en passant square** of a `FEN` is exported only when an en passant capture is legal (#31c).
 
-The moves themselves are exported as canonical SAN, so `ed` comes back as `exd5` and `0-0` as `O-O`. This is a change in notation, not a loss.
+The moves themselves are exported as canonical SAN, so `ed` comes back as `exd5` and `0-0` as `O-O`. This is a change in notation, not a loss. The movetext follows the PGN standard's export format: a space after each move number, no space inside a variation's parentheses, and a move number before a Black move that starts a variation or follows a comment or a variation.
 
 For example, importing and exporting
 
@@ -274,7 +276,7 @@ For example, importing and exporting
 gives this from `scidtopgn`:
 
 ```text
-1. e4 += {Develops} e5 +-- 2. Nf3 Nc6 3. Bb5
+1. e4 e5 (1... c5 2. Nf3) 2. Nf3 += {Develops} 2... Nc6 +-- 3. Bb5
 *
 ```
 
@@ -440,5 +442,6 @@ game 74: ERROR (SCID skips this game) | [Event "28b no result at the end of the 
 - **The other tests in `test_pgn.rs`** check that warnings name the game and line, and that a rejected game reports only its error.
 - **Unit tests in `crates/scidtopgn/src/pgn.rs`** cover each notation, the symbol table, and how tokens are split.
 - **`tests/data/castling`** was written by the reference converter from `tests/data/castling.pgn`. `crates/scidtopgn/tests/test_interop.rs` checks that `scidtopgn` reads it (#17) and writes the same moves for `castling.pgn`. `position.rs` and `mov.rs` test castling without the castling right on its own.
+- **`tests/data/annotated`** was written by the reference converter from `tests/data/annotated.pgn`, which has NAGs and comments in the main line and in variations. `test_interop.rs` checks that `scidtopgn` reads and exports it with each annotation where SCID stores it, and writes the same moves and annotations for `annotated.pgn` (#38).
 - **`test_every_nag_survives_export_and_import`** in `crates/scidtopgn/src/game.rs` exports and imports each NAG from 1 to 255 (#34).
 - **`test_cli_import_prints_warnings_and_keeps_the_game`** in `crates/scidtopgn-cli/tests/integration.rs` checks how the CLI prints warnings in both `--on-error` modes (#33).

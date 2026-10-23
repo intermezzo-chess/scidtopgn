@@ -292,7 +292,7 @@ impl Database {
                 buf.put_byte(crate::mov::ENCODE_COMMENT)?;
             }
 
-            for var_start in Self::variations(game, idx) {
+            for var_start in game.variations(idx) {
                 buf.put_byte(crate::mov::ENCODE_START_MARKER)?;
                 Self::encode_moves(buf, game, var_start, before.clone())?;
                 buf.put_byte(crate::mov::ENCODE_END_MARKER)?;
@@ -302,22 +302,6 @@ impl Database {
         }
 
         Ok(())
-    }
-
-    /// The start markers of the move at `idx`'s variations, in order. A
-    /// start marker's `var_child` links to the next variation of the same
-    /// move.
-    fn variations(game: &Game, idx: usize) -> impl Iterator<Item = usize> + '_ {
-        let node = &game.moves[idx];
-        let first = if node.marker == Marker::StartMarker {
-            None
-        } else {
-            node.var_child
-        };
-        let valid = move |idx: &usize| *idx < game.moves.len();
-        std::iter::successors(first.filter(valid), move |&start| {
-            game.moves[start].var_child.filter(valid)
-        })
     }
 
     fn encode_comments(&self, buf: &mut ByteBuffer, game: &Game) -> Result<()> {
@@ -352,7 +336,7 @@ impl Database {
                 buf.put_terminated_string(comment)?;
             }
 
-            for var_start in Self::variations(game, idx) {
+            for var_start in game.variations(idx) {
                 Self::encode_comments_recursive(buf, game, var_start)?;
             }
 

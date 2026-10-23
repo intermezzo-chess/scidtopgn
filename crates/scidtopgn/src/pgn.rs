@@ -6,7 +6,7 @@ use shakmaty::{Bitboard, CastlingSide, Chess, File, Move, Position, Rank, Role, 
 
 use crate::common::GameResult;
 use crate::error::{Error, Result};
-use crate::game::{Game, Marker, MoveNode, MAX_NAGS};
+use crate::game::{Game, Marker, MoveNode};
 use crate::mov::GameMove;
 use crate::position::{chess_from_fen_reporting_drops, ScidPosition};
 use crate::Date;
@@ -332,6 +332,7 @@ impl PgnParser {
         let mut fen = None;
         let mut variant = None;
         let mut result_tag = None;
+        let mut comments = Vec::new();
         self.in_movetext = false;
 
         loop {
@@ -347,6 +348,8 @@ impl PgnParser {
                         self.rewind(pos, line);
                         self.advance();
                     })?;
+                    // Like SCID, a comment between tags is ignored.
+                    comments.clear();
                     if name == "FEN" {
                         fen = Some((value, line));
                     } else {
@@ -361,7 +364,15 @@ impl PgnParser {
                 Some('%') => {
                     self.skip_to_end_of_line();
                 }
-                Some('{') | Some(';') => {
+                Some('{') => {
+                    // A comment after the tags comes before the first move.
+                    // An unterminated one runs to the end of the input, so
+                    // there is nothing after it to read.
+                    if let Ok(comment) = self.read_brace_comment() {
+                        comments.push(comment);
+                    }
+                }
+                Some(';') => {
                     self.skip_comment();
                 }
                 Some(c) if c.is_ascii_alphanumeric() || matches!(c, '$' | '*' | '(' | '-') => {
@@ -402,6 +413,9 @@ impl PgnParser {
         game.moves.push(start);
         game.first_move = Some(start_idx);
         game.current_move = Some(start_idx);
+        for comment in &comments {
+            game.append_comment(comment);
+        }
 
         let position = game.initial_position()?;
         self.in_movetext = true;
@@ -503,18 +517,12 @@ impl PgnParser {
                 }
                 '{' => {
                     let comment = self.read_brace_comment()?;
-                    if depth == 0 {
-                        if let Some(current_idx) = game.current_move {
-                            if let Some(prev_idx) = game.moves[current_idx].prev {
-                                game.moves[prev_idx].comment = Some(comment);
-                            }
-                        }
-                    }
+                    game.append_comment(&comment);
                 }
                 '$' => {
                     self.advance();
                     let nag = self.read_nag()?;
-                    add_nag(game, nag, depth);
+                    game.add_nag(nag);
                 }
                 '(' => {
                     self.advance();
@@ -561,7 +569,7 @@ impl PgnParser {
                         }
                         MoveToken::Nags(nags) => {
                             for nag in nags {
-                                add_nag(game, nag, depth);
+                                game.add_nag(nag);
                             }
                         }
                         MoveToken::Move { text, suffix } => {
@@ -581,7 +589,7 @@ impl PgnParser {
 
                             let (nags, rest) = parse_symbols(&suffix);
                             for nag in nags {
-                                add_nag(game, nag, depth);
+                                game.add_nag(nag);
                             }
                             if !rest.is_empty() {
                                 let text = rest.to_string();
@@ -705,22 +713,6 @@ fn is_standard_chess(variant: &str) -> bool {
         variant.trim().to_ascii_lowercase().as_str(),
         "" | "standard" | "chess" | "normal" | "from position"
     )
-}
-
-/// Adds `nag` where a `$n` NAG goes, so an annotation symbol and its NAG
-/// read the same. That is the move before the last one, and NAGs in
-/// variations are dropped; #38 tracks both.
-fn add_nag(game: &mut Game, nag: u8, depth: u32) {
-    if depth > 0 {
-        return;
-    }
-    if let Some(current_idx) = game.current_move {
-        if let Some(prev_idx) = game.moves[current_idx].prev {
-            if game.moves[prev_idx].nags.len() < MAX_NAGS {
-                game.moves[prev_idx].nags.push(nag);
-            }
-        }
-    }
 }
 
 /// The castling rights on `rooks`, the rooks' squares, in FEN notation.
