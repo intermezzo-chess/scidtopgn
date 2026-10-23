@@ -771,3 +771,102 @@ fn test_rejected_game_reports_only_its_error() {
     assert_eq!(next.event, "y");
     assert!(next.warnings.is_empty());
 }
+
+/// The first node, in the order the moves were read, that plays `san`.
+fn node<'a>(game: &'a Game, san: &str) -> &'a scidtopgn::MoveNode {
+    game.moves
+        .iter()
+        .find(|node| node.san == san)
+        .unwrap_or_else(|| panic!("no move {san}"))
+}
+
+/// The comment on the start marker of the move `san`'s first variation.
+fn variation_comment<'a>(game: &'a Game, san: &str) -> Option<&'a str> {
+    let start = node(game, san).var_child.expect("a variation");
+    game.moves[start].comment.as_deref()
+}
+
+fn parse_movetext(movetext: &str) -> Game {
+    parse_single_game(&pgn_game("", movetext)).unwrap()
+}
+
+#[test]
+fn test_annotations_attach_to_the_move_they_follow() {
+    let game = parse_movetext("1. e4 $1 e5 {after e5} 2. Nf3 $2 *");
+    assert_eq!(node(&game, "e4").nags, [1]);
+    assert_eq!(node(&game, "e4").comment, None);
+    assert!(node(&game, "e5").nags.is_empty());
+    assert_eq!(node(&game, "e5").comment.as_deref(), Some("after e5"));
+    assert_eq!(node(&game, "Nf3").nags, [2]);
+}
+
+#[test]
+fn test_annotations_in_variations() {
+    let game = parse_movetext(
+        "1. e4 e5 (1... c5 $1 {Sicilian} (1... e6 ? $14)) (1... d5 {Scandinavian}) 2. Nf3 *",
+    );
+    assert_eq!(node(&game, "c5").nags, [1]);
+    assert_eq!(node(&game, "c5").comment.as_deref(), Some("Sicilian"));
+    assert_eq!(node(&game, "e6").nags, [2, 14]);
+    assert_eq!(node(&game, "d5").comment.as_deref(), Some("Scandinavian"));
+    assert!(node(&game, "e5").nags.is_empty());
+    assert_eq!(node(&game, "e5").comment, None);
+}
+
+#[test]
+fn test_comments_before_the_first_move() {
+    let game = parse_movetext("{Intro} 1. e4 ({Or} 1. d4) *");
+    let start = game.first_move.unwrap();
+    assert_eq!(game.moves[start].comment.as_deref(), Some("Intro"));
+    assert_eq!(variation_comment(&game, "e4"), Some("Or"));
+    assert_eq!(node(&game, "d4").comment, None);
+
+    // Like SCID, a comment between tags is ignored.
+    let game =
+        parse_single_game("[Event \"x\"]\n{between}\n[Site \"y\"]\n\n{Intro} 1. e4 *\n").unwrap();
+    assert_eq!(game.site, "y");
+    let start = game.first_move.unwrap();
+    assert_eq!(game.moves[start].comment.as_deref(), Some("Intro"));
+}
+
+#[test]
+fn test_annotations_after_a_variation_attach_to_the_varied_move() {
+    let game = parse_movetext("1. e4 (1. d4) $1 {King's pawn} e5 *");
+    assert_eq!(node(&game, "e4").nags, [1]);
+    assert_eq!(node(&game, "e4").comment.as_deref(), Some("King's pawn"));
+    assert!(node(&game, "d4").nags.is_empty());
+}
+
+#[test]
+fn test_comments_after_one_move_are_joined() {
+    for (movetext, expected) in [
+        ("1. e4 {a} {b} *", "a b"),
+        ("1. e4 {a }{b} *", "a b"),
+        ("1. e4 {}{b} *", "b"),
+        ("1. e4 {a} $1 {b} {c} *", "a b c"),
+    ] {
+        let game = parse_movetext(movetext);
+        assert_eq!(
+            node(&game, "e4").comment.as_deref(),
+            Some(expected),
+            "{movetext}"
+        );
+    }
+    let game = parse_movetext("{a} {b} 1. e4 ({c} {d} 1. d4) *");
+    let start = game.first_move.unwrap();
+    assert_eq!(game.moves[start].comment.as_deref(), Some("a b"));
+    assert_eq!(variation_comment(&game, "e4"), Some("c d"));
+}
+
+#[test]
+fn test_nags_before_the_first_move_are_dropped() {
+    let game = parse_movetext("$1 ! 1. e4 ($2 1. d4 $3) $0 e5 *");
+    let nags: Vec<(String, Vec<u8>)> = game
+        .moves
+        .iter()
+        .filter(|node| !node.nags.is_empty())
+        .map(|node| (node.san.clone(), node.nags.clone()))
+        .collect();
+    assert_eq!(nags, [("d4".to_string(), vec![3])]);
+    assert!(game.warnings.is_empty());
+}

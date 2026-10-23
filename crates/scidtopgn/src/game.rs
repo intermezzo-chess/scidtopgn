@@ -346,14 +346,14 @@ impl Game {
                     let nag = buf.get_byte()?;
                     self.add_nag(nag);
                 }
+                // The comment's text follows the moves; mark the move it
+                // belongs to.
                 ENCODE_COMMENT => {
                     if flags & GAME_DECODE_COMMENTS != 0 {
                         let current_idx = self
                             .current_move
                             .ok_or(Error::Decode("No current move".to_string()))?;
-                        if let Some(prev_idx) = self.moves[current_idx].prev {
-                            self.moves[prev_idx].comment = Some(String::new());
-                        }
+                        self.moves[current_idx].comment = Some(String::new());
                     }
                 }
                 _ => {
@@ -422,19 +422,36 @@ impl Game {
         Ok(())
     }
 
-    fn add_nag(&mut self, nag: u8) {
-        let current_idx = match self.current_move {
-            Some(idx) => idx,
-            None => return,
+    /// Adds `nag` to the current move, the move it follows.
+    ///
+    /// Like SCID, a NAG before the first move of the game or of a variation
+    /// is dropped, as is NAG 0, which means no annotation.
+    pub(crate) fn add_nag(&mut self, nag: u8) {
+        let Some(node) = self.current_move.map(|idx| &mut self.moves[idx]) else {
+            return;
         };
+        if node.marker == Marker::NoMarker && nag != 0 && node.nags.len() < MAX_NAGS {
+            node.nags.push(nag);
+        }
+    }
 
-        let prev_idx = match self.moves[current_idx].prev {
-            Some(idx) => idx,
-            None => return,
+    /// Adds `comment` to the current move, the move it follows, or to the
+    /// start of the game or variation before its first move.
+    ///
+    /// Like SCID, a second comment is appended to the first, with a space
+    /// between them unless the first is empty or ends in whitespace.
+    pub(crate) fn append_comment(&mut self, comment: &str) {
+        let Some(idx) = self.current_move else {
+            return;
         };
-
-        if self.moves[prev_idx].nags.len() < MAX_NAGS && nag != 0 {
-            self.moves[prev_idx].nags.push(nag);
+        match self.moves[idx].comment {
+            Some(ref mut existing) => {
+                if !existing.is_empty() && !existing.ends_with(|c: char| c.is_ascii_whitespace()) {
+                    existing.push(' ');
+                }
+                existing.push_str(comment);
+            }
+            None => self.moves[idx].comment = Some(comment.to_string()),
         }
     }
 
@@ -721,13 +738,13 @@ mod tests {
             assert!(pgn.is_ascii(), "${nag}: {pgn}");
             let reread = crate::pgn::parse_single_game(&pgn).unwrap();
             assert!(reread.warnings.is_empty(), "${nag}: {pgn}");
-            // Where the NAG attaches when read back is #38.
-            let nags: Vec<u8> = reread
+            assert_eq!(reread.moves[2].nags, [nag], "${nag}: {pgn}");
+            let nags = reread
                 .moves
                 .iter()
-                .flat_map(|node| node.nags.clone())
-                .collect();
-            assert_eq!(nags, [nag], "${nag}: {pgn}");
+                .map(|node| node.nags.len())
+                .sum::<usize>();
+            assert_eq!(nags, 1, "${nag}: {pgn}");
         }
     }
 
