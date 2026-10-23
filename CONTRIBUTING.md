@@ -63,10 +63,11 @@ reference the issue the PR addresses.
 
 ## Test data
 
-The fixtures in `tests/data/` (`one`, `five`, `edge`, and `castling`, each
+The fixtures in `tests/data/` (`one`, `five`, `edge`, `castling`, and `annotated`, each
 with `.si4`, `.sn4`, `.sg4`, and a matching `.pgn`) are shared by both crates'
-integration tests. `castling` was written by the C++ reference converter from
-`castling.pgn`, like `edge`. `notation.pgn` has one game per case in
+integration tests. `castling` and `annotated` were written by the C++ reference
+converter from `castling.pgn` and `annotated.pgn`, like `edge`. `annotated` has
+NAGs and comments in the main line and in variations. `notation.pgn` has one game per case in
 [docs/PGN_IMPORT.md](docs/PGN_IMPORT.md). `.gitignore` excludes `*.si4`, `*.sn4`, and `*.sg4` everywhere, so new
 fixtures must be added with `git add -f`.
 
