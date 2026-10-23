@@ -841,7 +841,7 @@ fn starts_with_symbol(text: &str) -> bool {
 }
 
 /// Splits a move from the annotation symbols written directly after it,
-/// as in `e4!?`, `Nf3=`, or `e4-+`. SCID's reader splits them the same way.
+/// as in `e4!?`, `Nf3=`, `e4-+`, or `e4--+`.
 fn split_suffix(token: &str) -> (&str, &str) {
     let bytes = token.as_bytes();
     let end = (0..bytes.len())
@@ -849,8 +849,10 @@ fn split_suffix(token: &str) -> (&str, &str) {
             let next = bytes.get(i + 1).copied();
             let in_move = match bytes[i] {
                 b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b':' => true,
-                // `-` separates squares, as in `e2-e4`, but starts `-+`.
-                b'-' => !matches!(next, Some(b'+' | b'/')),
+                // `-` separates squares, as in `e2-e4` or `O-O`, and SCID
+                // ignores one at the end of a move. Otherwise it starts a
+                // symbol, as in `-+`, `-/+`, `--+`, or `->`.
+                b'-' => next.is_none_or(|b| b.is_ascii_alphanumeric()),
                 // `=` marks a promotion, as in `e8=Q`, but is also a symbol.
                 b'=' => next.is_some_and(is_promotion_letter),
                 _ => false,
@@ -1396,6 +1398,10 @@ mod tests {
         assert_eq!(classify_token("Nf3="), mv("Nf3", "="));
         assert_eq!(classify_token("e2-e4"), mv("e2-e4", ""));
         assert_eq!(classify_token("e4-/+"), mv("e4", "-/+"));
+        assert_eq!(classify_token("e4--+"), mv("e4", "--+"));
+        assert_eq!(classify_token("e4->"), mv("e4", "->"));
+        assert_eq!(classify_token("e4-"), mv("e4-", ""));
+        assert_eq!(classify_token("O-O-O"), mv("O-O-O", ""));
         assert_eq!(classify_token("e4~"), mv("e4", "~"));
         assert_eq!(classify_token("exd6ep"), mv("exd6", ""));
         assert_eq!(classify_token("exd6e.p.+"), mv("exd6", "+"));
@@ -1428,6 +1434,35 @@ mod tests {
                 classify_token(unknown),
                 MoveToken::Unknown(unknown.to_string()),
                 "{unknown}"
+            );
+        }
+    }
+
+    /// The moves and each node's NAGs of a game with `movetext`.
+    fn moves_and_nags(movetext: &str) -> (Vec<String>, Vec<Vec<u8>>) {
+        let game = parse_single_game(&format!("[Event \"x\"]\n\n{movetext}\n")).unwrap();
+        assert!(game.warnings.is_empty(), "{movetext}: {:?}", game.warnings);
+        let sans = game.moves.iter().map(|node| node.san.clone()).collect();
+        let nags = game.moves.iter().map(|node| node.nags.clone()).collect();
+        (sans, nags)
+    }
+
+    #[test]
+    fn test_every_symbol_matches_its_nag_attached_or_separate() {
+        for (symbol, nag) in SYMBOL_NAGS {
+            let expected = moves_and_nags(&format!("1. e4 ${nag} e5 2. Nf3 ${nag} *"));
+            for movetext in [
+                format!("1. e4{symbol} e5 2. Nf3{symbol} *"),
+                format!("1. e4 {symbol} e5 2. Nf3 {symbol} *"),
+            ] {
+                assert_eq!(moves_and_nags(&movetext), expected, "{movetext}");
+            }
+        }
+        for (symbol, nag) in [("N", 146), ("D", 201), ("R", 144)] {
+            assert_eq!(
+                moves_and_nags(&format!("1. e4 {symbol} e5 *")),
+                moves_and_nags(&format!("1. e4 ${nag} e5 *")),
+                "{symbol}"
             );
         }
     }
