@@ -538,6 +538,11 @@ fn test_notation_fixture() {
         ("A3 missing or extra capture sign", "e4 d5 exd5 Qxd5 Nc3 |  | * | ".into()),
         ("A4 pawn coordinates", "e4 e5 |  | * | ".into()),
         ("A5 null moves", "e4 -- -- -- d4 |  | * | ".into()),
+        (
+            "A5b null move in check",
+            "error: --: Invalid move: a null move is illegal in check in k7/8/8/8/8/8/4r3/4K3 w - - 0 1"
+                .into(),
+        ),
         ("A6 check and mate signs", "e4 e5 Bc4 Nc6 Qh5 Nf6 Qxf7# |  | * | ".into()),
         ("A7 move numbers without dots", "e4 e5 Nf3 |  | * | ".into()),
         ("A8 double check sign", "e4 f6 d4 g5 Qh5# |  | * | ".into()),
@@ -636,8 +641,16 @@ fn test_notation_fixture() {
         ),
         ("27c result with no result tag", "e4 e5 |  | 1-0 | ".into()),
         (
+            "27d unrecognized result tag and unknown result",
+            "e4 e5 |  | * | ".into(),
+        ),
+        (
             "28a no result before the next game",
             "e4 e5 |  | 1-0 | the moves don't end with a result, so the Result tag 1-0 is used".into(),
+        ),
+        (
+            "28c no result and no result tag",
+            "e4 e5 |  | * | the moves don't end with a result, and there is no Result tag".into(),
         ),
         ("29 move that can't be read", "error: Nf6: illegal san".into()),
         ("30 SetUp without FEN", "e4 |  | * | ".into()),

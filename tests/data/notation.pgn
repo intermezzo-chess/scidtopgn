@@ -18,6 +18,11 @@
 
 1. e4 -- 2. Z0 null 3. d4 *
 
+[Event "A5b null move in check"]
+[FEN "k7/8/8/8/8/8/4r3/4K3 w - - 0 1"]
+
+1. -- *
+
 [Event "A6 check and mate signs"]
 
 1. e4 e5 2. Bc4 Nc6 3. Qh5+ Nf6 4. Qxf7# *
@@ -279,8 +284,17 @@
 
 1. e4 e5 1-0
 
+[Event "27d unrecognized result tag and unknown result"]
+[Result "1-0 (time)"]
+
+1. e4 e5 *
+
 [Event "28a no result before the next game"]
 [Result "1-0"]
+
+1. e4 e5
+
+[Event "28c no result and no result tag"]
 
 1. e4 e5
 
