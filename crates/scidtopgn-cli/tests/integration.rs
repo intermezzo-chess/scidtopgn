@@ -617,3 +617,34 @@ fn test_cli_import_prints_warnings_and_keeps_the_game() {
         assert!(exported.contains("6. O-O"), "{exported}");
     }
 }
+
+#[test]
+fn test_cli_round_trip_keeps_annotations_and_variations() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let pgn_path = temp.path().join("nag.pgn");
+    std::fs::write(
+        &pgn_path,
+        "[Event \"x\"]\n\n1. e4 $1 e5 {after e5} 2. Nf3 $2 (2. f4 $5) *\n",
+    )
+    .expect("Failed to write PGN");
+    let db_path = temp.path().join("nag");
+    let output = cli()
+        .arg("import")
+        .arg(&pgn_path)
+        .arg("-o")
+        .arg(&db_path)
+        .output()
+        .expect("Failed to run CLI");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let exported = cli().arg(&db_path).output().expect("Failed to run CLI");
+    let stdout = String::from_utf8_lossy(&exported.stdout);
+    assert!(
+        stdout.contains("1. e4 ! e5 {after e5} 2. Nf3 ? (2. f4 !?)\n*\n"),
+        "{stdout}"
+    );
+}

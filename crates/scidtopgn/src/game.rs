@@ -455,6 +455,22 @@ impl Game {
         }
     }
 
+    /// The start markers of the move at `idx`'s variations, in order. A
+    /// start marker's `var_child` links to the next variation of the same
+    /// move.
+    pub(crate) fn variations(&self, idx: usize) -> impl Iterator<Item = usize> + '_ {
+        let node = &self.moves[idx];
+        let first = if node.marker == Marker::StartMarker {
+            None
+        } else {
+            node.var_child
+        };
+        let valid = move |idx: &usize| *idx < self.moves.len();
+        std::iter::successors(first.filter(valid), move |&start| {
+            self.moves[start].var_child.filter(valid)
+        })
+    }
+
     fn decode_comments(&mut self, buf: &mut ByteBuffer) -> Result<()> {
         let start_idx = self
             .first_move
@@ -586,75 +602,31 @@ impl Game {
         pgn.push('\n');
 
         if let Some(start_idx) = self.first_move {
-            let mut lines: Vec<String> = Vec::new();
-            let mut current_line = String::new();
-            // A FEN's move number can be u32::MAX, so count in u64.
-            let (mut move_num, mut is_white_move) = match self.start_position {
-                Some(ref start) => (
-                    u64::from(start.fullmoves().get()),
-                    start.turn() == Color::White,
-                ),
-                None => (1, true),
+            // A FEN's move number can be u32::MAX, so count plies in u64.
+            let ply = match self.start_position {
+                Some(ref start) => {
+                    2 * (u64::from(start.fullmoves().get()) - 1)
+                        + u64::from(start.turn() == Color::Black)
+                }
+                None => 0,
             };
-            let mut first_move = true;
+            let mut tokens = Vec::new();
+            self.line_tokens(start_idx, ply, &mut tokens);
 
-            let mut current_idx = start_idx;
-            while let Some(next_idx) = self.moves[current_idx].next {
-                current_idx = next_idx;
-
-                if self.moves[current_idx].marker == Marker::EndMarker
-                    || self.moves[current_idx].marker == Marker::EndGame
-                {
-                    break;
-                }
-
-                let mut token = String::new();
-
-                if is_white_move {
-                    token.push_str(&format!("{}. ", move_num));
-                } else if first_move {
-                    token.push_str(&format!("{}... ", move_num));
-                }
-                first_move = false;
-
-                token.push_str(&self.moves[current_idx].san);
-
-                // NAG 0 means no annotation; SCID writes nothing for it.
-                for &nag in self.moves[current_idx].nags.iter().filter(|&&nag| nag != 0) {
-                    token.push(' ');
-                    match nag_to_symbol(nag) {
-                        "" => token.push_str(&format!("${nag}")),
-                        symbol => token.push_str(symbol),
-                    }
-                }
-
-                if let Some(ref comment) = self.moves[current_idx].comment {
-                    token.push(' ');
-                    token.push_str(&format!("{{{}}}", comment));
-                }
-
+            let mut current_line = String::new();
+            for token in tokens {
                 if current_line.len() + token.len() + 1 > 80 && !current_line.is_empty() {
-                    lines.push(current_line.trim().to_string());
-                    current_line = String::new();
+                    pgn.push_str(&current_line);
+                    pgn.push('\n');
+                    current_line.clear();
                 }
-
                 if !current_line.is_empty() {
                     current_line.push(' ');
                 }
                 current_line.push_str(&token);
-
-                is_white_move = !is_white_move;
-                if is_white_move {
-                    move_num += 1;
-                }
             }
-
             if !current_line.is_empty() {
-                lines.push(current_line.trim().to_string());
-            }
-
-            for line in &lines {
-                pgn.push_str(line);
+                pgn.push_str(&current_line);
                 pgn.push('\n');
             }
         }
@@ -663,6 +635,71 @@ impl Game {
         pgn.push('\n');
 
         pgn
+    }
+
+    /// Appends the movetext of the line that starts at the start marker
+    /// `start_idx` to `tokens`, with its comments, NAGs, and variations.
+    /// `ply` is the half-move number of its first move, counting from 0.
+    ///
+    /// Each token is a move with its number, NAGs, and comment, so they stay
+    /// on one line. A Black move is numbered when it starts a line or
+    /// follows a comment or a variation, as the PGN export format requires.
+    fn line_tokens(&self, start_idx: usize, mut ply: u64, tokens: &mut Vec<String>) {
+        if let Some(ref comment) = self.moves[start_idx].comment {
+            tokens.push(format!("{{{comment}}}"));
+        }
+
+        let mut number_black_move = true;
+        let mut idx = self.moves[start_idx].next;
+        while let Some(i) = idx {
+            let node = &self.moves[i];
+            if matches!(node.marker, Marker::EndMarker | Marker::EndGame) {
+                break;
+            }
+
+            let number = ply / 2 + 1;
+            let mut token = if ply.is_multiple_of(2) {
+                format!("{number}. ")
+            } else if number_black_move {
+                format!("{number}... ")
+            } else {
+                String::new()
+            };
+            token.push_str(&node.san);
+
+            // NAG 0 means no annotation; SCID writes nothing for it.
+            for &nag in node.nags.iter().filter(|&&nag| nag != 0) {
+                token.push(' ');
+                match nag_to_symbol(nag) {
+                    "" => token.push_str(&format!("${nag}")),
+                    symbol => token.push_str(symbol),
+                }
+            }
+
+            if let Some(ref comment) = node.comment {
+                token.push_str(&format!(" {{{comment}}}"));
+            }
+            number_black_move = node.comment.is_some();
+            tokens.push(token);
+
+            for var_start in self.variations(i) {
+                let first = tokens.len();
+                self.line_tokens(var_start, ply, tokens);
+                if first == tokens.len() {
+                    tokens.push("()".to_string());
+                } else {
+                    tokens[first].insert(0, '(');
+                    tokens
+                        .last_mut()
+                        .expect("the variation added a token")
+                        .push(')');
+                }
+                number_black_move = true;
+            }
+
+            ply += 1;
+            idx = node.next;
+        }
     }
 }
 
