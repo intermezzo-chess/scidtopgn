@@ -4,7 +4,9 @@
 //! the C++ reference converter in `scid-cpp` from `tests/data/edge.pgn`, which
 //! covers variations, null moves, promotions, en passant, castling, and FEN
 //! starts. The expected movetext below is python-chess 1.11.2's export of
-//! `edge.pgn`.
+//! `edge.pgn`. `tests/data/castling` was written by the C++ reference
+//! converter from `tests/data/castling.pgn`, which castles after the king has
+//! moved and returned, as SCID allows.
 
 use std::path::PathBuf;
 
@@ -18,6 +20,12 @@ const EDGE_MOVETEXT: [&str; 4] = [
     "25... dxe3 26. bxa8=N ( 26. bxa8=Q+ Kd7 ) ( 26. bxa8=R+ Kd7 ) ( 26. b8=B Rxb8 ) 26... gxh1=Q+ ( 26... gxh1=R+ 27. Ke2 ) ( 26... gxh1=B 27. Rd1 ) ( 26... g1=N 27. Rd1 ) 27. Ke2 Qxa1 28. Nc7+ Kd7 29. -- ( 29. Nb5 Rh2+ ) 29... Qb2+ 30. Kxe3 Rh3+ 31. Kf4 Qf2+ 32. Kg4 Rg3+ 33. Kh4 Qh2# 0-1",
     "1. e4 -- 2. d4 e6 3. -- ( 3. Nc3 Bb4 ) 3... d5 4. e5 c5 5. c3 Nc6 6. Nf3 Qb6 7. Be2 cxd4 8. cxd4 Nge7 9. Na3 Nf5 10. Nc2 Bb4+ 11. Kf1 O-O 12. g4 Nfe7 13. h4 f6 14. exf6 Rxf6 15. g5 Rf7 16. Bd3 Ng6 17. h5 Nf4 18. Bxf4 Rxf4 19. Bxh7+ Kxh7 20. Qd3+ Kg8 21. Qh7+ Kf8 22. Qh8+ Ke7 23. Qxg7+ Kd8 24. g6 1-0",
     "40... Kd7 41. O-O-O+ Kc6 42. Rd4 e5 43. Rd3 e4 44. Rd4 e3 45. Kd1 e2+ 46. Kxe2 Kc5 1/2-1/2",
+];
+
+const CASTLING_MOVETEXT: [&str; 3] = [
+    "1. e4 e5 2. Nf3 Nf6 3. Bc4 Bc5 4. Ke2 Ke7 5. Ke1 Ke8 6. O-O O-O 7. d3 d6 *",
+    "1. O-O-O O-O 2. Kb1 Kg7 *",
+    "1. e4 e5 2. Nf3 Nf6 3. Bc4 Bc5 4. Ke2 Ke7 5. Ke1 Ke8 6. d3 ( 6. O-O d6 ) 6... d6 *",
 ];
 
 fn data_path(name: &str) -> PathBuf {
@@ -126,6 +134,22 @@ fn test_reads_scid_written_variations_and_setups() {
 }
 
 #[test]
+fn test_reads_scid_written_castling_without_the_right() {
+    let games = read_database("castling");
+    let movetext: Vec<String> = games.iter().map(movetext).collect();
+    assert_eq!(movetext, CASTLING_MOVETEXT);
+}
+
+#[test]
+fn test_parses_castling_without_the_right() {
+    let games = read_pgn("castling.pgn");
+    let movetext: Vec<String> = games.iter().map(movetext).collect();
+    assert_eq!(movetext, CASTLING_MOVETEXT);
+    let warnings: Vec<usize> = games.iter().map(|game| game.warnings.len()).collect();
+    assert_eq!(warnings, [2, 2, 1]);
+}
+
+#[test]
 fn test_parses_pgn_variations_and_setups() {
     let games = read_pgn("edge.pgn");
     let movetext: Vec<String> = games.iter().map(movetext).collect();
@@ -144,20 +168,22 @@ fn test_writes_moves_like_scid() {
         .collect();
     assert_eq!(written, expected);
 
-    let expected: Vec<_> = records(&data_path("five"))
-        .iter()
-        .map(|r| move_section(r))
-        .collect();
-    let written: Vec<_> = write_records(&read_pgn("five.pgn"))
-        .iter()
-        .map(|r| move_section(r))
-        .collect();
-    assert_eq!(written, expected);
+    for name in ["five", "castling"] {
+        let expected: Vec<_> = records(&data_path(name))
+            .iter()
+            .map(|r| move_section(r))
+            .collect();
+        let written: Vec<_> = write_records(&read_pgn(&format!("{name}.pgn")))
+            .iter()
+            .map(|r| move_section(r))
+            .collect();
+        assert_eq!(written, expected, "{name}");
+    }
 }
 
 #[test]
 fn test_scid_to_pgn_to_scid() {
-    for name in ["five", "edge"] {
+    for name in ["five", "edge", "castling"] {
         let original = records(&data_path(name));
         let pgn: String = read_database(name).iter().map(Game::to_pgn).collect();
         let reparsed = parse_pgn(&pgn).unwrap();
@@ -173,7 +199,7 @@ fn test_scid_to_pgn_to_scid() {
 
 #[test]
 fn test_pgn_to_scid_to_pgn() {
-    for name in ["five.pgn", "edge.pgn"] {
+    for name in ["five.pgn", "edge.pgn", "castling.pgn"] {
         let games = read_pgn(name);
         let temp = TempDir::new().unwrap();
         let path = temp.path().join("roundtrip");

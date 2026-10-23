@@ -575,3 +575,45 @@ fn test_cli_import_accepts_delimiters_attached_to_moves() {
         );
     }
 }
+
+#[test]
+fn test_cli_import_prints_warnings_and_keeps_the_game() {
+    let pgn = "[Event \"Castled\"]\n[Result \"1-0\"]\n\n1. e4 e5 2. Nf3 Nf6 3. Bc4 Bc5\n4. Ke2 Ke7 5. Ke1 Ke8 6. O-O zz 1-0\n\n[Event \"Plain\"]\n\n1. d4 d5 *\n";
+    for mode in ["skip", "abort"] {
+        let temp = TempDir::new().expect("Failed to create temp dir");
+        let pgn_path = temp.path().join("input.pgn");
+        std::fs::write(&pgn_path, pgn).expect("Failed to write PGN");
+        let db_path = temp.path().join("imported");
+        let output = cli()
+            .arg("import")
+            .arg(&pgn_path)
+            .arg("-o")
+            .arg(&db_path)
+            .args(["--on-error", mode, "--verbose"])
+            .output()
+            .expect("Failed to run CLI");
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{mode}: {stderr}");
+        assert!(
+            stderr.contains(
+                "Warning: PGN game 1, line 5: \"O-O\" castles without the castling right"
+            ),
+            "{mode}: {stderr}"
+        );
+        assert!(
+            stderr.contains("Warning: PGN game 1, line 5: skipped unknown text \"zz\""),
+            "{mode}: {stderr}"
+        );
+        assert!(
+            stderr.contains("2 games imported, 0 skipped"),
+            "{mode}: {stderr}"
+        );
+        assert_eq!(imported_events(&db_path), ["Castled", "Plain"]);
+
+        // The castle is exported like any other.
+        let exported = cli().arg(&db_path).output().expect("Failed to run CLI");
+        let exported = String::from_utf8_lossy(&exported.stdout);
+        assert!(exported.contains("6. O-O"), "{exported}");
+    }
+}

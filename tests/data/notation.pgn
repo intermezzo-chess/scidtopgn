@@ -1,0 +1,333 @@
+[Event "A1 castling with zeros or lowercase"]
+
+1. e4 e5 2. Nf3 Nf6 3. Bc4 Bc5 4. 0-0 o-o *
+
+[Event "A2 pawn prefix"]
+
+1. Pe4 Pe5 *
+
+[Event "A3 missing or extra capture sign"]
+
+1. e4 d5 2. ed5 Qd5 3. Nxc3 *
+
+[Event "A4 pawn coordinates"]
+
+1. e2e4 e7e5 *
+
+[Event "A5 null moves"]
+
+1. e4 -- 2. Z0 null 3. d4 *
+
+[Event "A5b null move in check"]
+[FEN "k7/8/8/8/8/8/4r3/4K3 w - - 0 1"]
+
+1. -- *
+
+[Event "A6 check and mate signs"]
+
+1. e4 e5 2. Bc4 Nc6 3. Qh5+ Nf6 4. Qxf7# *
+
+[Event "A7 move numbers without dots"]
+
+1 e4 e5 2 Nf3 *
+
+[Event "A8 double check sign"]
+
+1. e4 f6 2. d4 g5 3. Qh5++ *
+
+[Event "1a pawn capture without a rank"]
+
+1. e4 d5 2. ed *
+
+[Event "1b pawn capture without a rank, with x"]
+
+1. e4 d5 2. exd *
+
+[Event "1c pawn capture without a rank, en passant"]
+[FEN "4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 2"]
+
+2. ed *
+
+[Event "2 ambiguous pawn capture without a rank"]
+[FEN "4k3/8/3n4/4P3/3n4/4P3/8/4K3 w - - 0 1"]
+
+1. ed *
+
+[Event "3 colon for a capture"]
+
+1. e4 d5 2. e:d5 Q:d5 *
+
+[Event "4 hyphen between squares"]
+
+1. e2-e4 e7-e5 2. Ng1-f3 Nb8-c6 *
+
+[Event "5 coordinate piece moves"]
+
+1. g1f3 g8f6 *
+
+[Event "6a king moves two squares"]
+
+1. e4 e5 2. Nf3 Nf6 3. Bc4 Bc5 4. Kg1 Kg8 *
+
+[Event "6b king coordinate castling"]
+
+1. e4 e5 2. Nf3 Nf6 3. Bc4 Bc5 4. e1g1 e8g8 *
+
+[Event "6c king moves two squares without the castling right"]
+
+1. e4 e5 2. Nf3 Nf6 3. Bc4 Bc5 4. Ke2 Ke7 5. Ke1 Ke8 6. Kg1 *
+
+[Event "7a promotion with no piece"]
+[FEN "4k3/P7/8/8/8/8/8/4K3 w - - 0 1"]
+
+1. a8 *
+
+[Event "7b capture promotion with no piece"]
+[FEN "1n2k3/P7/8/8/8/8/8/4K3 w - - 0 1"]
+
+1. axb8 *
+
+[Event "7c coordinate promotion with no piece"]
+[FEN "4k3/P7/8/8/8/8/8/4K3 w - - 0 1"]
+
+1. a7a8 *
+
+[Event "8a lowercase promotion piece"]
+[FEN "4k3/P7/8/8/8/8/8/4K3 w - - 0 1"]
+
+1. a8q *
+
+[Event "8b lowercase coordinate promotion"]
+[FEN "4k3/P7/8/8/8/8/8/4K3 w - - 0 1"]
+
+1. a7a8q *
+
+[Event "8c lowercase capture promotion without a rank"]
+[FEN "1n2k3/P7/8/8/8/8/8/4K3 w - - 0 1"]
+
+1. abn *
+
+[Event "8d lowercase bishop promotion"]
+[FEN "4k3/P7/8/8/8/8/8/4K3 w - - 0 1"]
+
+1. a8b *
+
+[Event "8e lowercase coordinate bishop promotion"]
+[FEN "4k3/P7/8/8/8/8/8/4K3 w - - 0 1"]
+
+1. a7a8b *
+
+[Event "9 lowercase piece after equals sign"]
+[FEN "4k3/P7/8/8/8/8/8/4K3 w - - 0 1"]
+
+1. a8=n *
+
+[Event "10a capture promotion without a rank"]
+[FEN "1n2k3/P7/8/8/8/8/8/4K3 w - - 0 1"]
+
+1. ab=Q *
+
+[Event "10b capture promotion without a rank or equals sign"]
+[FEN "1n2k3/P7/8/8/8/8/8/4K3 w - - 0 1"]
+
+1. abQ *
+
+[Event "11a en passant marker attached"]
+[FEN "4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 2"]
+
+2. exd6ep *
+
+[Event "11b en passant marker after the move"]
+[FEN "4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 2"]
+
+2. exd6 e.p. *
+
+[Event "12 lowercase piece letter"]
+
+1. e4 e5 2. nf3 *
+
+[Event "13 lowercase b for a bishop"]
+
+1. e4 e5 2. bc4 *
+
+[Event "14 castling without dashes"]
+[FEN "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1"]
+
+1. OOO OO *
+
+[Event "15 castling with zeros and no dashes"]
+[FEN "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1"]
+
+1. 000 00 *
+
+[Event "16a castling after the king moved"]
+
+1. e4 e5 2. Nf3 Nf6 3. Bc4 Bc5 4. Ke2 Ke7 5. Ke1 Ke8 6. O-O O-O *
+
+[Event "16b castling after the rook moved"]
+
+1. e4 e5 2. Nf3 Nf6 3. Bc4 Bc5 4. Rg1 Rg8 5. Rh1 Rh8 6. O-O *
+
+[Event "16c queenside castling without the right in the FEN"]
+[FEN "r3k2r/8/8/8/8/8/8/R3K2R w - - 0 1"]
+
+1. O-O-O *
+
+[Event "16d castling without the right in a variation"]
+
+1. e4 e5 2. Nf3 Nf6 3. Bc4 Bc5 4. Ke2 Ke7 5. Ke1 Ke8 6. d3 (6. O-O) 6... d6 *
+
+[Event "18a castling with no rook"]
+[FEN "4k3/8/8/8/8/8/8/4K3 w - - 0 1"]
+
+1. O-O *
+
+[Event "18b queenside castling with no rook"]
+[FEN "4k3/8/8/8/8/8/8/4K3 w - - 0 1"]
+
+1. O-O-O *
+
+[Event "19 castling through check"]
+[FEN "4k1r1/8/8/8/8/8/8/4K2R w K - 0 1"]
+
+1. O-O *
+
+[Event "20a kingside castling when only queenside is legal"]
+[FEN "r3k2r/8/8/8/8/8/8/R3K1NR w KQkq - 0 1"]
+
+1. O-O *
+
+[Event "20b queenside castling when only kingside is legal"]
+[FEN "r3k2r/8/8/8/8/8/8/RN2K2R w KQkq - 0 1"]
+
+1. O-O-O *
+
+[Event "21a annotation symbols attached"]
+
+1. e4! e5? 2. Nf3!! Nc6?? 3. Bb5!? a6?! *
+
+[Event "21b annotation symbols after the move"]
+
+1. e4 ! e5 ? 2. Nf3 += Nc6 =+ 3. Bb5 +/- a6 -/+ 4. Ba4 +- Nf6 -+ 5. O-O = Be7 ~ *
+
+[Event "21c other annotation symbols"]
+
+1. e4 +/= e5 =/+ 2. Nf3 +-- Nc6 --+ 3. Bb5 +> a6 -> 4. Ba4 =/& Nf6 ~= *
+
+[Event "21d annotation symbols after check"]
+
+1. e4 e5 2. Bc4 Nc6 3. Qh5 Nf6 4. Qxf7#! *
+
+[Event "22a annotation symbols attached by equals or hyphen"]
+
+1. e4=+ e5 2. Nf3= Nc6 3. Bb5-+ a6 4. Ba4-/+ Nf6 *
+
+[Event "22b several annotation symbols attached"]
+
+1. e4!!+- e5 *
+
+[Event "22c symbols starting with two hyphens or an arrow attached"]
+
+1. e4--+ e5 2. Nf3-> Nc6 *
+
+[Event "23 tilde attached"]
+
+1. e4~ e5 *
+
+[Event "24 letter symbols"]
+
+1. e4 N e5 D 2. Nf3 R Nc6 *
+
+[Event "25a unknown symbols"]
+
+1. e4 zz e5 /\ 2. Nf3 Diagram Nc6 *
+
+[Event "25b piece letter on its own"]
+
+1. e4 B e5 *
+
+[Event "25c word that starts like a null move"]
+
+1. e4 nullify e5 *
+
+[Event "26a result 1:0"]
+[Result "1-0"]
+
+1. e4 e5 1:0
+
+[Event "26b result 0:1"]
+[Result "0-1"]
+
+1. e4 e5 0:1
+
+[Event "26c result 1/2"]
+[Result "1/2-1/2"]
+
+1. e4 e5 1/2
+
+[Event "26d result 1/2:1/2"]
+[Result "1/2-1/2"]
+
+1. e4 e5 1/2:1/2
+
+[Event "27a result differs from the tag"]
+[Result "1-0"]
+
+1. e4 e5 0-1
+
+[Event "27b unknown result with a result tag"]
+[Result "1-0"]
+
+1. e4 e5 *
+
+[Event "27c result with no result tag"]
+
+1. e4 e5 1-0
+
+[Event "27d unrecognized result tag and unknown result"]
+[Result "1-0 (time)"]
+
+1. e4 e5 *
+
+[Event "28a no result before the next game"]
+[Result "1-0"]
+
+1. e4 e5
+
+[Event "28c no result and no result tag"]
+
+1. e4 e5
+
+[Event "29 move that can't be read"]
+
+1. e4 e5 2. Nf6 Nc6 *
+
+[Event "30 SetUp without FEN"]
+[SetUp "1"]
+
+1. e4 *
+
+[Event "31a FEN castling rights that don't fit"]
+[FEN "4k3/8/8/8/8/8/8/4K3 w KQkq - 0 1"]
+
+1. Kd1 *
+
+[Event "31b FEN en passant square that doesn't fit"]
+[FEN "4k3/8/8/8/8/8/8/4K3 w - e3 0 1"]
+
+1. Kd1 *
+
+[Event "31c FEN en passant square with no capture"]
+[FEN "4k3/8/8/8/4P3/8/8/4K3 b - e3 0 1"]
+
+1... Kd7 *
+
+[Event "32 Variant tag"]
+[Variant "Chess960"]
+
+1. e4 *
+
+[Event "28b no result at the end of the input"]
+[Result "0-1"]
+
+1. e4 e5

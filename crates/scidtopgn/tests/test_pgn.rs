@@ -101,7 +101,7 @@ fn test_game_roundtrip() {
 }
 
 use scidtopgn::shakmaty::{Color, Position};
-use scidtopgn::{Error, PgnParser};
+use scidtopgn::{Error, PgnParser, PgnWarningKind};
 
 fn pgn_game(tags: &str, movetext: &str) -> String {
     format!("[Event \"Test\"]\n{tags}\n\n{movetext}\n")
@@ -118,6 +118,10 @@ fn sans(game: &Game) -> Vec<String> {
         idx = game.moves[i].next;
     }
     sans
+}
+
+fn warning_kinds(game: &Game) -> Vec<PgnWarningKind> {
+    game.warnings.iter().map(|w| w.kind.clone()).collect()
 }
 
 fn parse_sans(movetext: &str) -> Vec<String> {
@@ -152,18 +156,21 @@ fn test_castling_rights() {
         parse_sans("1. e4 e5 2. Nf3 Nf6 3. Bc4 Bc5 4. O-O O-O *"),
         ["e4", "e5", "Nf3", "Nf6", "Bc4", "Bc5", "O-O", "O-O"]
     );
-    // The king has moved.
-    assert_illegal(
-        "",
+    // Like SCID, castling after the king or rook has moved and returned is
+    // played, with a warning.
+    for movetext in [
         "1. e4 e5 2. Nf3 Nf6 3. Bc4 Bc5 4. Ke2 Ke7 5. Ke1 Ke8 6. O-O *",
-        "O-O",
-    );
-    // The rook has moved.
-    assert_illegal(
-        "",
         "1. e4 e5 2. Nf3 Nf6 3. Bc4 Bc5 4. Rg1 Rg8 5. Rh1 Rh8 6. O-O *",
-        "O-O",
-    );
+    ] {
+        let game = parse_single_game(&pgn_game("", movetext)).unwrap();
+        assert_eq!(sans(&game).last().map(String::as_str), Some("O-O"));
+        assert_eq!(
+            warning_kinds(&game),
+            [PgnWarningKind::CastlingWithoutRight {
+                text: "O-O".to_string()
+            }]
+        );
+    }
     // Castling through an attacked square.
     assert_illegal(
         "[FEN \"4k3/8/8/8/8/8/5r2/4K2R w K - 0 1\"]",
@@ -436,9 +443,11 @@ fn test_tag_pairs_may_span_lines() {
 
 #[test]
 fn test_annotated_null_moves() {
+    // Like SCID, `--+` is the symbol for a crushing advantage for Black
+    // (NAG 21), not a null move.
     assert_eq!(
         parse_sans("1. Z0! null? 2. e4 --+ 3. -- #?! *"),
-        ["--", "--", "e4", "--", "--"]
+        ["--", "--", "e4", "--"]
     );
     assert_illegal("", "1. e4 e5 2. Qh5 Nc6 3. Qxf7+ --! *", "--!");
 }
@@ -487,4 +496,278 @@ fn test_delimiters_attached_to_moves() {
         assert_eq!(sans(&parse_single_game(&pgn).unwrap()), ["e4", "e5"]);
     }
     assert_eq!(parse_sans("1. e4*"), ["e4"]);
+}
+
+/// The main line's SAN, every NAG in it, the result, and the warnings,
+/// without line numbers.
+fn summary(game: &Game) -> String {
+    let mut nags = Vec::new();
+    let mut idx = game.first_move;
+    while let Some(i) = idx {
+        nags.extend(game.moves[i].nags.iter().map(|nag| format!("${nag}")));
+        idx = game.moves[i].next;
+    }
+    let warnings: Vec<String> = game.warnings.iter().map(|w| w.kind.to_string()).collect();
+    format!(
+        "{} | {} | {} | {}",
+        sans(game).join(" "),
+        nags.join(" "),
+        game.result,
+        warnings.join("; ")
+    )
+}
+
+/// The reason a game failed.
+fn failure(error: &Error) -> String {
+    match error {
+        Error::PgnGame { source, .. } => failure(source),
+        Error::PgnMove { san, source, .. } => format!("error: {san}: {source}"),
+        other => format!("error: {other}"),
+    }
+}
+
+/// Each game in `tests/data/notation.pgn` is a case in `docs/PGN_IMPORT.md`,
+/// named by its `Event` tag. The document records how SCID reads the same
+/// file.
+#[test]
+fn test_notation_fixture() {
+    let castled = "\"O-O\" castles without the castling right";
+    let expected = [
+        ("A1 castling with zeros or lowercase", "e4 e5 Nf3 Nf6 Bc4 Bc5 O-O O-O |  | * | ".to_string()),
+        ("A2 pawn prefix", "e4 e5 |  | * | ".into()),
+        ("A3 missing or extra capture sign", "e4 d5 exd5 Qxd5 Nc3 |  | * | ".into()),
+        ("A4 pawn coordinates", "e4 e5 |  | * | ".into()),
+        ("A5 null moves", "e4 -- -- -- d4 |  | * | ".into()),
+        (
+            "A5b null move in check",
+            "error: --: Invalid move: a null move is illegal in check in k7/8/8/8/8/8/4r3/4K3 w - - 0 1"
+                .into(),
+        ),
+        ("A6 check and mate signs", "e4 e5 Bc4 Nc6 Qh5 Nf6 Qxf7# |  | * | ".into()),
+        ("A7 move numbers without dots", "e4 e5 Nf3 |  | * | ".into()),
+        ("A8 double check sign", "e4 f6 d4 g5 Qh5# |  | * | ".into()),
+        ("1a pawn capture without a rank", "e4 d5 exd5 |  | * | ".into()),
+        ("1b pawn capture without a rank, with x", "e4 d5 exd5 |  | * | ".into()),
+        ("1c pawn capture without a rank, en passant", "exd6 |  | * | ".into()),
+        ("2 ambiguous pawn capture without a rank", "error: ed: ambiguous san".into()),
+        ("3 colon for a capture", "e4 d5 exd5 Qxd5 |  | * | ".into()),
+        ("4 hyphen between squares", "e4 e5 Nf3 Nc6 |  | * | ".into()),
+        ("5 coordinate piece moves", "Nf3 Nf6 |  | * | ".into()),
+        ("6a king moves two squares", "e4 e5 Nf3 Nf6 Bc4 Bc5 O-O O-O |  | * | ".into()),
+        ("6b king coordinate castling", "e4 e5 Nf3 Nf6 Bc4 Bc5 O-O O-O |  | * | ".into()),
+        ("6c king moves two squares without the castling right", "error: Kg1: illegal san".into()),
+        ("7a promotion with no piece", "a8=Q+ |  | * | ".into()),
+        ("7b capture promotion with no piece", "axb8=Q+ |  | * | ".into()),
+        ("7c coordinate promotion with no piece", "error: a7a8: illegal uci".into()),
+        ("8a lowercase promotion piece", "a8=Q+ |  | * | ".into()),
+        ("8b lowercase coordinate promotion", "a8=Q+ |  | * | ".into()),
+        ("8c lowercase capture promotion without a rank", "axb8=N |  | * | ".into()),
+        ("8d lowercase bishop promotion", "a8=B |  | * | ".into()),
+        ("8e lowercase coordinate bishop promotion", "a8=B |  | * | ".into()),
+        ("9 lowercase piece after equals sign", "a8=N |  | * | ".into()),
+        ("10a capture promotion without a rank", "axb8=Q+ |  | * | ".into()),
+        ("10b capture promotion without a rank or equals sign", "axb8=Q+ |  | * | ".into()),
+        ("11a en passant marker attached", "exd6 |  | * | ".into()),
+        ("11b en passant marker after the move", "exd6 |  | * | ".into()),
+        ("12 lowercase piece letter", "e4 e5 |  | * | skipped unknown text \"nf3\"".into()),
+        ("13 lowercase b for a bishop", "error: bc4: illegal san".into()),
+        ("14 castling without dashes", "O-O-O O-O |  | * | ".into()),
+        ("15 castling with zeros and no dashes", "O-O-O O-O |  | * | ".into()),
+        (
+            "16a castling after the king moved",
+            format!("e4 e5 Nf3 Nf6 Bc4 Bc5 Ke2 Ke7 Ke1 Ke8 O-O O-O |  | * | {castled}; {castled}"),
+        ),
+        (
+            "16b castling after the rook moved",
+            format!("e4 e5 Nf3 Nf6 Bc4 Bc5 Rg1 Rg8 Rh1 Rh8 O-O |  | * | {castled}"),
+        ),
+        (
+            "16c queenside castling without the right in the FEN",
+            "O-O-O |  | * | \"O-O-O\" castles without the castling right".into(),
+        ),
+        (
+            "16d castling without the right in a variation",
+            format!("e4 e5 Nf3 Nf6 Bc4 Bc5 Ke2 Ke7 Ke1 Ke8 d3 d6 |  | * | {castled}"),
+        ),
+        ("18a castling with no rook", "error: O-O: illegal san".into()),
+        ("18b queenside castling with no rook", "error: O-O-O: illegal san".into()),
+        ("19 castling through check", "error: O-O: illegal san".into()),
+        (
+            "20a kingside castling when only queenside is legal",
+            "O-O-O |  | * | read \"O-O\" as O-O-O because only queenside castling is legal".into(),
+        ),
+        ("20b queenside castling when only kingside is legal", "error: O-O-O: illegal san".into()),
+        ("21a annotation symbols attached", "e4 e5 Nf3 Nc6 Bb5 a6 | $1 $2 $3 $4 $5 $6 | * | ".into()),
+        (
+            "21b annotation symbols after the move",
+            "e4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6 O-O Be7 | $1 $2 $14 $15 $16 $17 $18 $19 $10 $13 | * | ".into(),
+        ),
+        (
+            "21c other annotation symbols",
+            "e4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6 | $14 $15 $20 $21 $40 $41 $44 $44 | * | ".into(),
+        ),
+        ("21d annotation symbols after check", "e4 e5 Bc4 Nc6 Qh5 Nf6 Qxf7# | $1 | * | ".into()),
+        (
+            "22a annotation symbols attached by equals or hyphen",
+            "e4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6 | $15 $10 $19 $17 | * | ".into(),
+        ),
+        ("22b several annotation symbols attached", "e4 e5 | $3 $18 | * | ".into()),
+        (
+            "22c symbols starting with two hyphens or an arrow attached",
+            "e4 e5 Nf3 Nc6 | $21 $41 | * | ".into(),
+        ),
+        ("23 tilde attached", "e4 e5 | $13 | * | ".into()),
+        ("24 letter symbols", "e4 e5 Nf3 Nc6 | $146 $201 $144 | * | ".into()),
+        (
+            "25a unknown symbols",
+            "e4 e5 Nf3 Nc6 |  | * | skipped unknown text \"zz\"; skipped unknown text \"/\\\\\"; skipped unknown text \"Diagram\"".into(),
+        ),
+        ("25b piece letter on its own", "e4 e5 |  | * | skipped unknown text \"B\"".into()),
+        (
+            "25c word that starts like a null move",
+            "e4 e5 |  | * | skipped unknown text \"nullify\"".into(),
+        ),
+        ("26a result 1:0", "e4 e5 |  | 1-0 | ".into()),
+        ("26b result 0:1", "e4 e5 |  | 0-1 | ".into()),
+        ("26c result 1/2", "e4 e5 |  | 1/2-1/2 | ".into()),
+        ("26d result 1/2:1/2", "e4 e5 |  | 1/2-1/2 | ".into()),
+        (
+            "27a result differs from the tag",
+            "e4 e5 |  | 0-1 | the result 0-1 after the moves replaces the Result tag 1-0".into(),
+        ),
+        (
+            "27b unknown result with a result tag",
+            "e4 e5 |  | * | the result * after the moves replaces the Result tag 1-0".into(),
+        ),
+        ("27c result with no result tag", "e4 e5 |  | 1-0 | ".into()),
+        (
+            "27d unrecognized result tag and unknown result",
+            "e4 e5 |  | * | ".into(),
+        ),
+        (
+            "28a no result before the next game",
+            "e4 e5 |  | 1-0 | the moves don't end with a result, so the Result tag 1-0 is used".into(),
+        ),
+        (
+            "28c no result and no result tag",
+            "e4 e5 |  | * | the moves don't end with a result, and there is no Result tag".into(),
+        ),
+        ("29 move that can't be read", "error: Nf6: illegal san".into()),
+        ("30 SetUp without FEN", "e4 |  | * | ".into()),
+        (
+            "31a FEN castling rights that don't fit",
+            "Kd1 |  | * | dropped castling rights \"KQkq\" from the FEN because they don't fit the position".into(),
+        ),
+        (
+            "31b FEN en passant square that doesn't fit",
+            "Kd1 |  | * | dropped en passant square e3 from the FEN because no pawn could have just moved past it".into(),
+        ),
+        ("31c FEN en passant square with no capture", "Kd7 |  | * | ".into()),
+        ("32 Variant tag", "error: Unsupported variant: Chess960".into()),
+        (
+            "28b no result at the end of the input",
+            "e4 e5 |  | 0-1 | the moves don't end with a result, so the Result tag 0-1 is used".into(),
+        ),
+    ];
+
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/data/notation.pgn");
+    let pgn = std::fs::read_to_string(path).unwrap();
+    let events = pgn
+        .lines()
+        .filter_map(|line| line.strip_prefix("[Event \"")?.strip_suffix("\"]"));
+    let actual: Vec<(String, String)> = events
+        .zip(PgnParser::new(&pgn))
+        .map(|(event, result)| {
+            let outcome = match result {
+                Ok(game) => {
+                    assert_eq!(game.event, event);
+                    summary(&game)
+                }
+                Err(e) => failure(&e),
+            };
+            (event.to_string(), outcome)
+        })
+        .collect();
+    let expected: Vec<(String, String)> = expected
+        .into_iter()
+        .map(|(event, outcome)| (event.to_string(), outcome))
+        .collect();
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn test_annotation_symbols_match_nags() {
+    // Where a NAG attaches is #38; a symbol attaches like its `$n`.
+    for (symbols, nags) in [
+        (
+            "1. e4! e5? 2. Nf3!! Nc6?? 3. Bb5!? a6?! *",
+            "1. e4 $1 e5 $2 2. Nf3 $3 Nc6 $4 3. Bb5 $5 a6 $6 *",
+        ),
+        (
+            "1. e4 += e5 =+ 2. Nf3 +/- Nc6 -/+ 3. Bb5 +- a6 -+ 4. Ba4 = Nf6 ~ *",
+            "1. e4 $14 e5 $15 2. Nf3 $16 Nc6 $17 3. Bb5 $18 a6 $19 4. Ba4 $10 Nf6 $13 *",
+        ),
+        (
+            "1. e4=+ e5 2. Nf3= Nc6 3. Bb5-+ *",
+            "1. e4 $15 e5 2. Nf3 $10 Nc6 3. Bb5 $19 *",
+        ),
+        ("1. e4~ e5 2. Qh5!!+- *", "1. e4 $13 e5 2. Qh5 $3 $18 *"),
+        (
+            "1. e4 N e5 D 2. Nf3 R *",
+            "1. e4 $146 e5 $201 2. Nf3 $144 *",
+        ),
+    ] {
+        let read = |movetext| {
+            let game = parse_single_game(&pgn_game("", movetext)).unwrap();
+            let nags: Vec<Vec<u8>> = game.moves.iter().map(|node| node.nags.clone()).collect();
+            (sans(&game), nags)
+        };
+        assert_eq!(read(symbols), read(nags), "{symbols}");
+    }
+}
+
+#[test]
+fn test_words_that_start_like_a_null_move_are_skipped() {
+    let game = parse_single_game(&pgn_game("", "1. e4 nullify e5 2. Nf3 *")).unwrap();
+    assert_eq!(sans(&game), ["e4", "e5", "Nf3"]);
+    assert_eq!(
+        warning_kinds(&game),
+        [PgnWarningKind::UnknownText {
+            text: "nullify".to_string()
+        }]
+    );
+}
+
+#[test]
+fn test_warnings_name_the_game_and_line() {
+    let pgn = "[Event \"First\"]\n\n1. e4 *\n\n[Event \"Second\"]\n\n1. e4 e5 2. Nf3 Nf6 3. Bc4 Bc5\n4. Ke2 Ke7 5. Ke1 Ke8\n6. O-O zz *\n";
+    let games: Vec<Game> = PgnParser::new(pgn).map(Result::unwrap).collect();
+    assert!(games[0].warnings.is_empty());
+    let warnings: Vec<String> = games[1].warnings.iter().map(ToString::to_string).collect();
+    assert_eq!(
+        warnings,
+        [
+            "PGN game 2, line 9: \"O-O\" castles without the castling right",
+            "PGN game 2, line 9: skipped unknown text \"zz\"",
+        ]
+    );
+
+    // The FEN warning names the FEN tag's line.
+    let pgn = "[Event \"x\"]\n[FEN \"4k3/8/8/8/8/8/8/4K3 w K - 0 1\"]\n\n1. Kd1 *\n";
+    let game = parse_single_game(pgn).unwrap();
+    assert_eq!(
+        game.warnings[0].to_string(),
+        "PGN game 1, line 2: dropped castling rights \"K\" from the FEN because they don't fit the position"
+    );
+}
+
+#[test]
+fn test_rejected_game_reports_only_its_error() {
+    let pgn = "[Event \"x\"]\n\n1. e4 zz e5 2. Nf6 *\n\n[Event \"y\"]\n\n1. d4 *\n";
+    let results: Vec<_> = PgnParser::new(pgn).collect();
+    assert!(matches!(results[0], Err(Error::PgnGame { number: 1, .. })));
+    let next = results[1].as_ref().unwrap();
+    assert_eq!(next.event, "y");
+    assert!(next.warnings.is_empty());
 }
