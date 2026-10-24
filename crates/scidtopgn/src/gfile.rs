@@ -3,7 +3,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 use crate::bytebuf::ByteBuffer;
-use crate::error::{Error, Result};
+use crate::error::{DatabaseFile, Error, Result};
 
 pub const GFILE_SUFFIX: &str = ".sg4";
 pub const GF_BLOCKSIZE: usize = 131_072;
@@ -61,14 +61,14 @@ impl GFile {
     }
 
     pub fn create<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let path = path.as_ref();
-        let sg4_path = path.with_extension("sg4");
+        let sg4_path = path.as_ref().with_extension("sg4");
 
         let file = OpenOptions::new()
             .write(true)
             .create(true)
             .truncate(true)
-            .open(&sg4_path)?;
+            .open(&sg4_path)
+            .map_err(|e| Error::from(e).in_file(DatabaseFile::Game))?;
 
         Ok(Self {
             handle: Some(file),
@@ -81,13 +81,14 @@ impl GFile {
     }
 
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let path = path.as_ref();
-        let sg4_path = path.with_extension("sg4");
-
-        let file = OpenOptions::new().read(true).write(true).open(&sg4_path)?;
-
-        let metadata = file.metadata()?;
-        let file_size = metadata.len() as usize;
+        let sg4_path = path.as_ref().with_extension("sg4");
+        let open = || -> Result<(File, u64)> {
+            let file = OpenOptions::new().read(true).write(true).open(&sg4_path)?;
+            let size = file.metadata()?.len();
+            Ok((file, size))
+        };
+        let (file, file_size) = open().map_err(|e| e.in_file(DatabaseFile::Game))?;
+        let file_size = file_size as usize;
 
         let num_blocks = if file_size == 0 {
             0
@@ -138,11 +139,11 @@ impl GFile {
     fn flush_block(&mut self) -> Result<()> {
         let handle = match &mut self.handle {
             Some(h) => h,
-            None => return Err(Error::Database("File not open".to_string())),
+            None => return Err(Error::FileNotOpen),
         };
 
         if self.file_mode == FileMode::ReadOnly {
-            return Err(Error::Database("File is read-only".to_string()));
+            return Err(Error::ReadOnly);
         }
 
         if !self.current_block.dirty {
@@ -179,15 +180,13 @@ impl GFile {
     }
 
     fn fetch_block(&mut self, block_num: u32) -> Result<()> {
-        if self.handle.is_none() {
-            return Err(Error::Database("File not open".to_string()));
-        }
-
         if self.current_block.dirty && self.file_mode != FileMode::ReadOnly {
             self.flush_block()?;
         }
 
-        let handle = self.handle.as_mut().unwrap();
+        let Some(handle) = self.handle.as_mut() else {
+            return Err(Error::FileNotOpen);
+        };
 
         let file_pos = (block_num as u64) * (GF_BLOCKSIZE as u64);
 
@@ -214,14 +213,26 @@ impl GFile {
         Ok(())
     }
 
+    /// Reads the `length` bytes of game data at `offset` into `buf`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::GameOutOfRange`] if the data extends past the end of
+    /// the file, and [`Error::GameSpansBlocks`] if it crosses a block
+    /// boundary.
     pub fn read_game(&mut self, buf: &mut ByteBuffer, offset: u32, length: u32) -> Result<()> {
+        if u64::from(offset) + u64::from(length) > self.file_size() {
+            return Err(Error::GameOutOfRange { offset, length });
+        }
+        if length == 0 {
+            buf.provide_external(&[]);
+            return Ok(());
+        }
+
         let block_num = offset as usize / GF_BLOCKSIZE;
         let end_block_num = (offset as usize + length as usize - 1) / GF_BLOCKSIZE;
-
-        if end_block_num != block_num || block_num as u32 >= self.num_blocks {
-            return Err(Error::CorruptData(
-                "Game spans multiple blocks or invalid offset".to_string(),
-            ));
+        if end_block_num != block_num {
+            return Err(Error::GameSpansBlocks { offset, length });
         }
 
         if self.current_block.block_num != block_num as i32 {
@@ -242,16 +253,27 @@ impl GFile {
         Ok(buf.as_slice().to_vec())
     }
 
+    /// Appends a game record and returns its offset.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::GameTooLarge`] if the record is longer than a block.
     pub fn add_game(&mut self, buf: &ByteBuffer) -> Result<u32> {
         if self.handle.is_none() {
-            return Err(Error::Database("File not open".to_string()));
+            return Err(Error::FileNotOpen);
         }
 
         if self.file_mode == FileMode::ReadOnly {
-            return Err(Error::Database("File is read-only".to_string()));
+            return Err(Error::ReadOnly);
         }
 
         let data_len = buf.byte_count();
+        if data_len > GF_BLOCKSIZE {
+            return Err(Error::GameTooLarge {
+                length: data_len,
+                max: GF_BLOCKSIZE,
+            });
+        }
 
         if self.num_blocks == 0 {
             self.current_block.block_num = 0;

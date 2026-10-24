@@ -40,7 +40,8 @@ fn export_command(args: &ExportArgs) -> Result<()> {
         }
     }
 
-    let mut db = Database::open(&args.database)?;
+    let mut db = Database::open(&args.database)
+        .with_context(|| format!("Failed to open database '{}'", args.database))?;
 
     if args.count {
         println!("{} games", db.num_games());
@@ -63,9 +64,7 @@ fn export_command(args: &ExportArgs) -> Result<()> {
             continue;
         }
 
-        let game = db
-            .get_game(i)
-            .with_context(|| format!("Failed to read game {}", i + 1))?;
+        let game = db.get_game(i)?;
         let pgn = game.to_pgn();
         writeln!(writer, "{}", pgn)?;
         exported += 1;
@@ -126,12 +125,14 @@ fn import_command(args: &ImportArgs) -> Result<()> {
         if args.verbose {
             eprintln!("Appending to existing database: {}", args.output);
         }
-        Database::open(&args.output)?
+        Database::open(&args.output)
+            .with_context(|| format!("Failed to open database '{}'", args.output))?
     } else {
         if args.verbose && si4_exists {
             eprintln!("Overwriting existing database: {}", args.output);
         }
-        Database::create(&args.output)?
+        Database::create(&args.output)
+            .with_context(|| format!("Failed to create database '{}'", args.output))?
     };
 
     let initial_count = db.num_games();

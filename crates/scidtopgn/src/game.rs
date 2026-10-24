@@ -2,7 +2,7 @@ use shakmaty::{Chess, Color, Position};
 
 use crate::bytebuf::ByteBuffer;
 use crate::common::GameResult;
-use crate::error::{Error, Result};
+use crate::error::{CorruptGameKind, Error, Result};
 use crate::mov::{
     decode_move, GameMove, ENCODE_COMMENT, ENCODE_END_GAME, ENCODE_END_MARKER, ENCODE_NAG,
     ENCODE_START_MARKER,
@@ -18,10 +18,6 @@ pub const MAX_NAGS: usize = 8;
 /// line as 1. Reading and writing a game recurse once per level, so deeper
 /// nesting could overflow the stack.
 pub(crate) const MAX_VARIATION_DEPTH: u32 = 100;
-
-/// SCID counts a move's variations in a byte, so it can't read back a move
-/// with more than 255.
-const TOO_MANY_VARIATIONS: &str = "More than 255 variations of one move";
 
 pub const GAME_DECODE_NONE: u8 = 0;
 pub const GAME_DECODE_TAGS: u8 = 1;
@@ -291,7 +287,7 @@ impl Game {
         self.decode_variation(buf, flags, position, 0)?;
 
         if flags & GAME_DECODE_COMMENTS != 0 {
-            self.decode_comments(buf)?;
+            self.decode_comments_recursive(buf, start_node_idx)?;
         }
 
         Ok(())
@@ -338,15 +334,20 @@ impl Game {
         // The position before the last move, where its variations start.
         let mut before_last: Option<ScidPosition> = None;
         let mut b = buf.get_byte()?;
+        // The offset of `b`, which was just read.
+        let corrupt = |buf: &ByteBuffer, kind| Error::CorruptGame {
+            offset: buf.position() - 1,
+            kind,
+        };
 
         while b != ENCODE_END_GAME && b != ENCODE_END_MARKER {
             match b {
                 ENCODE_START_MARKER => {
                     let start = before_last
                         .clone()
-                        .ok_or_else(|| Error::Decode("Variation before any move".to_string()))?;
-                    if let Some(message) = self.variation_limit(level + 1) {
-                        return Err(Error::Decode(message));
+                        .ok_or_else(|| corrupt(buf, CorruptGameKind::VariationBeforeMove))?;
+                    if let Some(error) = self.variation_limit(level + 1) {
+                        return Err(error);
                     }
                     let parent = self.current_move;
                     self.add_variation()?;
@@ -363,7 +364,7 @@ impl Game {
                     if flags & GAME_DECODE_COMMENTS != 0 {
                         let current_idx = self
                             .current_move
-                            .ok_or(Error::Decode("No current move".to_string()))?;
+                            .expect("decoding starts at the game's start marker");
                         self.moves[current_idx].comment = Some(String::new());
                     }
                 }
@@ -379,10 +380,10 @@ impl Game {
         }
 
         if level == 0 && b != ENCODE_END_GAME {
-            return Err(Error::Decode("Expected ENCODE_END_GAME".to_string()));
+            return Err(corrupt(buf, CorruptGameKind::UnmatchedEndMarker));
         }
         if level > 0 && b != ENCODE_END_MARKER {
-            return Err(Error::Decode("Expected ENCODE_END_MARKER".to_string()));
+            return Err(corrupt(buf, CorruptGameKind::UnclosedVariation));
         }
 
         Ok(())
@@ -412,14 +413,13 @@ impl Game {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Decode`] if there is no current move, or if it
-    /// already has 255 variations, the most SCID can read back.
+    /// Returns [`Error::NoCurrentMove`] if there is no current move, or
+    /// [`Error::TooManyVariations`] if it already has 255 variations, the
+    /// most SCID can read back.
     pub fn add_variation(&mut self) -> Result<()> {
-        let current_idx = self
-            .current_move
-            .ok_or(Error::Decode("No current move".to_string()))?;
+        let current_idx = self.current_move.ok_or(Error::NoCurrentMove)?;
         if self.moves[current_idx].num_variations == u8::MAX {
-            return Err(Error::Decode(TOO_MANY_VARIATIONS.to_string()));
+            return Err(Error::TooManyVariations);
         }
 
         let var_parent = Some(current_idx);
@@ -445,15 +445,13 @@ impl Game {
 
     /// Why a variation at nesting `depth` can't be added to the current move,
     /// or `None` if it can.
-    pub(crate) fn variation_limit(&self, depth: u32) -> Option<String> {
+    pub(crate) fn variation_limit(&self, depth: u32) -> Option<Error> {
         if depth > MAX_VARIATION_DEPTH {
-            return Some(format!(
-                "Variation nested more than {MAX_VARIATION_DEPTH} levels deep"
-            ));
+            return Some(Error::VariationTooDeep);
         }
         let current = self.current_move.map(|idx| &self.moves[idx]);
         if current.is_some_and(|node| node.num_variations == u8::MAX) {
-            return Some(TOO_MANY_VARIATIONS.to_string());
+            return Some(Error::TooManyVariations);
         }
         None
     }
@@ -505,13 +503,6 @@ impl Game {
         std::iter::successors(first.filter(valid), move |&start| {
             self.moves[start].var_child.filter(valid)
         })
-    }
-
-    fn decode_comments(&mut self, buf: &mut ByteBuffer) -> Result<()> {
-        let start_idx = self
-            .first_move
-            .ok_or(Error::Decode("No first move".to_string()))?;
-        self.decode_comments_recursive(buf, start_idx)
     }
 
     fn decode_comments_recursive(&mut self, buf: &mut ByteBuffer, start_idx: usize) -> Result<()> {

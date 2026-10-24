@@ -20,7 +20,7 @@ pub use date::{
     date_decode_to_string, date_encode_from_string, date_get_day, date_get_month, date_get_year,
     date_make, date_valid_string, Date, YEAR_MAX,
 };
-pub use error::{Error, Result};
+pub use error::{CorruptGameKind, DatabaseFile, Error, InvalidMoveByte, Result};
 pub use game::{
     nag_to_symbol, Game, Marker, MoveNode, Tag, GAME_DECODE_ALL, GAME_DECODE_COMMENTS,
     GAME_DECODE_NONE, GAME_DECODE_TAGS, MAX_NAGS, MAX_TAGS,

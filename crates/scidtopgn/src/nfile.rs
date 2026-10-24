@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io::{BufReader, BufWriter, Write};
 use std::path::Path;
 
-use crate::error::Result;
+use crate::error::{DatabaseFile, Result};
 use crate::namebase::NameBase;
 
 pub struct NFile {
@@ -23,11 +23,13 @@ impl NFile {
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
         let sn4_path = path.with_extension("sn4");
-        let file = File::open(&sn4_path)?;
-        let mut reader = BufReader::new(file);
-
-        let mut namebase = NameBase::new();
-        namebase.read_sn4(&mut reader)?;
+        let read = || -> Result<NameBase> {
+            let mut reader = BufReader::new(File::open(&sn4_path)?);
+            let mut namebase = NameBase::new();
+            namebase.read_sn4(&mut reader)?;
+            Ok(namebase)
+        };
+        let namebase = read().map_err(|e| e.in_file(DatabaseFile::Name))?;
 
         Ok(NFile {
             namebase,

@@ -645,8 +645,8 @@ impl PgnParser {
                     let start = before_last
                         .clone()
                         .ok_or_else(|| self.error("Variation before any move"))?;
-                    if let Some(message) = game.variation_limit(depth + 1) {
-                        return Err(self.error(&message));
+                    if let Some(error) = game.variation_limit(depth + 1) {
+                        return Err(self.error(&error.to_string()));
                     }
                     let parent = game.current_move;
                     game.add_variation()?;

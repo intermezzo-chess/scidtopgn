@@ -446,7 +446,9 @@ fn test_cli_export_names_corrupt_game() {
     let output = cli().arg(&db).output().expect("Failed to run CLI");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(!output.status.success(), "{stderr}");
-    assert!(stderr.contains("Failed to read game 1"), "{stderr}");
+    assert!(stderr.contains("SCID game 1"), "{stderr}");
+    let damaged = format!("Damaged game data at byte {}", first_move - offset);
+    assert!(stderr.contains(&damaged), "{stderr}");
     assert!(stderr.contains("invalid move byte 0xc2"), "{stderr}");
 }
 
