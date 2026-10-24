@@ -94,6 +94,7 @@ A game that fails to parse is reported by its error only, without its warnings.
 | `the result 0-1 after the moves replaces the Result tag 1-0` | The result after the moves differs from the `Result` tag. A tag `scidtopgn` doesn't recognize, such as `1-0 (time)`, counts as `*`, so it gives this warning only when the moves end with another result. | #27 |
 | `the moves don't end with a result, so the Result tag 1-0 is used` | The moves end at the next game's tags, or at the end of the input, without a result. | #28a, #28b |
 | `the moves don't end with a result, and there is no Result tag` | The same, in a game with no `Result` tag. The game's result is `*`. | #28c |
+| `read text that isn't UTF-8 as Windows-1252` | The game's text, including text before it that is kept as its first comment, has bytes that aren't valid UTF-8. Those bytes are read as Windows-1252. Given once per game, on the first line with such bytes. In the library, only `PgnParser::from_bytes` reads such input; the CLI uses it. | #42 |
 
 ## Already accepted by both
 
@@ -291,7 +292,7 @@ Lines inside the text, including blank lines, are joined by line breaks. Text th
 | Rating in a player name | `[White "Carlsen, Magnus (2850)"]` | Removes the rating from the name and uses it as the Elo | Keeps the name as written and has no Elo |
 | Rating tags | `[WhiteUSCF "2400"]` | Uses the rating as the player's rating, with its type, such as USCF | Keeps it as an ordinary tag, with no rating in the index |
 | `Result` tag with more text | `[Result "1-0 (time)"]` | Reads `1-0` | Reads it as `*`. The result after the moves is used, with a warning only when that result isn't `*` (#27d). |
-| Text that isn't UTF-8 | A Latin-1 `é` in a tag | Stores the bytes unchanged | The CLI fails for the whole file: `stream did not contain valid UTF-8` |
+| Text that isn't UTF-8 | A Latin-1 `é` in a tag | Stores the bytes unchanged | Reads each byte that isn't valid UTF-8 as Windows-1252, stores UTF-8, and warns (#42). Valid UTF-8 is unchanged, even on the same line, so a name written in Latin-1 and in UTF-8 is stored once. Latin-1 bytes that happen to be valid UTF-8, such as `Ã©`, are read as UTF-8, without a warning. The five bytes Windows-1252 leaves undefined are read as the control characters U+0081, U+008D, U+008F, U+0090, and U+009D. |
 | A `}` outside a comment | `1. e4 } e5` | Skips it and logs `"}" seen outside a comment` | Skips it, without a warning |
 
 ## Export and round trips

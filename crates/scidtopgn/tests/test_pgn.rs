@@ -1049,3 +1049,123 @@ fn test_long_pre_game_text_is_kept() {
     let pgn = format!("{text}\n\n[Event \"x\"]\n\n1. e4 *\n");
     assert_eq!(first_comments(&pgn), [Some(text)]);
 }
+
+/// The games read from `pgn` bytes, which must all parse.
+fn games_from_bytes(pgn: &[u8]) -> Vec<Game> {
+    PgnParser::from_bytes(pgn).map(Result::unwrap).collect()
+}
+
+fn warning_texts(game: &Game) -> Vec<String> {
+    game.warnings.iter().map(ToString::to_string).collect()
+}
+
+#[test]
+fn test_text_that_isnt_utf8_is_read_as_windows_1252() {
+    let pgn = b"[Event \"\xe9v\xe9nement\"]\n[White \"M\xfcller\"]\n\n1. e4 {\x80 \x93quoted\x94 \x81} *\n";
+    let games = games_from_bytes(pgn);
+    assert_eq!(games[0].event, "événement");
+    assert_eq!(games[0].white, "Müller");
+    assert_eq!(
+        games[0].moves[1].comment.as_deref(),
+        Some("€ \u{201C}quoted\u{201D} \u{0081}")
+    );
+    // One warning for the game, on its first line with such bytes.
+    assert_eq!(
+        warning_texts(&games[0]),
+        ["PGN game 1, line 1: read text that isn't UTF-8 as Windows-1252"]
+    );
+}
+
+#[test]
+fn test_only_bytes_that_arent_utf8_are_converted() {
+    // A UTF-8 é and a Latin-1 é on one line. A Latin-1 "Ã©" is valid UTF-8,
+    // so it is read as UTF-8, without a warning.
+    let games = games_from_bytes(b"[White \"Caf\xc3\xa9 Caf\xe9\"]\n\n1. e4 *\n");
+    assert_eq!(games[0].white, "Café Café");
+    assert_eq!(warning_kinds(&games[0]), [PgnWarningKind::NotUtf8]);
+
+    let games = games_from_bytes("[White \"Café\"]\n\n1. e4 *\n".as_bytes());
+    assert_eq!(games[0].white, "Café");
+    assert!(games[0].warnings.is_empty());
+
+    // An incomplete UTF-8 sequence before other text.
+    let games = games_from_bytes(b"[White \"\xe2\x82x\"]\n\n1. e4 *\n");
+    assert_eq!(games[0].white, "\u{e2}\u{201A}x");
+}
+
+#[test]
+fn test_not_utf8_warning_names_the_game_with_the_bytes() {
+    let pgn = b"[Event \"A\"]\n\n1. e4 *\n\nNotes \xe9\n\n[Event \"B\"]\n\n1. d4 *\n\n[Event \"C\"]\n\n1. c4 zz\n{\xe9} 1-0\n";
+    let games = games_from_bytes(pgn);
+    assert!(games[0].warnings.is_empty());
+    // Text before a game is its first comment, so the game gets the warning.
+    assert_eq!(
+        games[1].moves[games[1].first_move.unwrap()]
+            .comment
+            .as_deref(),
+        Some("Notes é")
+    );
+    assert_eq!(
+        warning_texts(&games[1]),
+        ["PGN game 2, line 5: read text that isn't UTF-8 as Windows-1252"]
+    );
+    // The warning is in line order among the game's others.
+    assert_eq!(
+        warning_texts(&games[2]),
+        [
+            "PGN game 3, line 13: skipped unknown text \"zz\"",
+            "PGN game 3, line 14: read text that isn't UTF-8 as Windows-1252",
+        ]
+    );
+}
+
+#[test]
+fn test_not_utf8_bytes_outside_a_kept_game_give_no_warning() {
+    // In a game that fails to parse, and after the last game.
+    let pgn = b"[Event \"\xe9\"]\n\n1. e4 e5 2. Nf6 *\n\n[Event \"B\"]\n\n1. d4 *\n\xe9\n";
+    let results: Vec<_> = PgnParser::from_bytes(pgn).collect();
+    assert_eq!(results.len(), 2);
+    assert!(matches!(results[0], Err(Error::PgnGame { number: 1, .. })));
+    assert!(results[1].as_ref().unwrap().warnings.is_empty());
+}
+
+#[test]
+fn test_not_utf8_bytes_in_line_comments_and_at_the_end() {
+    // A line comment, and an incomplete sequence at the end of the input.
+    let games = games_from_bytes(b"[Event \"x\"]\n\n1. e4 ; \xe9\ne5 % x\n2. Nf3 ; \xc3");
+    assert_eq!(sans(&games[0]), ["e4", "e5", "Nf3"]);
+    let warnings: Vec<(u32, PgnWarningKind)> = games[0]
+        .warnings
+        .iter()
+        .map(|w| (w.line, w.kind.clone()))
+        .collect();
+    assert_eq!(
+        warnings,
+        [
+            (3, PgnWarningKind::NotUtf8),
+            (5, PgnWarningKind::MissingResult { tag: None }),
+        ]
+    );
+}
+
+#[test]
+fn test_from_bytes_reads_utf8_as_new_does() {
+    let pgn = "\u{feff}Notes\n\n[Event \"Événement\"]\n[White \"Müller\"]\n\n1. e4 zz {€} *\n\n[Event \"x\"]\n\n1. d4 Nf6 2. Nf6 *\n";
+    let read = |results: Vec<scidtopgn::Result<Game>>| -> Vec<String> {
+        results
+            .into_iter()
+            .map(|result| match result {
+                Ok(game) => format!("{game:?}"),
+                Err(e) => e.to_string(),
+            })
+            .collect()
+    };
+    assert_eq!(
+        read(PgnParser::from_bytes(pgn.as_bytes()).collect()),
+        read(PgnParser::new(pgn).collect())
+    );
+
+    // A byte order mark is still skipped before text that isn't UTF-8.
+    let games = games_from_bytes(b"\xef\xbb\xbf[Event \"\xe9\"]\n\n1. e4 *\n");
+    assert_eq!(games[0].event, "é");
+}
