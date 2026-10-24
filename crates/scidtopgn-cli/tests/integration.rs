@@ -666,6 +666,46 @@ fn test_cli_import_prints_warnings_and_keeps_the_game() {
 }
 
 #[test]
+fn test_cli_import_reads_text_that_isnt_utf8_as_windows_1252() {
+    let pgn = b"[Event \"\xe9v\xe9nement\"]\n[White \"M\xfcller\"]\n\n1. e4 *\n";
+    for mode in ["skip", "abort"] {
+        let temp = TempDir::new().expect("Failed to create temp dir");
+        let pgn_path = temp.path().join("latin1.pgn");
+        std::fs::write(&pgn_path, pgn).expect("Failed to write PGN");
+        // From a file, and from stdin.
+        for (input, name) in [(pgn_path.as_os_str(), "file"), ("-".as_ref(), "stdin")] {
+            let db_path = temp.path().join(name);
+            let output = cli()
+                .arg("import")
+                .arg(input)
+                .arg("-o")
+                .arg(&db_path)
+                .args(["--on-error", mode])
+                .stdin(std::fs::File::open(&pgn_path).expect("Failed to open PGN"))
+                .output()
+                .expect("Failed to run CLI");
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(output.status.success(), "{mode} {name}: {stderr}");
+            assert_eq!(
+                stderr, "Warning: PGN game 1, line 1: read text that isn't UTF-8 as Windows-1252\n",
+                "{mode} {name}"
+            );
+
+            let exported = cli().arg(&db_path).output().expect("Failed to run CLI");
+            let exported = String::from_utf8(exported.stdout).expect("Output should be UTF-8");
+            assert!(
+                exported.contains("[Event \"événement\"]\n"),
+                "{mode} {name}: {exported}"
+            );
+            assert!(
+                exported.contains("[White \"Müller\"]\n"),
+                "{mode} {name}: {exported}"
+            );
+        }
+    }
+}
+
+#[test]
 fn test_cli_round_trip_keeps_annotations_and_variations() {
     let temp = TempDir::new().expect("Failed to create temp dir");
     let pgn_path = temp.path().join("nag.pgn");

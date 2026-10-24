@@ -58,6 +58,10 @@ pub enum PgnWarningKind {
     /// The moves don't end with a result, so the `Result` tag, if any, is
     /// used.
     MissingResult { tag: Option<GameResult> },
+    /// Text that isn't valid UTF-8, read with [`PgnParser::from_bytes`]. Its
+    /// bytes are read as Windows-1252. Given once per game, on the first
+    /// line with such bytes.
+    NotUtf8,
 }
 
 impl fmt::Display for PgnWarningKind {
@@ -91,6 +95,7 @@ impl fmt::Display for PgnWarningKind {
                 f,
                 "the moves don't end with a result, and there is no Result tag"
             ),
+            Self::NotUtf8 => write!(f, "read text that isn't UTF-8 as Windows-1252"),
         }
     }
 }
@@ -156,16 +161,44 @@ pub struct PgnParser {
     line: u32,
     games: usize,
     in_movetext: bool,
+    /// Where bytes that weren't valid UTF-8 were read as Windows-1252: the
+    /// index in `input` and the line of each run of them, in input order.
+    not_utf8: Vec<(usize, u32)>,
 }
 
 impl PgnParser {
     pub fn new(input: &str) -> Self {
+        Self::from_bytes(input.as_bytes())
+    }
+
+    /// Reads games from PGN that may not be valid UTF-8, such as a Latin-1
+    /// file. Bytes that aren't valid UTF-8 are read as Windows-1252, and
+    /// each game with such bytes gets a [`PgnWarningKind::NotUtf8`] warning.
+    /// Valid UTF-8 is read as [`PgnParser::new`] reads it.
+    pub fn from_bytes(input: &[u8]) -> Self {
+        let mut chars = Vec::with_capacity(input.len());
+        let mut not_utf8 = Vec::new();
+        let mut line = 1;
+        for chunk in input.utf8_chunks() {
+            for c in chunk.valid().chars() {
+                if c == '\n' {
+                    line += 1;
+                }
+                chars.push(c);
+            }
+            // A line break is valid UTF-8, so an invalid run is on one line.
+            if !chunk.invalid().is_empty() {
+                not_utf8.push((chars.len(), line));
+                chars.extend(chunk.invalid().iter().map(|&b| windows_1252_char(b)));
+            }
+        }
         PgnParser {
-            input: input.chars().collect(),
+            input: chars,
             pos: 0,
             line: 1,
             games: 0,
             in_movetext: false,
+            not_utf8,
         }
     }
 
@@ -381,7 +414,10 @@ impl PgnParser {
     /// variations are nested more than 100 levels deep or a move has more
     /// than 255 of them.
     pub fn parse_game(&mut self) -> Result<Game> {
-        self.read_game("")
+        let start = self.pos;
+        let mut game = self.read_game("")?;
+        self.warn_not_utf8(&mut game, start);
+        Ok(game)
     }
 
     /// Parses a game, with `pre_game_text` as the comment before its first
@@ -508,6 +544,23 @@ impl PgnParser {
             line,
             kind,
         });
+    }
+
+    /// Records a warning if the game, read from `start` to the current
+    /// position, had bytes that weren't valid UTF-8. The warning is placed
+    /// among the game's others in line order.
+    fn warn_not_utf8(&self, game: &mut Game, start: usize) {
+        let i = self.not_utf8.partition_point(|&(pos, _)| pos < start);
+        let Some(&(_, line)) = self.not_utf8.get(i).filter(|&&(pos, _)| pos < self.pos) else {
+            return;
+        };
+        let at = game.warnings.partition_point(|w| w.line <= line);
+        let warning = PgnWarning {
+            game: self.games,
+            line,
+            kind: PgnWarningKind::NotUtf8,
+        };
+        game.warnings.insert(at, warning);
     }
 
     /// Reads a tag pair. Its tokens may be on separate lines.
@@ -738,11 +791,15 @@ impl Iterator for PgnParser {
     /// it is the comment before its first move. An error is wrapped in
     /// [`Error::PgnGame`], which gives the game's number and first tag line.
     fn next(&mut self) -> Option<Result<Game>> {
+        let start = self.pos;
         let text = self.read_pre_game_text()?;
 
         let line = self.line;
         match self.read_game(&text) {
-            Ok(game) => Some(Ok(game)),
+            Ok(mut game) => {
+                self.warn_not_utf8(&mut game, start);
+                Some(Ok(game))
+            }
             Err(source) => {
                 self.skip_to_next_game();
                 Some(Err(Error::PgnGame {
@@ -752,6 +809,24 @@ impl Iterator for PgnParser {
                 }))
             }
         }
+    }
+}
+
+/// The character a byte stands for in Windows-1252. The five bytes it leaves
+/// undefined stand for the C1 control characters with the same numbers, as in
+/// the WHATWG Encoding Standard.
+fn windows_1252_char(byte: u8) -> char {
+    const BYTES_80_TO_9F: [char; 32] = [
+        '\u{20AC}', '\u{0081}', '\u{201A}', '\u{0192}', '\u{201E}', '\u{2026}', '\u{2020}',
+        '\u{2021}', '\u{02C6}', '\u{2030}', '\u{0160}', '\u{2039}', '\u{0152}', '\u{008D}',
+        '\u{017D}', '\u{008F}', '\u{0090}', '\u{2018}', '\u{2019}', '\u{201C}', '\u{201D}',
+        '\u{2022}', '\u{2013}', '\u{2014}', '\u{02DC}', '\u{2122}', '\u{0161}', '\u{203A}',
+        '\u{0153}', '\u{009D}', '\u{017E}', '\u{0178}',
+    ];
+    match byte {
+        0x80..=0x9F => BYTES_80_TO_9F[usize::from(byte - 0x80)],
+        // The rest are the same as in Latin-1.
+        _ => char::from(byte),
     }
 }
 
@@ -1590,5 +1665,26 @@ mod tests {
             warning.to_string(),
             "PGN game 3, line 12: \"O-O\" castles without the castling right"
         );
+    }
+
+    #[test]
+    fn test_windows_1252_char() {
+        // ASCII and 0xA0-0xFF are the same as in Latin-1.
+        for byte in (0x00..=0x7F).chain(0xA0..=0xFF) {
+            assert_eq!(windows_1252_char(byte), char::from(byte), "{byte:#04x}");
+        }
+        for (byte, c) in [
+            (0x80, '€'),
+            (0x8A, 'Š'),
+            (0x93, '\u{201C}'),
+            (0x96, '–'),
+            (0x9F, 'Ÿ'),
+        ] {
+            assert_eq!(windows_1252_char(byte), c, "{byte:#04x}");
+        }
+        // The undefined bytes are C1 control characters, as in WHATWG.
+        for byte in [0x81, 0x8D, 0x8F, 0x90, 0x9D] {
+            assert_eq!(windows_1252_char(byte), char::from(byte), "{byte:#04x}");
+        }
     }
 }

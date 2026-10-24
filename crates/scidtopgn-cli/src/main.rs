@@ -83,12 +83,13 @@ fn export_command(args: &ExportArgs) -> Result<()> {
 }
 
 fn import_command(args: &ImportArgs) -> Result<()> {
+    // Read as bytes: the parser reads text that isn't UTF-8 as Windows-1252.
     let pgn = if args.pgn_file == "-" {
-        let mut buf = String::new();
-        std::io::stdin().read_to_string(&mut buf)?;
+        let mut buf = Vec::new();
+        std::io::stdin().read_to_end(&mut buf)?;
         buf
     } else {
-        std::fs::read_to_string(&args.pgn_file)?
+        std::fs::read(&args.pgn_file)?
     };
 
     let abort_on_error = args.on_error == "abort";
@@ -97,7 +98,7 @@ fn import_command(args: &ImportArgs) -> Result<()> {
     // parse error leaves it unchanged.
     let mut games = Vec::new();
     let mut skipped = 0u32;
-    for result in PgnParser::new(&pgn) {
+    for result in PgnParser::from_bytes(&pgn) {
         match result {
             Ok(game) => {
                 // Warnings don't stop the game from being imported.
