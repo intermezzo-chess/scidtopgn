@@ -870,3 +870,139 @@ fn test_nags_before_the_first_move_are_dropped() {
     assert_eq!(nags, [("d4".to_string(), vec![3])]);
     assert!(game.warnings.is_empty());
 }
+
+/// The comment before each game's first move.
+fn first_comments(pgn: &str) -> Vec<Option<String>> {
+    parse_pgn(pgn)
+        .unwrap()
+        .iter()
+        .map(|game| game.moves[game.first_move.unwrap()].comment.clone())
+        .collect()
+}
+
+#[test]
+fn test_text_before_a_game_is_its_first_comment() {
+    let pgn = "Games from the 2026 club championship.\nDownloaded from example.org.\n\n\
+        [Event \"First\"]\n[Result \"1-0\"]\n\n1. e4 e5 1-0\n\n\
+        Round 2 starts here.\n\n\
+        [Event \"Second\"]\n[Result \"0-1\"]\n\n1. d4 d5 0-1\n";
+    let expected = [
+        Some("Games from the 2026 club championship.\nDownloaded from example.org.".to_string()),
+        Some("Round 2 starts here.".to_string()),
+    ];
+    for pgn in [pgn.to_string(), pgn.replace('\n', "\r\n")] {
+        let games = parse_pgn(&pgn).unwrap();
+        assert_eq!(events(&pgn), ["First", "Second"]);
+        assert!(games.iter().all(|game| game.warnings.is_empty()));
+        assert_eq!(first_comments(&pgn), expected);
+    }
+
+    // Text after a result on the same line belongs to the next game.
+    let pgn = "[Event \"A\"]\n\n1. e4 1-0  Round 2 starts here.\nMore.\n[Event \"B\"]\n\n1. d4 *\n";
+    assert_eq!(
+        first_comments(pgn),
+        [None, Some("Round 2 starts here.\nMore.".to_string())]
+    );
+}
+
+#[test]
+fn test_pre_game_text_whitespace() {
+    for (text, expected) in [
+        // Blank lines around the text are dropped, and kept inside it.
+        (
+            "\n\n  Indented.  \n\nAfter a blank line.\n\n\n",
+            Some("  Indented.\n\nAfter a blank line."),
+        ),
+        ("\u{feff}Notes\n", Some("Notes")),
+        ("\u{feff}\n", None),
+        (" \t\n \n", None),
+        ("", None),
+    ] {
+        let pgn = format!("{text}[Event \"x\"]\n\n1. e4 *\n");
+        assert_eq!(
+            first_comments(&pgn),
+            [expected.map(String::from)],
+            "{text:?}"
+        );
+    }
+}
+
+#[test]
+fn test_pre_game_text_comes_before_the_first_comment() {
+    // Like SCID, a comment between tags is ignored, but the text is kept.
+    let pgn = "Notes\n\n[Event \"x\"]\n{between}\n[Site \"y\"]\n\n{Intro} 1. e4 *\n";
+    assert_eq!(first_comments(pgn), [Some("Notes Intro".to_string())]);
+}
+
+#[test]
+fn test_comments_between_games_are_skipped() {
+    for comments in [
+        "; a line comment\n",
+        "% an escape\n",
+        "{A brace comment}\n",
+        "{A brace comment\n[Event \"inside the comment\"]\n}\n",
+        "{a} {b} ; c\n",
+    ] {
+        let pgn = format!("[Event \"A\"]\n\n1. e4 *\n{comments}\n[Event \"B\"]\n\n1. d4 *\n");
+        assert_eq!(events(&pgn), ["A", "B"], "{comments:?}");
+        assert_eq!(first_comments(&pgn), [None, None], "{comments:?}");
+    }
+    // Text on a comment's line is kept, and the comment's line isn't a blank line.
+    let pgn = "A\n{skipped}\n{skipped} B\n; skipped\nC\n[Event \"x\"]\n\n1. e4 *\n";
+    assert_eq!(first_comments(pgn), [Some("A\nB\nC".to_string())]);
+}
+
+#[test]
+fn test_moves_without_tags_are_text() {
+    // Like SCID, a game starts at its tags.
+    let pgn = "1. c4 c5 *\n\n[Event \"x\"]\n\n1. e4 *\n";
+    assert_eq!(first_comments(pgn), [Some("1. c4 c5 *".to_string())]);
+    assert!(parse_pgn("1. e4 e5 *\n").unwrap().is_empty());
+    // parse_single_game still reads moves without tags.
+    assert_eq!(
+        sans(&parse_single_game("1. e4 e5 *\n").unwrap()),
+        ["e4", "e5"]
+    );
+}
+
+#[test]
+fn test_text_after_the_last_game_is_dropped() {
+    for tail in ["The end.\n", "The end.", "1. d4 d5 *\n", "{unterminated\n"] {
+        let pgn = format!("[Event \"x\"]\n\n1. e4 1-0\n\n{tail}");
+        let games = parse_pgn(&pgn).unwrap();
+        assert_eq!(games.len(), 1, "{tail:?}");
+        assert_eq!(sans(&games[0]), ["e4"], "{tail:?}");
+    }
+}
+
+#[test]
+fn test_pre_game_text_keeps_game_numbers_and_lines() {
+    let pgn = format!("Notes\n\nMore notes.\n\n{ILLEGAL_MOVE}\nBetween.\n\n{VALID}\nBetween.\n\n[Event \"Last\"]\n\n1. e4 zz *\n");
+    let results: Vec<_> = PgnParser::new(&pgn).collect();
+    assert_eq!(results.len(), 3);
+    // The game starts at its first tag line.
+    assert!(matches!(
+        results[0],
+        Err(Error::PgnGame {
+            number: 1,
+            line: 5,
+            ..
+        })
+    ));
+    // Text after a failed game is skipped with it.
+    let valid = results[1].as_ref().unwrap();
+    assert_eq!(valid.event, "Valid");
+    assert_eq!(valid.moves[valid.first_move.unwrap()].comment, None);
+    let last = results[2].as_ref().unwrap();
+    assert_eq!(
+        last.warnings[0].to_string(),
+        "PGN game 3, line 19: skipped unknown text \"zz\""
+    );
+}
+
+#[test]
+fn test_a_bracket_line_before_a_game_is_a_bad_tag() {
+    // SCID also reads the line as a tag and reports an error.
+    let pgn = "[Note: see below]\n\n[Event \"x\"]\n\n1. e4 *\n";
+    assert_eq!(events(pgn), ["error", "x"]);
+}
