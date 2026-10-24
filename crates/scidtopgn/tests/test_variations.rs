@@ -3,17 +3,59 @@
 
 use scidtopgn::shakmaty::uci::UciMove;
 use scidtopgn::{
-    encode_move, parse_single_game, ByteBuffer, Database, Error, Game, GameMove, MoveNode,
+    encode_move, parse_single_game, ByteBuffer, Database, Error, Game, GameMove, Marker, MoveNode,
     PgnParser, ScidPosition, ENCODE_COMMENT, ENCODE_END_GAME, ENCODE_END_MARKER,
     ENCODE_START_MARKER, GAME_DECODE_ALL,
 };
 use tempfile::TempDir;
 
-/// Six levels of variations, with a NAG or a comment at each boundary.
-const NESTED: &str = "1. e4 e5 2. Nf3 {m2} (2. f4 {L1} exf4 (2... d5 {L2} 3. exd5 \
-(3. Nf3 {L3} dxe4 (3... Nf6 $1 {L4} 4. Nxe5 (4. d3 {L5} Bc5 (4... Bb4+ {L6} $2) \
-$3 {after L6}) {after L5} $4) {after L4} $5) $6 {after L3}) {after L2} $7 3. Nf3) \
-{after L1} $10 Nc6 *";
+/// Six levels of variations. NAGs and comments come right after each `(`,
+/// after moves, and after `)`, including after several `)` in a row and
+/// between sibling variations. The deepest move has empty and comment-only
+/// sibling variations.
+const NESTED: &str = "{start} 1. e4 $1 {m1} e5 2. Nf3 ({L1 start} $9 2. f4 $2 {L1 f4} \
+exf4 ({L2 start} 2... d5 $3 {L2 d5} 3. exd5 ({L3 start} 3. Nf3 $4 {L3 Nf3} dxe4 \
+({L4 start} 3... Nf6 $5 {L4 Nf6} 4. Nxe5 ({L5 start} 4. d3 $6 {L5 d3} Bc5 \
+({L6 start} 4... Bb4+ $7 {L6 Bb4+}) $8 {after L6} (4... Bd6 {L6 sibling}) () \
+({only comment}))) $10 {after three closes}) $11 {after L3} (3. Nc3 {L3 sibling})) \
+$13 {after L2} 3. Nf3) {after L1} $12 Nc6 3. Bb5 a6 *";
+
+/// Where each annotation in `NESTED` belongs: every node of the game, in
+/// order, indented by its depth. `$9`, a NAG before the first move of a
+/// variation, is dropped.
+const NESTED_TREE: [&str; 31] = [
+    "start {start}",
+    "e4 $1 {m1}",
+    "e5",
+    "Nf3 $12 {after L1}",
+    "  start {L1 start}",
+    "  f4 $2 {L1 f4}",
+    "  exf4 $13 {after L2}",
+    "    start {L2 start}",
+    "    d5 $3 {L2 d5}",
+    "    exd5 $11 {after L3}",
+    "      start {L3 start}",
+    "      Nf3 $4 {L3 Nf3}",
+    "      dxe4 $10 {after three closes}",
+    "        start {L4 start}",
+    "        Nf6 $5 {L4 Nf6}",
+    "        Nxe5",
+    "          start {L5 start}",
+    "          d3 $6 {L5 d3}",
+    "          Bc5 $8 {after L6}",
+    "            start {L6 start}",
+    "            Bb4+ $7 {L6 Bb4+}",
+    "            start",
+    "            Bd6 {L6 sibling}",
+    "            start",
+    "            start {only comment}",
+    "      start",
+    "      Nc3 {L3 sibling}",
+    "  Nf3",
+    "Nc6",
+    "Bb5",
+    "a6",
+];
 
 fn pgn_game(movetext: &str) -> String {
     format!("[Event \"x\"]\n[Result \"*\"]\n\n{movetext}\n")
@@ -27,9 +69,45 @@ fn node<'a>(game: &'a Game, san: &str) -> &'a MoveNode {
         .unwrap_or_else(|| panic!("no move {san}"))
 }
 
-fn annotations(game: &Game, san: &str) -> (Vec<u8>, Option<String>) {
-    let node = node(game, san);
-    (node.nags.clone(), node.comment.clone())
+/// Every node of `game`, in order, with its NAGs and comment, indented by
+/// its depth. Each line starts with a start marker.
+fn tree(game: &Game) -> Vec<String> {
+    let mut lines = Vec::new();
+    line_tree(game, game.first_move.unwrap(), 0, &mut lines);
+    lines
+}
+
+fn line_tree(game: &Game, start: usize, depth: usize, lines: &mut Vec<String>) {
+    let mut idx = Some(start);
+    while let Some(i) = idx {
+        let node = &game.moves[i];
+        if matches!(node.marker, Marker::EndMarker | Marker::EndGame) {
+            break;
+        }
+        let mut text = "  ".repeat(depth);
+        text.push_str(if node.marker == Marker::StartMarker {
+            "start"
+        } else {
+            &node.san
+        });
+        for nag in &node.nags {
+            text.push_str(&format!(" ${nag}"));
+        }
+        if let Some(ref comment) = node.comment {
+            text.push_str(&format!(" {{{comment}}}"));
+        }
+        lines.push(text);
+
+        // A start marker's `var_child` is its next sibling, not a variation.
+        if node.marker != Marker::StartMarker {
+            let mut variation = node.var_child;
+            while let Some(start) = variation {
+                line_tree(game, start, depth + 1, lines);
+                variation = game.moves[start].var_child;
+            }
+        }
+        idx = node.next;
+    }
 }
 
 /// Writes `game` to a new database and reads it back.
@@ -93,33 +171,13 @@ fn decode(moves: &[u8], comments: &[&str]) -> scidtopgn::Result<Game> {
 #[test]
 fn test_annotations_in_nested_variations() {
     let game = parse_single_game(&pgn_game(NESTED)).unwrap();
-    let expected = [
-        ("Nf3", vec![10], Some("m2 after L1")),
-        ("f4", vec![], Some("L1")),
-        ("exf4", vec![7], Some("after L2")),
-        ("d5", vec![], Some("L2")),
-        ("exd5", vec![6], Some("after L3")),
-        ("dxe4", vec![5], Some("after L4")),
-        ("Nf6", vec![1], Some("L4")),
-        ("Nxe5", vec![4], Some("after L5")),
-        ("d3", vec![], Some("L5")),
-        ("Bc5", vec![3], Some("after L6")),
-        ("Bb4+", vec![2], Some("L6")),
-        ("Nc6", vec![], None),
-    ];
-    let check = |game: &Game, stage: &str| {
-        for (san, nags, comment) in &expected {
-            let expected = (nags.clone(), comment.map(String::from));
-            assert_eq!(annotations(game, san), expected, "{san} after {stage}");
-        }
-    };
-    check(&game, "PGN import");
+    assert_eq!(tree(&game), NESTED_TREE, "after PGN import");
     let reread = scid_round_trip(&game);
-    check(&reread, "SCID round trip");
+    assert_eq!(tree(&reread), NESTED_TREE, "after a SCID round trip");
 
     let exported = reread.to_pgn();
     let reimported = parse_single_game(&exported).unwrap();
-    check(&reimported, "PGN to SCID to PGN");
+    assert_eq!(tree(&reimported), NESTED_TREE, "after PGN to SCID to PGN");
     assert_eq!(scid_round_trip(&reimported).to_pgn(), exported);
 }
 
