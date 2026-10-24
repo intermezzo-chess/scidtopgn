@@ -518,6 +518,53 @@ fn test_cli_import_recovers_past_line_comments() {
 }
 
 #[test]
+fn test_cli_import_keeps_text_before_games() {
+    let pgn = "Games from the 2026 club championship.\nDownloaded from example.org.\n\n\
+        [Event \"First\"]\n[Result \"1-0\"]\n\n1. e4 e5 1-0 [Round 2 notes]\n\n\
+        Round 2 starts here.\n\n\
+        [Event \"Second\"]\n[Result \"0-1\"]\n\n1. d4 zz d5 0-1\n";
+    for mode in ["skip", "abort"] {
+        let temp = TempDir::new().expect("Failed to create temp dir");
+        let pgn_path = temp.path().join("pregame.pgn");
+        std::fs::write(&pgn_path, pgn).expect("Failed to write PGN");
+        let db_path = temp.path().join("pregame");
+        let output = cli()
+            .arg("import")
+            .arg(&pgn_path)
+            .arg("-o")
+            .arg(&db_path)
+            .args(["--on-error", mode, "--verbose"])
+            .output()
+            .expect("Failed to run CLI");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{mode}: {stderr}");
+        assert!(
+            stderr.contains("Warning: PGN game 2, line 14: skipped unknown text \"zz\""),
+            "{mode}: {stderr}"
+        );
+        assert!(
+            stderr.contains("2 games imported, 0 skipped"),
+            "{mode}: {stderr}"
+        );
+        assert_eq!(imported_events(&db_path), ["First", "Second"]);
+
+        // The text is stored and exported as each game's first comment.
+        let output = cli().arg(&db_path).output().expect("Failed to run CLI");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains(
+                "{Games from the 2026 club championship.\nDownloaded from example.org.} 1. e4 e5"
+            ),
+            "{stdout}"
+        );
+        assert!(
+            stdout.contains("{[Round 2 notes]\n\nRound 2 starts here.} 1. d4 d5"),
+            "{stdout}"
+        );
+    }
+}
+
+#[test]
 fn test_cli_import_accepts_tag_pairs_across_lines() {
     let temp = TempDir::new().expect("Failed to create temp dir");
     let pgn_path = temp.path().join("split.pgn");
