@@ -145,9 +145,11 @@ impl From<Move> for ParsedMove {
 
 /// Reads games from PGN text.
 ///
-/// As an iterator, it yields each game or the error that stopped it. After an
-/// error it resumes at the next line that starts with `[`, the next game's
-/// tags.
+/// As an iterator, it yields each game or the error that stopped it. A game
+/// starts at a line that starts with `[`, its first tag. Text before that
+/// line, such as notes before the first game, is kept as the comment before
+/// the game's first move, and text after the last game is dropped. After an
+/// error it resumes at the next game's tags.
 pub struct PgnParser {
     input: Vec<char>,
     pos: usize,
@@ -242,17 +244,56 @@ impl PgnParser {
         }
     }
 
-    /// Skips whitespace, a byte order mark, and line comments before a game.
-    fn skip_between_games(&mut self) {
-        while let Some(c) = self.peek() {
-            if c.is_whitespace() || c == '\u{feff}' {
-                self.advance();
-            } else if c == '%' || c == ';' {
-                self.skip_to_end_of_line();
-            } else {
-                break;
+    /// Reads the text before the next game, up to the line whose first
+    /// character other than whitespace or a byte order mark is `[`. Like
+    /// SCID, everything before that line is text, even moves. Returns `None`
+    /// if no game follows.
+    ///
+    /// Lines are joined by line breaks, without whitespace at their end or
+    /// blank lines around them. Line comments and brace comments are skipped.
+    fn read_pre_game_text(&mut self) -> Option<String> {
+        let mut lines: Vec<String> = Vec::new();
+        loop {
+            // A whole line, or the rest of one after a result or comment.
+            let whole_line = self.at_line_start();
+            let start = self.pos;
+            let mut had_comment = false;
+            loop {
+                while self
+                    .peek()
+                    .is_some_and(|c| c == '\u{feff}' || (c.is_whitespace() && c != '\n'))
+                {
+                    self.advance();
+                }
+                if self.peek() != Some('{') {
+                    break;
+                }
+                self.skip_comment();
+                had_comment = true;
+            }
+            match self.peek()? {
+                '[' => break,
+                '%' | ';' => self.skip_to_end_of_line(),
+                _ => {
+                    let from = if whole_line && !had_comment {
+                        start
+                    } else {
+                        self.pos
+                    };
+                    self.skip_to_end_of_line();
+                    let line: String = self.input[from..self.pos].iter().collect();
+                    let line = line.trim_start_matches('\u{feff}').trim_end();
+                    // A blank line is kept only between lines of text.
+                    if !line.is_empty() || !(had_comment || lines.is_empty()) {
+                        lines.push(line.to_string());
+                    }
+                }
             }
         }
+        while lines.last().is_some_and(String::is_empty) {
+            lines.pop();
+        }
+        Some(lines.join("\n"))
     }
 
     /// Skips the rest of a game that failed to parse, up to the next tag
@@ -317,7 +358,8 @@ impl PgnParser {
         Err(self.error("Unterminated string"))
     }
 
-    /// Parses the next game.
+    /// Parses a game from the current position. Unlike the iterator, it
+    /// reads text before the game's tags, or a game without tags, as moves.
     ///
     /// Problems that don't stop the game from being read are recorded in
     /// [`Game::warnings`].
@@ -329,6 +371,12 @@ impl PgnParser {
     /// variations are nested more than 100 levels deep or a move has more
     /// than 255 of them.
     pub fn parse_game(&mut self) -> Result<Game> {
+        self.read_game("")
+    }
+
+    /// Parses a game, with `pre_game_text` as the comment before its first
+    /// move, ahead of any comment after its tags.
+    fn read_game(&mut self, pre_game_text: &str) -> Result<Game> {
         self.games += 1;
         let mut game = Game::new();
         let mut fen = None;
@@ -415,6 +463,9 @@ impl PgnParser {
         game.moves.push(start);
         game.first_move = Some(start_idx);
         game.current_move = Some(start_idx);
+        if !pre_game_text.is_empty() {
+            game.append_comment(pre_game_text);
+        }
         for comment in &comments {
             game.append_comment(comment);
         }
@@ -673,14 +724,14 @@ impl PgnParser {
 impl Iterator for PgnParser {
     type Item = Result<Game>;
 
-    /// Parses the next game. An error is wrapped in [`Error::PgnGame`], which
-    /// gives the game's number and first line.
+    /// Parses the next game, which starts at its first tag line. Text before
+    /// it is the comment before its first move. An error is wrapped in
+    /// [`Error::PgnGame`], which gives the game's number and first tag line.
     fn next(&mut self) -> Option<Result<Game>> {
-        self.skip_between_games();
-        self.peek()?;
+        let text = self.read_pre_game_text()?;
 
         let line = self.line;
-        match self.parse_game() {
+        match self.read_game(&text) {
             Ok(game) => Some(Ok(game)),
             Err(source) => {
                 self.skip_to_next_game();

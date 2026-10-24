@@ -16,6 +16,7 @@ The case numbers match [#37](https://github.com/intermezzo-chess/scidtopgn/issue
 - [Castling](#castling)
 - [Annotation symbols](#annotation-symbols)
 - [Results and the start position](#results-and-the-start-position)
+- [Text before and between games](#text-before-and-between-games)
 - [Known differences outside these cases](#known-differences-outside-these-cases)
 - [Export and round trips](#export-and-round-trips)
 - [How SCID's behavior was checked](#how-scids-behavior-was-checked)
@@ -54,6 +55,10 @@ PGN export:
 
 - **#34** Each NAG is exported as the symbol SCID writes when both SCID and `scidtopgn` read it back as the same NAG, and as `$n` otherwise. SCID writes some NAGs as symbols it can't read back, such as `→` for $40.
 - **#38** Variations, NAGs, and comments are exported where SCID exports them, in the PGN standard's export format, such as `1. e4 ! (1. d4)`. SCID writes `1.e4! ( 1.d4 )`.
+
+Text before and between games ([#41](https://github.com/intermezzo-chess/scidtopgn/issues/41)):
+
+- Text before a game, including moves with no tags, is kept as the comment before the game's first move, as in SCID. `;`, `%`, and `{...}` lines between games are skipped, where SCID keeps them in the text. A line starting with `[` that isn't a tag is reported as a failed game, where SCID logs an error and ignores it. See [Text before and between games](#text-before-and-between-games).
 
 Other known differences, which these cases don't cover, are listed in [Known differences outside these cases](#known-differences-outside-these-cases).
 
@@ -246,13 +251,37 @@ A `FEN` tag sets the start position with or without `SetUp`, in both products.
 
 **#32: `Variant` tag.** *What changes:* games in other variants, such as Chess960, are skipped and reported instead of being read as standard chess. *Why:* reading them as standard chess gives wrong moves or fails partway through. Chess960 is [#14](https://github.com/intermezzo-chess/scidtopgn/issues/14). `Variant` values that mean standard chess are accepted: `Standard`, `Chess`, `Normal`, and Lichess's `From Position`.
 
+## Text before and between games
+
+As in SCID, a game starts at its first tag line: a line whose first character other than whitespace is `[`. Everything before that line, from the start of the input or from the previous game's result, is text, and the text is kept as the comment before the game's first move. These cases were added by [#41](https://github.com/intermezzo-chess/scidtopgn/issues/41).
+
+| Case | Example | SCID | scidtopgn | Comparison |
+| --- | --- | --- | --- | --- |
+| Text before the first game | `Downloaded from example.org.` above `[Event ...]` | Keeps it as the comment before the first move | Keeps it as the comment before the first move | Same |
+| Text between games | `Round 2 starts here.` after a game's result, on the same line or below it | Keeps it as the comment before the next game's first move | Keeps it as the comment before the next game's first move | Same |
+| Moves with no tags | `1. c4 c5 *` above `[Event ...]` | Keeps them as text, as above | Keeps them as text, as above | Same |
+| Text or moves after the last game | `The end.` at the end of the input | Drops it, without a message | Drops it, without a message | Same |
+| Text and a comment before the first move | `Notes` above the tags, then `{Intro} 1. e4` | `Notes` and `Intro` on separate lines | `Notes Intro` | **Differs** |
+| Blank lines and spaces around the text | Blank lines after the text, spaces at the end of a line | Drops blank lines before the text, keeps the spaces and one line break at the end | Drops blank lines before and after the text, and the spaces at the end of each line and before text after a result | **Differs** |
+| Comments between games | `; note`, `% note`, or `{note}` on its own line | Keeps each line in the text as written, with its `;`, `%`, or braces | Skips them | **Differs** |
+| A line starting with `[` that isn't a tag | `[Note: see below]` above `[Event ...]` | Logs `Error reading tag` and reads the next tags into the same game | Reports a failed game, so the next game's number is one higher | **Differs** |
+
+Lines inside the text, including blank lines, are joined by line breaks. Text that is only whitespace isn't stored. Text after a game that fails to parse is skipped with that game, so it isn't attached to the next game. Before #41, `scidtopgn` read text before a game as the moves of a game, which failed and was reported as an extra game. It also imported moves with no tags as a game, so a file of games without tags now imports no games, as in SCID.
+
+**Text and a comment before the first move.** *What changes:* the text and the comment are joined with a space instead of a line break. *Why:* `scidtopgn` joins every comment it stores in one place the same way, as [Where annotations attach](#general-differences) describes.
+
+**Blank lines and spaces around the text.** *What changes:* the stored comment has no blank lines or spaces at its ends, and no spaces at the end of its lines. *Why:* they come from the layout of the file, not from the text.
+
+**Comments between games.** *What changes:* they aren't kept in the text. *Why:* `;` and `{...}` are comments in PGN, and a `%` line is an escape for other programs. `scidtopgn` skipped them between games before #41 and still does. Reading a brace comment as a comment also keeps a line starting with `[` inside it from starting a game.
+
+**A line starting with `[` that isn't a tag.** *What changes:* the line is reported as a failed game instead of being logged and ignored. *Why:* #41 only changed text that doesn't start with `[`. A malformed tag can't be told apart from a game whose tags are broken.
+
 ## Known differences outside these cases
 
 #37 doesn't change these. Each was checked against SCID's sources in `scid-cpp/scid` and `scidtopgn` as of #37.
 
 | Case | Example | SCID | scidtopgn |
 | --- | --- | --- | --- |
-| Text before the first game | `This text comes before the first game.` above `[Event ...]` | Keeps it as a comment before the first move | Reads it as a game, fails, and reports `PGN game 1`. The following games are numbered from 2. |
 | Rating in a player name | `[White "Carlsen, Magnus (2850)"]` | Removes the rating from the name and uses it as the Elo | Keeps the name as written and has no Elo |
 | Rating tags | `[WhiteUSCF "2400"]` | Uses the rating as the player's rating, with its type, such as USCF | Keeps it as an ordinary tag, with no rating in the index |
 | `Result` tag with more text | `[Result "1-0 (time)"]` | Reads `1-0` | Reads it as `*`. The result after the moves is used, with a warning only when that result isn't `*` (#27d). |
@@ -318,7 +347,7 @@ c++ -std=c++17 -Wno-register -w -Iscid-cpp/scid \
 
 `scid-cpp/CMakeLists.txt` names `scid-cpp/scid/src/main.cpp` as the converter's source, but the file is `scid-cpp/src/main.cpp`. These commands call the compiler directly instead. To build the reference converter itself, for example to write a test database such as `tests/data/castling`, use the same command with `-Iscid-cpp/src scid-cpp/src/main.cpp` in place of `pgn_probe.cpp`. Then run it as `<converter> <database> <pgn-file>`.
 
-To compare with `scidtopgn`, run `cargo test -p scidtopgn --test test_pgn test_notation_fixture`, which checks every game in `tests/data/notation.pgn`. To check another file, run `scidtopgn import <file> -o <database>`, which prints each warning and skipped game. The cases in [Known differences outside these cases](#known-differences-outside-these-cases) were checked the same way, with the example inputs shown.
+To compare with `scidtopgn`, run `cargo test -p scidtopgn --test test_pgn test_notation_fixture`, which checks every game in `tests/data/notation.pgn`. To check another file, run `scidtopgn import <file> -o <database>`, which prints each warning and skipped game. The cases in [Known differences outside these cases](#known-differences-outside-these-cases) were checked the same way, with the example inputs shown. So were the cases in [Text before and between games](#text-before-and-between-games). `pgn_probe` joins the lines of its output with spaces, so where the text's line breaks and spaces matter, SCID's stored comment was printed with `Game::GetMoveComment` instead.
 
 <details>
 <summary>SCID's output for <code>tests/data/notation.pgn</code></summary>
@@ -447,3 +476,4 @@ game 74: ERROR (SCID skips this game) | [Event "28b no result at the end of the 
 - **`crates/scidtopgn/tests/test_variations.rs`** checks where annotations attach in variations nested six levels deep, after PGN import and after round trips through SCID, and checks both variation limits from PGN and from SCID ([issue 4](https://github.com/intermezzo-chess/scidtopgn/issues/4)).
 - **`test_every_nag_survives_export_and_import`** in `crates/scidtopgn/src/game.rs` exports and imports each NAG from 1 to 255 (#34).
 - **`test_cli_import_prints_warnings_and_keeps_the_game`** in `crates/scidtopgn-cli/tests/integration.rs` checks how the CLI prints warnings in both `--on-error` modes (#33).
+- **The pre-game text tests in `test_pgn.rs`**, such as `test_text_before_a_game_is_its_first_comment`, check each case in [Text before and between games](#text-before-and-between-games). **`test_cli_import_keeps_text_before_games`** in `crates/scidtopgn-cli/tests/integration.rs` checks that the CLI numbers the games correctly in both `--on-error` modes, and that the text is stored and exported as each game's first comment (#41).
