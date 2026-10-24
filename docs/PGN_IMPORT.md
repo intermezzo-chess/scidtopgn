@@ -58,7 +58,7 @@ PGN export:
 
 Text before and between games ([#41](https://github.com/intermezzo-chess/scidtopgn/issues/41)):
 
-- Text before a game, including moves with no tags, is kept as the comment before the game's first move, as in SCID. `;`, `%`, and `{...}` lines between games are skipped, where SCID keeps them in the text. A line starting with `[` that isn't a tag is reported as a failed game, where SCID logs an error and ignores it. See [Text before and between games](#text-before-and-between-games).
+- Text before a game, including moves with no tags, is kept as the comment before the game's first move, as in SCID. `;`, `%`, and `{...}` lines between games are skipped, where SCID keeps them in the text. A line starting with `[` that isn't a tag is reported as a failed game, where SCID logs an error and ignores it. A `[` after a result on the same line is text, where SCID reads it as a tag. See [Text before and between games](#text-before-and-between-games).
 
 Other known differences, which these cases don't cover, are listed in [Known differences outside these cases](#known-differences-outside-these-cases).
 
@@ -265,6 +265,7 @@ As in SCID, a game starts at its first tag line: a line whose first character ot
 | Blank lines and spaces around the text | Blank lines after the text, spaces at the end of a line | Drops blank lines before the text, keeps the spaces and one line break at the end | Drops blank lines before and after the text, and the spaces at the end of each line and before text after a result | **Differs** |
 | Comments between games | `; note`, `% note`, or `{note}` on its own line | Keeps each line in the text as written, with its `;`, `%`, or braces | Skips them | **Differs** |
 | A line starting with `[` that isn't a tag | `[Note: see below]` above `[Event ...]` | Logs `Error reading tag` and reads the next tags into the same game | Reports a failed game, so the next game's number is one higher | **Differs** |
+| A `[` after a result or a comment on the same line | `1-0 [Round 2 notes]` | Reads it as a tag. If it isn't one, logs `Error reading tag` | Keeps it as text, like other text after a result | **Differs** |
 
 Lines inside the text, including blank lines, are joined by line breaks. Text that is only whitespace isn't stored. Text after a game that fails to parse is skipped with that game, so it isn't attached to the next game. Before #41, `scidtopgn` read text before a game as the moves of a game, which failed and was reported as an extra game. It also imported moves with no tags as a game, so a file of games without tags now imports no games, as in SCID.
 
@@ -275,6 +276,8 @@ Lines inside the text, including blank lines, are joined by line breaks. Text th
 **Comments between games.** *What changes:* they aren't kept in the text. *Why:* `;` and `{...}` are comments in PGN, and a `%` line is an escape for other programs. `scidtopgn` skipped them between games before #41 and still does. Reading a brace comment as a comment also keeps a line starting with `[` inside it from starting a game.
 
 **A line starting with `[` that isn't a tag.** *What changes:* the line is reported as a failed game instead of being logged and ignored. *Why:* #41 only changed text that doesn't start with `[`. A malformed tag can't be told apart from a game whose tags are broken.
+
+**A `[` after a result or a comment on the same line.** *What changes:* it is text, so `1-0 [Event "B"]` doesn't start a game, and `1-0 [Round 2 notes]` isn't reported as a failed game. *Why:* `scidtopgn` starts a game only at a tag line, as it does where a game without a result ends and where it resumes after a failed game. Before #41, `scidtopgn` read the `[` as a tag, as SCID does.
 
 ## Known differences outside these cases
 

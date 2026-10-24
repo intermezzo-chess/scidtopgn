@@ -520,7 +520,7 @@ fn test_cli_import_recovers_past_line_comments() {
 #[test]
 fn test_cli_import_keeps_text_before_games() {
     let pgn = "Games from the 2026 club championship.\nDownloaded from example.org.\n\n\
-        [Event \"First\"]\n[Result \"1-0\"]\n\n1. e4 e5 1-0\n\n\
+        [Event \"First\"]\n[Result \"1-0\"]\n\n1. e4 e5 1-0 [Round 2 notes]\n\n\
         Round 2 starts here.\n\n\
         [Event \"Second\"]\n[Result \"0-1\"]\n\n1. d4 zz d5 0-1\n";
     for mode in ["skip", "abort"] {
@@ -558,7 +558,7 @@ fn test_cli_import_keeps_text_before_games() {
             "{stdout}"
         );
         assert!(
-            stdout.contains("{Round 2 starts here.} 1. d4 d5"),
+            stdout.contains("{[Round 2 notes]\n\nRound 2 starts here.} 1. d4 d5"),
             "{stdout}"
         );
     }

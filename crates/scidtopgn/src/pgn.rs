@@ -249,13 +249,22 @@ impl PgnParser {
     /// SCID, everything before that line is text, even moves. Returns `None`
     /// if no game follows.
     ///
+    /// Unlike SCID, a `[` after a result or a comment on the same line is
+    /// text. A game starts only at a tag line, as everywhere else in the
+    /// parser.
+    ///
     /// Lines are joined by line breaks, without whitespace at their end or
     /// blank lines around them. Line comments and brace comments are skipped.
     fn read_pre_game_text(&mut self) -> Option<String> {
         let mut lines: Vec<String> = Vec::new();
         loop {
             // A whole line, or the rest of one after a result or comment.
-            let whole_line = self.at_line_start();
+            // Recovery from a failed game can stop inside a line's indent.
+            let whole_line = self.input[..self.pos]
+                .iter()
+                .rev()
+                .take_while(|&&c| c != '\n')
+                .all(|&c| c == '\u{feff}' || c.is_whitespace());
             let start = self.pos;
             let mut had_comment = false;
             loop {
@@ -272,7 +281,8 @@ impl PgnParser {
                 had_comment = true;
             }
             match self.peek()? {
-                '[' => break,
+                // A `[` after a result or comment on its line is text.
+                '[' if whole_line && !had_comment => break,
                 '%' | ';' => self.skip_to_end_of_line(),
                 _ => {
                     let from = if whole_line && !had_comment {

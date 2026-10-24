@@ -1006,3 +1006,38 @@ fn test_a_bracket_line_before_a_game_is_a_bad_tag() {
     let pgn = "[Note: see below]\n\n[Event \"x\"]\n\n1. e4 *\n";
     assert_eq!(events(pgn), ["error", "x"]);
 }
+
+#[test]
+fn test_a_bracket_after_a_result_or_comment_is_text() {
+    for (between, text) in [
+        ("1-0 [Round 2 starts here.]", "[Round 2 starts here.]"),
+        (
+            "1-0\n{note} [Round 2 starts here.]",
+            "[Round 2 starts here.]",
+        ),
+        ("1-0 [Event \"Not a game\"]", "[Event \"Not a game\"]"),
+    ] {
+        let pgn = format!("[Event \"A\"]\n\n1. e4 {between}\n\n[Event \"B\"]\n\n1. d4 *\n");
+        let results: Vec<_> = PgnParser::new(&pgn).collect();
+        assert!(results.iter().all(Result::is_ok), "{between:?}");
+        assert_eq!(events(&pgn), ["A", "B"], "{between:?}");
+        assert_eq!(
+            first_comments(&pgn),
+            [None, Some(text.to_string())],
+            "{between:?}"
+        );
+    }
+
+    // After the last game, the text is dropped instead of starting a game.
+    for tail in [
+        "1-0 [Event \"Not a game\"]\n",
+        "1-0\n{note} [Event \"Not a game\"]\n",
+    ] {
+        let pgn = format!("[Event \"A\"]\n\n1. e4 {tail}");
+        assert_eq!(events(&pgn), ["A"], "{tail:?}");
+    }
+
+    // A byte order mark before the first tag still starts a game.
+    assert_eq!(events("\u{feff}[Event \"A\"]\n\n1. e4 *\n"), ["A"]);
+    assert_eq!(events("\u{feff}  [Event \"A\"]\n\n1. e4 *\n"), ["A"]);
+}
