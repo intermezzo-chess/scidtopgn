@@ -263,6 +263,7 @@ As in SCID, a game starts at its first tag line: a line whose first character ot
 | Text or moves after the last game | `The end.` at the end of the input | Drops it, without a message | Drops it, without a message | Same |
 | Text and a comment before the first move | `Notes` above the tags, then `{Intro} 1. e4` | `Notes` and `Intro` on separate lines | `Notes Intro` | **Differs** |
 | Blank lines and spaces around the text | Blank lines after the text, spaces at the end of a line | Drops blank lines before the text, keeps the spaces and one line break at the end | Drops blank lines before and after the text, and the spaces at the end of each line and before text after a result | **Differs** |
+| Long text | Text of more than 16,000 characters | Keeps lines while the text stays under 16,000 characters, and drops the others without a message | Keeps all of it | **Differs** |
 | Comments between games | `; note`, `% note`, or `{note}` on its own line | Keeps each line in the text as written, with its `;`, `%`, or braces | Skips them | **Differs** |
 | A line starting with `[` that isn't a tag | `[Note: see below]` above `[Event ...]` | Logs `Error reading tag` and reads the next tags into the same game | Reports a failed game, so the next game's number is one higher | **Differs** |
 | A `[` after a result or a comment on the same line | `1-0 [Round 2 notes]` | Reads it as a tag. If it isn't one, logs `Error reading tag` | Keeps it as text, like other text after a result | **Differs** |
@@ -272,6 +273,8 @@ Lines inside the text, including blank lines, are joined by line breaks. Text th
 **Text and a comment before the first move.** *What changes:* the text and the comment are joined with a space instead of a line break. *Why:* `scidtopgn` joins every comment it stores in one place the same way, as [Where annotations attach](#general-differences) describes.
 
 **Blank lines and spaces around the text.** *What changes:* the stored comment has no blank lines or spaces at its ends, and no spaces at the end of its lines. *Why:* they come from the layout of the file, not from the text.
+
+**Long text.** *What changes:* text that SCID would cut short is kept in full, and exported in full. *Why:* SCID reads the text into a buffer of `MAX_COMMENT_SIZE`, 16,000 characters, in `pgnparse.cpp`. `scidtopgn` reads the text without a fixed buffer, so it doesn't drop part of it without saying so.
 
 **Comments between games.** *What changes:* they aren't kept in the text. *Why:* `;` and `{...}` are comments in PGN, and a `%` line is an escape for other programs. `scidtopgn` skipped them between games before #41 and still does. Reading a brace comment as a comment also keeps a line starting with `[` inside it from starting a game.
 

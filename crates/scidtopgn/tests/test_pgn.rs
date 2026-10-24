@@ -1041,3 +1041,11 @@ fn test_a_bracket_after_a_result_or_comment_is_text() {
     assert_eq!(events("\u{feff}[Event \"A\"]\n\n1. e4 *\n"), ["A"]);
     assert_eq!(events("\u{feff}  [Event \"A\"]\n\n1. e4 *\n"), ["A"]);
 }
+
+#[test]
+fn test_long_pre_game_text_is_kept() {
+    // SCID drops the lines past 16,000 characters.
+    let text = vec!["x".repeat(1000); 20].join("\n");
+    let pgn = format!("{text}\n\n[Event \"x\"]\n\n1. e4 *\n");
+    assert_eq!(first_comments(&pgn), [Some(text)]);
+}
