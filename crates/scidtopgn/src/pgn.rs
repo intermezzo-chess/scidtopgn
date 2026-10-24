@@ -324,8 +324,10 @@ impl PgnParser {
     ///
     /// # Errors
     ///
-    /// Returns an error if a tag, the `FEN`, or a move is invalid, or if the
-    /// `Variant` tag names a variant other than standard chess.
+    /// Returns an error if a tag, the `FEN`, or a move is invalid, if the
+    /// `Variant` tag names a variant other than standard chess, or if
+    /// variations are nested more than 100 levels deep or a move has more
+    /// than 255 of them.
     pub fn parse_game(&mut self) -> Result<Game> {
         self.games += 1;
         let mut game = Game::new();
@@ -529,6 +531,9 @@ impl PgnParser {
                     let start = before_last
                         .clone()
                         .ok_or_else(|| self.error("Variation before any move"))?;
+                    if let Some(message) = game.variation_limit(depth + 1) {
+                        return Err(self.error(&message));
+                    }
                     let parent = game.current_move;
                     game.add_variation()?;
                     self.parse_line(game, start, depth + 1)?;

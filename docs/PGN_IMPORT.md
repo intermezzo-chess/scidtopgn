@@ -71,6 +71,7 @@ These apply to every case below.
   - A comment between tags is ignored.
   - **A NAG before the first move of the game or of a variation is dropped, without a warning.** In `$1 1. e4 ($2 1. d4)`, neither NAG is kept. SCID keeps such a NAG in memory, but it neither saves it to the database nor exports it, so the result is the same.
   - `$0` means no annotation, and isn't stored.
+- **Variation limits ([issue 4](https://github.com/intermezzo-chess/scidtopgn/issues/4)).** A game with variations nested more than 100 levels deep, or with more than 255 variations of one move, is rejected with an error, whether it is read from PGN or from a SCID database. Reading and writing a game recurse once per level of nesting, so deeper nesting could overflow the stack. SCID has no limit on nesting. It counts a move's variations in a byte, which wraps, so it loses variations after the 255th.
 
 ## Warnings
 
@@ -443,5 +444,6 @@ game 74: ERROR (SCID skips this game) | [Event "28b no result at the end of the 
 - **Unit tests in `crates/scidtopgn/src/pgn.rs`** cover each notation, the symbol table, and how tokens are split.
 - **`tests/data/castling`** was written by the reference converter from `tests/data/castling.pgn`. `crates/scidtopgn/tests/test_interop.rs` checks that `scidtopgn` reads it (#17) and writes the same moves for `castling.pgn`. `position.rs` and `mov.rs` test castling without the castling right on its own.
 - **`tests/data/annotated`** was written by the reference converter from `tests/data/annotated.pgn`, which has NAGs and comments in the main line and in variations. `test_interop.rs` checks that `scidtopgn` reads and exports it with each annotation where SCID stores it, and writes the same moves and annotations for `annotated.pgn` (#38).
+- **`crates/scidtopgn/tests/test_variations.rs`** checks where annotations attach in variations nested six levels deep, after PGN import and after round trips through SCID, and checks both variation limits from PGN and from SCID ([issue 4](https://github.com/intermezzo-chess/scidtopgn/issues/4)).
 - **`test_every_nag_survives_export_and_import`** in `crates/scidtopgn/src/game.rs` exports and imports each NAG from 1 to 255 (#34).
 - **`test_cli_import_prints_warnings_and_keeps_the_game`** in `crates/scidtopgn-cli/tests/integration.rs` checks how the CLI prints warnings in both `--on-error` modes (#33).

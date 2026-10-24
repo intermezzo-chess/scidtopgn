@@ -14,6 +14,14 @@ use crate::Date;
 pub const MAX_TAGS: usize = 40;
 pub const MAX_TAG_LEN: u8 = 240;
 pub const MAX_NAGS: usize = 8;
+/// The deepest a variation can be nested, counting a variation of the main
+/// line as 1. Reading and writing a game recurse once per level, so deeper
+/// nesting could overflow the stack.
+pub(crate) const MAX_VARIATION_DEPTH: u32 = 100;
+
+/// SCID counts a move's variations in a byte, so it can't read back a move
+/// with more than 255.
+const TOO_MANY_VARIATIONS: &str = "More than 255 variations of one move";
 
 pub const GAME_DECODE_NONE: u8 = 0;
 pub const GAME_DECODE_TAGS: u8 = 1;
@@ -337,6 +345,9 @@ impl Game {
                     let start = before_last
                         .clone()
                         .ok_or_else(|| Error::Decode("Variation before any move".to_string()))?;
+                    if let Some(message) = self.variation_limit(level + 1) {
+                        return Err(Error::Decode(message));
+                    }
                     let parent = self.current_move;
                     self.add_variation()?;
                     self.decode_variation(buf, flags, start, level + 1)?;
@@ -396,10 +407,20 @@ impl Game {
         }
     }
 
+    /// Adds a variation to the current move and makes its start marker the
+    /// current move.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Decode`] if there is no current move, or if it
+    /// already has 255 variations, the most SCID can read back.
     pub fn add_variation(&mut self) -> Result<()> {
         let current_idx = self
             .current_move
             .ok_or(Error::Decode("No current move".to_string()))?;
+        if self.moves[current_idx].num_variations == u8::MAX {
+            return Err(Error::Decode(TOO_MANY_VARIATIONS.to_string()));
+        }
 
         let var_parent = Some(current_idx);
         let start_idx = self.add_marker_node(Marker::StartMarker, var_parent);
@@ -420,6 +441,21 @@ impl Game {
         self.current_move = Some(start_idx);
 
         Ok(())
+    }
+
+    /// Why a variation at nesting `depth` can't be added to the current move,
+    /// or `None` if it can.
+    pub(crate) fn variation_limit(&self, depth: u32) -> Option<String> {
+        if depth > MAX_VARIATION_DEPTH {
+            return Some(format!(
+                "Variation nested more than {MAX_VARIATION_DEPTH} levels deep"
+            ));
+        }
+        let current = self.current_move.map(|idx| &self.moves[idx]);
+        if current.is_some_and(|node| node.num_variations == u8::MAX) {
+            return Some(TOO_MANY_VARIATIONS.to_string());
+        }
+        None
     }
 
     /// Adds `nag` to the current move, the move it follows.
