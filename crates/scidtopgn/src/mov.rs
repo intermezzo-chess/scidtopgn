@@ -9,7 +9,7 @@
 use shakmaty::{CastlingMode, CastlingSide, Color, Move, Position, Role, Square};
 
 use crate::bytebuf::ByteBuffer;
-use crate::error::{Error, Result};
+use crate::error::{CorruptGameKind, Error, InvalidMoveByte, Result};
 use crate::position::{fen, ScidPosition};
 
 pub const ENCODE_NAG: u8 = 11;
@@ -77,44 +77,52 @@ fn square_diff(from: Square, to: Square) -> i32 {
     to.to_u32() as i32 - from.to_u32() as i32
 }
 
-/// Decodes the move whose first byte is `byte`, reading a diagonal queen
-/// move's second byte from `buf`.
+/// Decodes the move whose first byte is `byte`, which was just read from
+/// `buf`, reading a diagonal queen move's second byte from `buf`.
 ///
 /// # Errors
 ///
-/// Returns [`Error::Decode`] if the piece number or value is invalid, or if
-/// the move can't be played in `pos` (see [`ScidPosition::can_play`]). A null
-/// move is returned without checking; [`ScidPosition::play`] rejects it in
-/// check.
+/// Returns [`Error::CorruptGame`] if the piece number or value is invalid, if
+/// the move can't be played in `pos` (see [`ScidPosition::can_play`]), or if
+/// it is a null move in check. Its offset is the offset of `byte`.
 pub fn decode_move(buf: &mut ByteBuffer, pos: &ScidPosition, byte: u8) -> Result<GameMove> {
     let (number, value) = parse_move_byte(byte);
     let chess = pos.chess();
     let color = chess.turn();
-    let invalid = |reason: &str| {
-        Error::Decode(format!(
-            "invalid move byte {byte:#04x} ({reason}) in {}",
-            fen(chess)
-        ))
+    let byte_offset = buf.position().saturating_sub(1);
+    let invalid = |reason| Error::CorruptGame {
+        offset: byte_offset,
+        kind: CorruptGameKind::InvalidMove {
+            byte,
+            reason,
+            fen: fen(chess),
+        },
     };
     let from = pos
         .pieces()
         .square(color, number)
-        .ok_or_else(|| invalid("no such piece"))?;
+        .ok_or_else(|| invalid(InvalidMoveByte::NoSuchPiece))?;
     let role = chess
         .board()
         .role_at(from)
-        .ok_or_else(|| invalid("no piece on its square"))?;
+        .ok_or_else(|| invalid(InvalidMoveByte::EmptySquare))?;
 
-    let offset = |diff: i32| from.offset(diff).ok_or_else(|| invalid("off the board"));
+    let offset = |diff: i32| {
+        from.offset(diff)
+            .ok_or_else(|| invalid(InvalidMoveByte::OffBoard))
+    };
     let (to, promotion) = match role {
+        Role::King if value == 0 && chess.is_check() => {
+            return Err(invalid(InvalidMoveByte::NullMoveInCheck))
+        }
         Role::King if value == 0 => return Ok(GameMove::Null),
         Role::King => match KING_SQDIFF.get(usize::from(value)) {
             Some(&diff) => (offset(diff)?, None),
-            None => return Err(invalid("not a king move")),
+            None => return Err(invalid(InvalidMoveByte::NotKingMove)),
         },
         Role::Knight => match KNIGHT_SQDIFF.get(usize::from(value)) {
             Some(&diff) if value != 0 => (offset(diff)?, None),
-            _ => return Err(invalid("not a knight move")),
+            _ => return Err(invalid(InvalidMoveByte::NotKnightMove)),
         },
         Role::Rook => (rook_destination(from, value), None),
         Role::Bishop => {
@@ -132,7 +140,7 @@ pub fn decode_move(buf: &mut ByteBuffer, pos: &ScidPosition, byte: u8) -> Result
         Role::Queen => {
             let second = buf.get_byte()?;
             if !(64..=127).contains(&second) {
-                return Err(invalid("bad diagonal queen move"));
+                return Err(invalid(InvalidMoveByte::BadQueenMove));
             }
             (Square::new(u32::from(second - 64)), None)
         }
@@ -156,7 +164,7 @@ pub fn decode_move(buf: &mut ByteBuffer, pos: &ScidPosition, byte: u8) -> Result
             m.from() == Some(from) && destination(m, color) == to && m.promotion() == promotion
         })
         .map(GameMove::Move)
-        .ok_or_else(|| invalid(&format!("{from}{to} is illegal")))
+        .ok_or_else(|| invalid(InvalidMoveByte::Illegal { from, to }))
 }
 
 /// The destination of a rook move, or a queen move along a rank or file.
@@ -193,18 +201,16 @@ pub fn encode_move(buf: &mut ByteBuffer, pos: &ScidPosition, mv: GameMove) -> Re
     let number = pos
         .pieces()
         .number(from)
-        .ok_or_else(|| Error::Encoding(format!("no piece number for the piece on {from}")))?;
+        .expect("the piece list numbers every piece on the board");
     let diff = square_diff(from, to);
     let same_rank = from.rank() == to.rank();
     let same_file = from.file() == to.file();
 
     let value = match m.role() {
-        Role::King if number != 0 => {
-            return Err(Error::Encoding(format!(
-                "the king on {from} has piece number {number}, not 0"
-            )))
+        Role::King => {
+            debug_assert_eq!(number, 0, "the king is always piece number 0");
+            KING_DIFF_TO_VAL[(diff + 9) as usize]
         }
-        Role::King => KING_DIFF_TO_VAL[(diff + 9) as usize],
         Role::Knight => KNIGHT_DIFF_TO_VAL[(diff + 17) as usize],
         Role::Rook | Role::Queen if same_rank => to.file().to_u32() as u8,
         Role::Rook | Role::Queen if same_file => 8 + to.rank().to_u32() as u8,
@@ -375,7 +381,10 @@ mod tests {
             assert!(
                 matches!(
                     decode_move(&mut ByteBuffer::new(), &pos, byte),
-                    Err(Error::Decode(_))
+                    Err(Error::CorruptGame {
+                        offset: 0,
+                        kind: CorruptGameKind::InvalidMove { .. },
+                    })
                 ),
                 "{byte:#04x} should be rejected"
             );

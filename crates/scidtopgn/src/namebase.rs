@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::fmt;
 use std::io::{Read, Write};
 
 use crate::error::{Error, Result};
@@ -38,8 +39,19 @@ impl TryFrom<usize> for NameType {
             1 => Ok(NameType::Event),
             2 => Ok(NameType::Site),
             3 => Ok(NameType::Round),
-            _ => Err(Error::Database(format!("Invalid name type: {}", value))),
+            _ => Err(Error::InvalidNameType { value }),
         }
+    }
+}
+
+impl fmt::Display for NameType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            NameType::Player => "player",
+            NameType::Event => "event",
+            NameType::Site => "site",
+            NameType::Round => "round",
+        })
     }
 }
 
@@ -110,7 +122,7 @@ impl NameBase {
         let idx = ntype.as_usize();
 
         if self.num_names[idx] >= ntype.max_id() {
-            return Err(Error::Database("NameBase full".to_string()));
+            return Err(Error::NameBaseFull { name_type: ntype });
         }
 
         if let Some(&id) = self.trees[idx].get(name) {
@@ -245,7 +257,7 @@ impl NameBase {
         let mut magic = [0u8; 8];
         reader.read_exact(&mut magic)?;
         if &magic != NAMEBASE_MAGIC {
-            return Err(Error::CorruptData("Invalid namebase magic".to_string()));
+            return Err(Error::InvalidMagic);
         }
 
         self.timestamp = read_four_bytes(reader)?;
@@ -284,15 +296,18 @@ impl NameBase {
                     read_one_byte(reader)? as u32
                 };
 
-                let length = read_one_byte(reader)? as usize;
-                let prefix = if i > 0 {
-                    read_one_byte(reader)? as usize
-                } else {
-                    0
-                };
+                let length = read_one_byte(reader)?;
+                let prefix = if i > 0 { read_one_byte(reader)? } else { 0 };
+                if prefix > length {
+                    return Err(Error::NamePrefixTooLong {
+                        name_type: ntype,
+                        prefix,
+                        length,
+                    });
+                }
+                let (length, prefix) = (usize::from(length), usize::from(prefix));
 
-                let suffix_len = length - prefix;
-                let mut suffix = vec![0u8; suffix_len];
+                let mut suffix = vec![0u8; length - prefix];
                 reader.read_exact(&mut suffix)?;
 
                 let mut name_bytes = Vec::with_capacity(length);
@@ -303,7 +318,7 @@ impl NameBase {
                 name_bytes.extend_from_slice(&suffix);
 
                 let name = String::from_utf8(name_bytes)
-                    .map_err(|_| Error::CorruptData("Invalid UTF-8 in name".to_string()))?;
+                    .map_err(|_| Error::NameNotUtf8 { name_type: ntype })?;
 
                 let clean_name: String = name
                     .chars()

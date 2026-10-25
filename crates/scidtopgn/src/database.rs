@@ -13,6 +13,10 @@ use crate::nfile::NFile;
 use crate::position::{fen, ScidPosition};
 use crate::Date;
 
+/// The longest game record a database can store. The index stores a
+/// record's length in 17 bits.
+const MAX_GAME_LENGTH: usize = (1 << 17) - 1;
+
 pub struct Database {
     path: PathBuf,
     index: Index,
@@ -69,21 +73,35 @@ impl Database {
         self.index.get_entry(game_num)
     }
 
+    /// Reads game `game_num`, counting from 0.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::GameNotFound`] if there is no such game, and
+    /// [`Error::Game`], which gives the game's number counting from 1, if it
+    /// can't be read.
     pub fn get_game(&mut self, game_num: u32) -> Result<Game> {
+        let number = u64::from(game_num) + 1;
         let entry = self
             .index
             .get_entry(game_num)
-            .ok_or_else(|| Error::Database(format!("Invalid game number: {}", game_num)))?;
+            .ok_or(Error::GameNotFound { number })?;
+        let in_game = |source| Error::Game {
+            number,
+            source: Box::new(source),
+        };
 
         let offset = entry.get_offset();
         let length = entry.get_length() as u16;
 
         let mut buf = ByteBuffer::new();
-        self.gfile.read_game(&mut buf, offset, length as u32)?;
+        self.gfile
+            .read_game(&mut buf, offset, length as u32)
+            .map_err(in_game)?;
         buf.back_to_start();
 
         let mut game = Game::new();
-        game.decode(&mut buf, GAME_DECODE_ALL)?;
+        game.decode(&mut buf, GAME_DECODE_ALL).map_err(in_game)?;
 
         let white_id = entry.get_white();
         let black_id = entry.get_black();
@@ -143,8 +161,20 @@ impl Database {
         Ok(game)
     }
 
+    /// Adds `game` and returns its number, counting from 0.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::GameTooLarge`] if the game's record is longer than
+    /// 131,071 bytes, the most the index can record.
     pub fn add_game(&mut self, game: &Game) -> Result<u32> {
         let encoded_data = self.encode_game(game)?;
+        if encoded_data.len() > MAX_GAME_LENGTH {
+            return Err(Error::GameTooLarge {
+                length: encoded_data.len(),
+                max: MAX_GAME_LENGTH,
+            });
+        }
 
         let buf = ByteBuffer::from_slice(&encoded_data);
         let offset = self.gfile.add_game(&buf)?;

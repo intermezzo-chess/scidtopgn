@@ -1,4 +1,4 @@
-use crate::error::{Error, Result};
+use crate::error::{CorruptGameKind, Error, Result};
 
 pub struct ByteBuffer {
     buffer: Vec<u8>,
@@ -63,9 +63,17 @@ impl ByteBuffer {
         v
     }
 
+    /// The error for reading past the end of the data.
+    fn unexpected_end(&self) -> Error {
+        Error::CorruptGame {
+            offset: self.read_pos,
+            kind: CorruptGameKind::UnexpectedEnd,
+        }
+    }
+
     pub fn get_byte(&mut self) -> Result<u8> {
         if self.read_pos >= self.write_pos {
-            return Err(Error::BufferRead);
+            return Err(self.unexpected_end());
         }
         let b = self.buffer[self.read_pos];
         self.read_pos += 1;
@@ -83,7 +91,7 @@ impl ByteBuffer {
 
     pub fn get_u16(&mut self) -> Result<u16> {
         if self.read_pos + 2 > self.write_pos {
-            return Err(Error::BufferRead);
+            return Err(self.unexpected_end());
         }
         let high = self.buffer[self.read_pos] as u16;
         let low = self.buffer[self.read_pos + 1] as u16;
@@ -105,7 +113,7 @@ impl ByteBuffer {
 
     pub fn skip(&mut self, count: usize) -> Result<()> {
         if self.read_pos + count > self.write_pos {
-            return Err(Error::BufferRead);
+            return Err(self.unexpected_end());
         }
         self.read_pos += count;
         Ok(())
@@ -113,7 +121,7 @@ impl ByteBuffer {
 
     pub fn get_fixed_string(&mut self, length: usize) -> Result<String> {
         if self.read_pos + length > self.write_pos {
-            return Err(Error::BufferRead);
+            return Err(self.unexpected_end());
         }
         let s = String::from_utf8_lossy(&self.buffer[self.read_pos..self.read_pos + length]);
         self.read_pos += length;
@@ -136,15 +144,20 @@ impl ByteBuffer {
         Ok(())
     }
 
+    /// Reads a string up to its terminating NUL, and the NUL.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::CorruptGame`] if the data ends before the NUL.
     pub fn get_terminated_string(&mut self) -> Result<String> {
         let start = self.read_pos;
-        while self.read_pos < self.write_pos && self.buffer[self.read_pos] != 0 {
-            self.read_pos += 1;
-        }
-        let s = String::from_utf8_lossy(&self.buffer[start..self.read_pos]).to_string();
-        if self.read_pos < self.write_pos {
-            self.read_pos += 1;
-        }
+        let data = &self.buffer[start..self.write_pos];
+        let Some(length) = data.iter().position(|&b| b == 0) else {
+            self.read_pos = self.write_pos;
+            return Err(self.unexpected_end());
+        };
+        let s = String::from_utf8_lossy(&data[..length]).to_string();
+        self.read_pos += length + 1;
         Ok(s)
     }
 

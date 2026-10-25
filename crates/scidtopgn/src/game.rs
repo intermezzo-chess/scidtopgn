@@ -2,7 +2,7 @@ use shakmaty::{Chess, Color, Position};
 
 use crate::bytebuf::ByteBuffer;
 use crate::common::GameResult;
-use crate::error::{Error, Result};
+use crate::error::{CorruptGameKind, Error, Result};
 use crate::mov::{
     decode_move, GameMove, ENCODE_COMMENT, ENCODE_END_GAME, ENCODE_END_MARKER, ENCODE_NAG,
     ENCODE_START_MARKER,
@@ -18,10 +18,6 @@ pub const MAX_NAGS: usize = 8;
 /// line as 1. Reading and writing a game recurse once per level, so deeper
 /// nesting could overflow the stack.
 pub(crate) const MAX_VARIATION_DEPTH: u32 = 100;
-
-/// SCID counts a move's variations in a byte, so it can't read back a move
-/// with more than 255.
-const TOO_MANY_VARIATIONS: &str = "More than 255 variations of one move";
 
 pub const GAME_DECODE_NONE: u8 = 0;
 pub const GAME_DECODE_TAGS: u8 = 1;
@@ -123,7 +119,7 @@ pub struct Game {
     /// The position the game starts from, or `None` for the standard
     /// starting position.
     pub start_position: Option<Chess>,
-    /// The number of half-moves in the main line.
+    /// The number of half-moves in the main line, up to 65,535.
     pub num_half_moves: u16,
     /// Problems found while reading the game from PGN that didn't stop it
     /// from being read. Empty for a game read from a SCID database.
@@ -202,19 +198,39 @@ impl Game {
 
     pub fn decode_start(&mut self, buf: &mut ByteBuffer) -> Result<()> {
         self.decode_tags(buf, false)?;
-        self.decode_start_position(buf)
+        self.decode_start_position(buf)?;
+        Ok(())
     }
 
     /// Reads the game flags and, if the game doesn't start from the standard
-    /// position, its starting FEN.
-    fn decode_start_position(&mut self, buf: &mut ByteBuffer) -> Result<()> {
+    /// position, its starting FEN. Returns the starting position.
+    fn decode_start_position(&mut self, buf: &mut ByteBuffer) -> Result<ScidPosition> {
         let flags = buf.get_byte()?;
-        self.start_position = if flags & 1 != 0 {
-            Some(chess_from_fen(&buf.get_terminated_string()?)?)
-        } else {
-            None
+        if flags & 1 == 0 {
+            self.start_position = None;
+            return Ok(ScidPosition::standard());
+        }
+
+        let offset = buf.position();
+        let fen = buf.get_terminated_string()?;
+        let invalid = |error: Error| {
+            // Keep the reason, which `InvalidFen` gives as its source.
+            let reason = match std::error::Error::source(&error) {
+                Some(source) => source.to_string(),
+                None => error.to_string(),
+            };
+            Error::CorruptGame {
+                offset,
+                kind: CorruptGameKind::InvalidStartPosition {
+                    fen: fen.clone(),
+                    reason,
+                },
+            }
         };
-        Ok(())
+        let chess = chess_from_fen(&fen).map_err(invalid)?;
+        let position = ScidPosition::from_setup_position(chess.clone()).map_err(invalid)?;
+        self.start_position = Some(chess);
+        Ok(position)
     }
 
     /// The starting position with SCID's piece numbering.
@@ -281,17 +297,16 @@ impl Game {
             self.skip_tags(buf)?;
         }
 
-        self.decode_start_position(buf)?;
+        let position = self.decode_start_position(buf)?;
 
         let start_node_idx = self.add_marker_node(Marker::StartMarker, None);
         self.first_move = Some(start_node_idx);
         self.current_move = Some(start_node_idx);
 
-        let position = self.initial_position()?;
         self.decode_variation(buf, flags, position, 0)?;
 
         if flags & GAME_DECODE_COMMENTS != 0 {
-            self.decode_comments(buf)?;
+            self.decode_comments_recursive(buf, start_node_idx)?;
         }
 
         Ok(())
@@ -338,15 +353,20 @@ impl Game {
         // The position before the last move, where its variations start.
         let mut before_last: Option<ScidPosition> = None;
         let mut b = buf.get_byte()?;
+        // The offset of `b`, which was just read.
+        let corrupt = |buf: &ByteBuffer, kind| Error::CorruptGame {
+            offset: buf.position() - 1,
+            kind,
+        };
 
         while b != ENCODE_END_GAME && b != ENCODE_END_MARKER {
             match b {
                 ENCODE_START_MARKER => {
                     let start = before_last
                         .clone()
-                        .ok_or_else(|| Error::Decode("Variation before any move".to_string()))?;
-                    if let Some(message) = self.variation_limit(level + 1) {
-                        return Err(Error::Decode(message));
+                        .ok_or_else(|| corrupt(buf, CorruptGameKind::VariationBeforeMove))?;
+                    if let Some(error) = self.variation_limit(level + 1) {
+                        return Err(error);
                     }
                     let parent = self.current_move;
                     self.add_variation()?;
@@ -363,7 +383,7 @@ impl Game {
                     if flags & GAME_DECODE_COMMENTS != 0 {
                         let current_idx = self
                             .current_move
-                            .ok_or(Error::Decode("No current move".to_string()))?;
+                            .expect("decoding starts at the game's start marker");
                         self.moves[current_idx].comment = Some(String::new());
                     }
                 }
@@ -379,10 +399,10 @@ impl Game {
         }
 
         if level == 0 && b != ENCODE_END_GAME {
-            return Err(Error::Decode("Expected ENCODE_END_GAME".to_string()));
+            return Err(corrupt(buf, CorruptGameKind::UnmatchedEndMarker));
         }
         if level > 0 && b != ENCODE_END_MARKER {
-            return Err(Error::Decode("Expected ENCODE_END_MARKER".to_string()));
+            return Err(corrupt(buf, CorruptGameKind::UnclosedVariation));
         }
 
         Ok(())
@@ -403,7 +423,8 @@ impl Game {
         self.moves.push(node);
         self.current_move = Some(new_idx);
         if main_line {
-            self.num_half_moves += 1;
+            // A main line of null moves can be longer than the count holds.
+            self.num_half_moves = self.num_half_moves.saturating_add(1);
         }
     }
 
@@ -412,14 +433,13 @@ impl Game {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Decode`] if there is no current move, or if it
-    /// already has 255 variations, the most SCID can read back.
+    /// Returns [`Error::NoCurrentMove`] if there is no current move, or
+    /// [`Error::TooManyVariations`] if it already has 255 variations, the
+    /// most SCID can read back.
     pub fn add_variation(&mut self) -> Result<()> {
-        let current_idx = self
-            .current_move
-            .ok_or(Error::Decode("No current move".to_string()))?;
+        let current_idx = self.current_move.ok_or(Error::NoCurrentMove)?;
         if self.moves[current_idx].num_variations == u8::MAX {
-            return Err(Error::Decode(TOO_MANY_VARIATIONS.to_string()));
+            return Err(Error::TooManyVariations);
         }
 
         let var_parent = Some(current_idx);
@@ -445,15 +465,13 @@ impl Game {
 
     /// Why a variation at nesting `depth` can't be added to the current move,
     /// or `None` if it can.
-    pub(crate) fn variation_limit(&self, depth: u32) -> Option<String> {
+    pub(crate) fn variation_limit(&self, depth: u32) -> Option<Error> {
         if depth > MAX_VARIATION_DEPTH {
-            return Some(format!(
-                "Variation nested more than {MAX_VARIATION_DEPTH} levels deep"
-            ));
+            return Some(Error::VariationTooDeep);
         }
         let current = self.current_move.map(|idx| &self.moves[idx]);
         if current.is_some_and(|node| node.num_variations == u8::MAX) {
-            return Some(TOO_MANY_VARIATIONS.to_string());
+            return Some(Error::TooManyVariations);
         }
         None
     }
@@ -505,13 +523,6 @@ impl Game {
         std::iter::successors(first.filter(valid), move |&start| {
             self.moves[start].var_child.filter(valid)
         })
-    }
-
-    fn decode_comments(&mut self, buf: &mut ByteBuffer) -> Result<()> {
-        let start_idx = self
-            .first_move
-            .ok_or(Error::Decode("No first move".to_string()))?;
-        self.decode_comments_recursive(buf, start_idx)
     }
 
     fn decode_comments_recursive(&mut self, buf: &mut ByteBuffer, start_idx: usize) -> Result<()> {

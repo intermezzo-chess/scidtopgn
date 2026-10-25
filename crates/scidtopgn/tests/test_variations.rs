@@ -253,10 +253,13 @@ fn test_variation_depth_limit_in_scid() {
     );
 
     match decode(&nested(101), &[]) {
-        Err(Error::Decode(message)) => {
-            assert_eq!(message, "Variation nested more than 100 levels deep");
+        Err(error @ Error::VariationTooDeep) => {
+            assert_eq!(
+                error.to_string(),
+                "Variation nested more than 100 levels deep"
+            );
         }
-        other => panic!("expected a decode error, got {other:?}"),
+        other => panic!("expected a depth error, got {other:?}"),
     }
 }
 
@@ -277,10 +280,10 @@ fn test_variation_count_limit_in_scid() {
     assert_eq!(last.comment.as_deref(), Some("v255"));
 
     match decode(&siblings(256), &comments) {
-        Err(Error::Decode(message)) => {
-            assert_eq!(message, "More than 255 variations of one move");
+        Err(error @ Error::TooManyVariations) => {
+            assert_eq!(error.to_string(), "More than 255 variations of one move");
         }
-        other => panic!("expected a decode error, got {other:?}"),
+        other => panic!("expected a variation count error, got {other:?}"),
     }
 }
 
@@ -288,6 +291,9 @@ fn test_variation_count_limit_in_scid() {
 fn test_add_variation_stops_at_255() {
     let mut game = parse_single_game(&pgn_game(&sibling_movetext(255))).unwrap();
     game.current_move = Some(1);
-    assert!(matches!(game.add_variation(), Err(Error::Decode(_))));
+    assert!(matches!(
+        game.add_variation(),
+        Err(Error::TooManyVariations)
+    ));
     assert_eq!(game.moves[1].num_variations, 255);
 }

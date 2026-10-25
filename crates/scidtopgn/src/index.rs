@@ -1,5 +1,5 @@
 use crate::common::GameResult;
-use crate::error::{Error, Result};
+use crate::error::{DatabaseFile, Error, Result};
 use crate::{date_get_day, date_get_month, date_get_year, date_make, Date};
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
@@ -93,7 +93,7 @@ impl IndexHeader {
 
         reader.read_exact(&mut header.magic)?;
         if &header.magic != INDEX_MAGIC {
-            return Err(Error::Database("Invalid magic number".to_string()));
+            return Err(Error::InvalidMagic);
         }
 
         header.version = read_u16_be(reader)?;
@@ -647,11 +647,20 @@ impl Index {
     }
 
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let path = path.as_ref();
+        Self::read_file(path.as_ref()).map_err(|e| e.in_file(DatabaseFile::Index))
+    }
+
+    fn read_file(path: &Path) -> Result<Self> {
         let file = File::open(path)?;
+        let file_size = file.metadata()?.len();
         let mut reader = BufReader::new(file);
 
         let header = IndexHeader::read(&mut reader)?;
+        // Check before allocating for the entries the header claims.
+        let entries_size = u64::from(header.num_games) * INDEX_ENTRY_SIZE as u64;
+        if file_size < INDEX_HEADER_SIZE as u64 + entries_size {
+            return Err(Error::Truncated);
+        }
 
         let mut entries = Vec::with_capacity(header.num_games as usize);
         for _ in 0..header.num_games {
@@ -667,7 +676,10 @@ impl Index {
     }
 
     pub fn create<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let path = path.as_ref();
+        Self::create_file(path.as_ref()).map_err(|e| e.in_file(DatabaseFile::Index))
+    }
+
+    fn create_file(path: &Path) -> Result<Self> {
         let file = File::create(path)?;
         let mut writer = BufWriter::new(file);
 
@@ -706,7 +718,7 @@ impl Index {
 
     pub fn add_entry(&mut self, entry: IndexEntry) -> Result<u32> {
         if self.header.num_games >= MAX_GAMES {
-            return Err(Error::Database("Index full".to_string()));
+            return Err(Error::IndexFull);
         }
 
         let game_num = self.header.num_games;
@@ -719,7 +731,9 @@ impl Index {
 
     pub fn write_entry<W: Write + Seek>(&mut self, writer: &mut W, game_num: u32) -> Result<()> {
         if game_num >= self.header.num_games {
-            return Err(Error::Database("Invalid game number".to_string()));
+            return Err(Error::GameNotFound {
+                number: u64::from(game_num) + 1,
+            });
         }
 
         let pos = INDEX_HEADER_SIZE as u64 + (game_num as u64) * (INDEX_ENTRY_SIZE as u64);
