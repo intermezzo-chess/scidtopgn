@@ -421,4 +421,102 @@ mod tests {
             assert_eq!(buf.as_slice(), data3.as_slice());
         }
     }
+
+    #[test]
+    fn test_gfile_without_a_file() {
+        let mut gf = GFile::default();
+        assert_eq!(gf.file_size(), 0);
+        assert!(matches!(
+            gf.add_game_data(&[1, 2, 3]),
+            Err(Error::FileNotOpen)
+        ));
+        assert_eq!(Error::FileNotOpen.to_string(), "File not open");
+        gf.flush().unwrap();
+        gf.close().unwrap();
+    }
+
+    #[test]
+    fn test_gfile_open_empty_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("empty");
+        std::fs::write(path.with_extension("sg4"), []).unwrap();
+
+        let mut gf = GFile::open(&path).unwrap();
+        assert_eq!(gf.file_size(), 0);
+        assert_eq!(gf.add_game_data(&[1, 2, 3]).unwrap(), 0);
+        gf.close().unwrap();
+        assert_eq!(
+            std::fs::read(path.with_extension("sg4")).unwrap(),
+            [1, 2, 3]
+        );
+    }
+
+    #[test]
+    fn test_gfile_open_file_of_one_full_block() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("full");
+        std::fs::write(path.with_extension("sg4"), vec![7; GF_BLOCKSIZE]).unwrap();
+
+        let mut gf = GFile::open(&path).unwrap();
+        assert_eq!(gf.file_size(), GF_BLOCKSIZE as u64);
+        let last = (GF_BLOCKSIZE - 1) as u32;
+        assert_eq!(gf.read_game_data(last, 1).unwrap(), [7]);
+        // A game added after a full block starts the next one.
+        assert_eq!(gf.add_game_data(&[1]).unwrap(), GF_BLOCKSIZE as u32);
+    }
+
+    #[test]
+    fn test_gfile_close_writes_the_block() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("closed");
+
+        let mut gf = GFile::create(&path).unwrap();
+        gf.add_game_data(&[1, 2, 3]).unwrap();
+        gf.close().unwrap();
+        // Closing again does nothing.
+        gf.close().unwrap();
+        assert!(matches!(gf.add_game_data(&[4]), Err(Error::FileNotOpen)));
+
+        let mut gf = GFile::open(&path).unwrap();
+        assert_eq!(gf.read_game_data(0, 3).unwrap(), [1, 2, 3]);
+    }
+
+    #[test]
+    fn test_gfile_read_after_close() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("closed");
+        std::fs::write(path.with_extension("sg4"), [1, 2, 3]).unwrap();
+
+        let mut gf = GFile::open(&path).unwrap();
+        gf.close().unwrap();
+        let mut buf = ByteBuffer::new();
+        assert!(matches!(
+            gf.read_game(&mut buf, 0, 3),
+            Err(Error::FileNotOpen)
+        ));
+    }
+
+    #[test]
+    fn test_gfile_add_and_read_across_blocks_after_open() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("blocks");
+        // A last block with room for 100 more bytes.
+        std::fs::write(path.with_extension("sg4"), vec![7; GF_BLOCKSIZE - 100]).unwrap();
+
+        let mut gf = GFile::open(&path).unwrap();
+        // 200 bytes don't fit, so they start the next block.
+        let second = gf.add_game_data(&[8; 200]).unwrap();
+        assert_eq!(second, GF_BLOCKSIZE as u32);
+        // Reading the first block writes the second one first.
+        assert_eq!(gf.read_game_data(0, 2).unwrap(), [7, 7]);
+        assert_eq!(gf.read_game_data(second, 200).unwrap(), [8; 200]);
+        gf.close().unwrap();
+
+        let size = std::fs::metadata(path.with_extension("sg4")).unwrap().len();
+        assert_eq!(size, GF_BLOCKSIZE as u64 + 200);
+        let mut gf = GFile::open(&path).unwrap();
+        assert_eq!(gf.read_game_data(second, 200).unwrap(), [8; 200]);
+        let end = (GF_BLOCKSIZE - 101) as u32;
+        assert_eq!(gf.read_game_data(end, 1).unwrap(), [7]);
+    }
 }

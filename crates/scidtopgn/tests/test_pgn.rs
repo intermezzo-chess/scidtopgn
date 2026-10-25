@@ -1169,3 +1169,114 @@ fn test_from_bytes_reads_utf8_as_new_does() {
     let games = games_from_bytes(b"\xef\xbb\xbf[Event \"\xe9\"]\n\n1. e4 *\n");
     assert_eq!(games[0].event, "é");
 }
+
+#[test]
+fn test_unclosed_comment_runs_to_the_end() {
+    // As in SCID, the comment runs to the end of the input, so the game
+    // fails and the games after it are inside the comment. The error gives
+    // the line where the input ends.
+    let pgn = "[Event \"A\"]\n\n1. e4 {open e5 *\n\n[Event \"B\"]\n\n1. d4 *\n";
+    let results: Vec<_> = PgnParser::new(pgn).collect();
+    assert_eq!(results.len(), 1);
+    assert_eq!(
+        failure(results[0].as_ref().unwrap_err()),
+        "error: Parse error at line 8: Unterminated comment"
+    );
+}
+
+#[test]
+fn test_unclosed_variation_fails_its_game() {
+    // As in SCID, the next game's tags or the end of the input end the
+    // game with an error, and the next game is read.
+    let unclosed = "[Event \"A\"]\n\n1. e4 (1. d4 d5\n";
+    let next = "[Event \"B\"]\n\n1. c4 *\n";
+    let pgn = format!("{unclosed}\n{next}");
+    let results: Vec<_> = PgnParser::new(&pgn).collect();
+    assert_eq!(results.len(), 2);
+    assert_eq!(
+        failure(results[0].as_ref().unwrap_err()),
+        "error: Parse error at line 5: Unexpected '['"
+    );
+    assert_eq!(results[1].as_ref().unwrap().event, "B");
+
+    let results: Vec<_> = PgnParser::new(unclosed).collect();
+    assert_eq!(results.len(), 1);
+    assert_eq!(
+        failure(results[0].as_ref().unwrap_err()),
+        "error: Parse error at line 4: Unterminated variation"
+    );
+}
+
+#[test]
+fn test_bracket_inside_moves_fails_the_game() {
+    // A `[` that doesn't start a tag line, as SCID also rejects the game.
+    let pgn = "[Event \"A\"]\n\n1. e4 [note] e5 *\n\n[Event \"B\"]\n\n1. d4 *\n";
+    let results: Vec<_> = PgnParser::new(pgn).collect();
+    assert_eq!(
+        failure(results[0].as_ref().unwrap_err()),
+        "error: Parse error at line 3: Unexpected '['"
+    );
+    assert_eq!(events(pgn), ["error", "B"]);
+}
+
+#[test]
+fn test_line_comments_between_tags_are_skipped() {
+    for comment in ["% escape {", "; comment {"] {
+        let pgn = format!("[Event \"A\"]\n{comment}\n[Site \"S\"]\n\n1. e4 *\n");
+        let game = parse_single_game(&pgn).unwrap();
+        assert_eq!(
+            (game.event.as_str(), game.site.as_str()),
+            ("A", "S"),
+            "{comment}"
+        );
+        assert_eq!(sans(&game), ["e4"], "{comment}");
+        assert!(game.warnings.is_empty(), "{comment}");
+    }
+}
+
+#[test]
+fn test_recovery_skips_the_failed_games_indented_tags() {
+    let good = "[Event \"Good\"]\n\n1. e4 e5 *\n";
+    for indent in ["  ", "\t"] {
+        let broken = format!("[Event \"Broken]\n{indent}[Site \"S\"]\n\n1. d4 d5 *\n");
+        assert_eq!(
+            events(&[broken.as_str(), good].join("\n")),
+            ["error", "Good"]
+        );
+    }
+}
+
+#[test]
+fn test_text_attached_after_a_moves_symbols() {
+    let game = parse_single_game(&pgn_game("", "1. e4!zz e5 *")).unwrap();
+    assert_eq!(sans(&game), ["e4", "e5"]);
+    assert_eq!(game.moves[1].nags, [1]);
+    assert_eq!(
+        warning_kinds(&game),
+        [PgnWarningKind::UnknownText {
+            text: "zz".to_string()
+        }]
+    );
+}
+
+#[test]
+fn test_king_moves_that_arent_castling() {
+    // Castling with pieces in the way, and a king move along its rank that
+    // isn't to the g- or c-file.
+    assert_illegal("", "1. O-O *", "O-O");
+    assert_illegal("", "1. Ka1 *", "Ka1");
+}
+
+#[test]
+fn test_dropped_castling_rights_name_the_rook_file() {
+    // In standard chess only a rook in the corner can castle, so the
+    // b-file right for Black is dropped.
+    let tags = "[FEN \"1r2k3/8/8/8/8/8/8/4K3 w b - 0 1\"]";
+    let game = parse_single_game(&pgn_game(tags, "1. Kd1 *")).unwrap();
+    assert_eq!(
+        warning_kinds(&game),
+        [PgnWarningKind::FenCastlingRights {
+            rights: "b".to_string()
+        }]
+    );
+}

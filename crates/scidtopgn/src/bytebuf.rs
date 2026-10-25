@@ -228,4 +228,61 @@ mod tests {
         assert_eq!(bb.get_byte().unwrap(), 0x01);
         assert_eq!(bb.get_u16().unwrap(), 0x0203);
     }
+
+    #[test]
+    fn test_fixed_string_is_padded_with_nuls() {
+        let mut bb = ByteBuffer::default();
+        assert!(bb.is_empty());
+        bb.put_fixed_string("ab", 4).unwrap();
+        assert!(!bb.is_empty());
+        bb.back_to_start();
+        assert_eq!(bb.get_fixed_string(4).unwrap(), "ab\0\0");
+        assert_eq!(bb.into_vec(), [b'a', b'b', 0, 0]);
+    }
+
+    #[test]
+    fn test_reads_past_the_end_give_their_offset() {
+        let mut bb = ByteBuffer::from_slice(&[1, 2, 3]);
+        bb.skip(2).unwrap();
+        let unexpected_end = |result: Result<()>| {
+            assert!(
+                matches!(
+                    result,
+                    Err(Error::CorruptGame {
+                        offset: 2,
+                        kind: CorruptGameKind::UnexpectedEnd,
+                    })
+                ),
+                "{result:?}"
+            );
+        };
+        unexpected_end(bb.get_u16().map(drop));
+        unexpected_end(bb.skip(2));
+        unexpected_end(bb.get_fixed_string(2).map(drop));
+        // Failed reads don't move the read position.
+        assert_eq!(bb.position(), 2);
+        assert_eq!(bb.get_byte().unwrap(), 3);
+    }
+
+    #[test]
+    fn test_external_data_is_read_only() {
+        let mut bb = ByteBuffer::from_slice(&[1]);
+        assert!(matches!(bb.put_byte(0), Err(Error::BufferFull)));
+        assert!(matches!(bb.put_u16(0), Err(Error::BufferFull)));
+        assert!(matches!(
+            bb.put_fixed_string("a", 1),
+            Err(Error::BufferFull)
+        ));
+        assert!(matches!(
+            bb.put_terminated_string("a"),
+            Err(Error::BufferFull)
+        ));
+        assert_eq!(Error::BufferFull.to_string(), "Buffer full");
+        assert_eq!(bb.as_slice(), [1]);
+
+        // Emptying the buffer makes it writable again.
+        bb.empty();
+        bb.put_byte(2).unwrap();
+        assert_eq!(bb.as_slice(), [2]);
+    }
 }

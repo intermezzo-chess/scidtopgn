@@ -193,3 +193,112 @@ fn test_five_sn4_roundtrip() {
     );
     assert_eq!(original, written, "Binary content mismatch");
 }
+
+#[test]
+fn test_name_type_conversions() {
+    use scidtopgn::Error;
+
+    for (value, ntype, text) in [
+        (0, NameType::Player, "player"),
+        (1, NameType::Event, "event"),
+        (2, NameType::Site, "site"),
+        (3, NameType::Round, "round"),
+    ] {
+        assert_eq!(NameType::try_from(value).unwrap(), ntype);
+        assert_eq!(ntype.as_usize(), value);
+        assert_eq!(ntype.to_string(), text);
+    }
+    match NameType::try_from(4) {
+        Err(error @ Error::InvalidNameType { value: 4 }) => {
+            assert_eq!(error.to_string(), "Invalid name type: 4");
+        }
+        other => panic!("expected an invalid name type, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_clear_and_timestamp() {
+    let mut nb = NameBase::default();
+    nb.set_timestamp(42);
+    let id = nb.add_name(NameType::Site, "Wijk aan Zee").unwrap();
+    nb.increment_frequency(NameType::Site, id);
+    assert_eq!(nb.timestamp(), 42);
+    assert_eq!(
+        nb.get_all_names(NameType::Site),
+        [(0, "Wijk aan Zee".to_string(), 1)]
+    );
+
+    nb.clear();
+    assert_eq!(nb.timestamp(), 0);
+    assert_eq!(nb.count(NameType::Site), 0);
+    assert_eq!(nb.max_frequency(NameType::Site), 0);
+    assert!(nb.get_all_names(NameType::Site).is_empty());
+    assert_eq!(nb.find_name(NameType::Site, "Wijk aan Zee"), None);
+}
+
+#[test]
+fn test_name_base_full() {
+    use scidtopgn::Error;
+
+    // Round has the fewest IDs.
+    let max = NameType::Round.max_id();
+    let mut nb = NameBase::new();
+    for n in 0..max {
+        nb.add_name(NameType::Round, &n.to_string()).unwrap();
+    }
+    assert_eq!(nb.count(NameType::Round), max);
+
+    match nb.add_name(NameType::Round, "new") {
+        Err(error @ Error::NameBaseFull { .. }) => assert_eq!(
+            error.to_string(),
+            "Too many round names: a SCID database holds at most 262143"
+        ),
+        other => panic!("expected a full name base, got {other:?}"),
+    }
+    // Like SCID, a full name base also refuses a name it has.
+    assert!(matches!(
+        nb.add_name(NameType::Round, "0"),
+        Err(Error::NameBaseFull { .. })
+    ));
+    // Other name types still have room.
+    assert!(nb.add_name(NameType::Player, "new").is_ok());
+}
+
+#[test]
+fn test_roundtrip_wide_ids_and_frequencies() {
+    // SCID writes IDs in 3 bytes from 65,536 names, and frequencies in 2
+    // bytes from 256 and in 3 bytes from 65,536.
+    let mut nb = NameBase::new();
+    for n in 0..65_536 {
+        nb.add_name(NameType::Event, &format!("Event {n:05}"))
+            .unwrap();
+    }
+    for _ in 0..65_536 {
+        nb.increment_frequency(NameType::Event, 7);
+    }
+    let site = nb.add_name(NameType::Site, "Site").unwrap();
+    for _ in 0..300 {
+        nb.increment_frequency(NameType::Site, site);
+    }
+
+    let mut bytes = Vec::new();
+    nb.write_sn4(&mut bytes).unwrap();
+    let mut reread = NameBase::new();
+    reread.read_sn4(&mut bytes.as_slice()).unwrap();
+
+    for ntype in [NameType::Event, NameType::Site] {
+        assert_eq!(reread.count(ntype), nb.count(ntype), "{ntype}");
+        assert_eq!(
+            reread.max_frequency(ntype),
+            nb.max_frequency(ntype),
+            "{ntype}"
+        );
+        assert_eq!(
+            reread.get_all_names(ntype),
+            nb.get_all_names(ntype),
+            "{ntype}"
+        );
+    }
+    assert_eq!(reread.get_frequency(NameType::Event, 7), 65_536);
+    assert_eq!(reread.get_frequency(NameType::Site, site), 300);
+}
