@@ -737,3 +737,134 @@ fn test_cli_round_trip_keeps_annotations_and_variations() {
         "{stdout}"
     );
 }
+
+#[test]
+fn test_cli_without_arguments() {
+    let output = cli().output().expect("Failed to run CLI");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Specify a database or use a subcommand (export/import)"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn test_cli_export_keeps_an_existing_output_file() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let output_path = temp.path().join("out.pgn");
+    std::fs::write(&output_path, "keep").expect("Failed to write file");
+
+    for args in [&["tests/data/one"][..], &["export", "tests/data/one"]] {
+        let output = cli()
+            .args(args)
+            .arg("-o")
+            .arg(&output_path)
+            .output()
+            .expect("Failed to run CLI");
+        assert!(!output.status.success(), "{args:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("exists. Use --overwrite to replace."),
+            "{stderr}"
+        );
+        assert_eq!(std::fs::read_to_string(&output_path).unwrap(), "keep");
+    }
+
+    let output = cli()
+        .args(["export", "tests/data/one", "--overwrite", "-o"])
+        .arg(&output_path)
+        .output()
+        .expect("Failed to run CLI");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let pgn = std::fs::read_to_string(&output_path).unwrap();
+    assert!(pgn.starts_with("[Event "), "{pgn}");
+}
+
+#[test]
+fn test_cli_missing_inputs() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let missing = temp.path().join("missing");
+
+    let output = cli().arg(&missing).output().expect("Failed to run CLI");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Failed to open database"), "{stderr}");
+
+    let output = cli()
+        .arg("import")
+        .arg(missing.with_extension("pgn"))
+        .arg("-o")
+        .arg(temp.path().join("db"))
+        .output()
+        .expect("Failed to run CLI");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("No such file or directory"), "{stderr}");
+    assert!(!temp.path().join("db.si4").exists());
+}
+
+#[test]
+fn test_cli_verbose_progress() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let pgn: String = (1..=100)
+        .map(|n| format!("[Event \"Game {n}\"]\n\n1. e4 *\n\n"))
+        .collect();
+    let (db_path, stderr) = import_pgn(temp.path(), &pgn);
+    assert!(stderr.contains("Imported 100 games...\n"), "{stderr}");
+
+    let output = cli()
+        .arg(&db_path)
+        .arg("--verbose")
+        .output()
+        .expect("Failed to run CLI");
+    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        stderr,
+        "Processed 100/100 games\nDone. 100 games exported.\n"
+    );
+
+    // Importing again appends, and --overwrite replaces.
+    let pgn_path = temp.path().join("input.pgn");
+    for (args, message, count) in [
+        (&[][..], "Appending to existing database", 200),
+        (&["--overwrite"], "Overwriting existing database", 100),
+    ] {
+        let output = cli()
+            .arg("import")
+            .arg(&pgn_path)
+            .args(args)
+            .arg("-o")
+            .arg(&db_path)
+            .arg("--verbose")
+            .output()
+            .expect("Failed to run CLI");
+        assert!(output.status.success());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(message), "{stderr}");
+        let db = scidtopgn::Database::open(&db_path).expect("Failed to open database");
+        assert_eq!(db.num_games(), count, "{args:?}");
+    }
+}
+
+#[test]
+fn test_cli_round_trip_keeps_games_without_moves() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let pgn = "[Event \"A\"]\n[Result \"*\"]\n\n*\n\n\
+               [Event \"B\"]\n[Result \"1-0\"]\n\n{only a comment} 1-0\n";
+    let (db_path, _) = import_pgn(temp.path(), pgn);
+
+    let exported = cli().arg(&db_path).output().expect("Failed to run CLI");
+    assert!(exported.status.success());
+    let stdout = String::from_utf8_lossy(&exported.stdout);
+    assert!(stdout.contains("[Result \"*\"]\n\n*\n"), "{stdout}");
+    assert!(
+        stdout.contains("[Result \"1-0\"]\n\n{only a comment}\n1-0\n"),
+        "{stdout}"
+    );
+}
