@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use scidtopgn::index::INDEX_HEADER_SIZE;
 use scidtopgn::{
     parse_single_game, ByteBuffer, CorruptGameKind, Database, DatabaseFile, Error, GFile, Game,
-    NameBase, NameType, ENCODE_END_GAME, ENCODE_END_MARKER, ENCODE_START_MARKER, GAME_DECODE_ALL,
-    GF_BLOCKSIZE,
+    InvalidMoveByte, NameBase, NameType, ENCODE_END_GAME, ENCODE_END_MARKER, ENCODE_START_MARKER,
+    GAME_DECODE_ALL, GF_BLOCKSIZE,
 };
 use tempfile::TempDir;
 
@@ -272,4 +272,48 @@ fn test_invalid_move_byte_gives_its_offset() {
         matches!(kind, CorruptGameKind::InvalidMove { byte: 0xC2, .. }),
         "{kind:?}"
     );
+}
+
+/// A record that starts from `fen`, followed by `moves` and the end of the
+/// game.
+fn from_fen(fen: &str, moves: &[u8]) -> Vec<u8> {
+    let mut record = vec![0, 1];
+    record.extend(fen.as_bytes());
+    record.push(0);
+    record.extend(moves);
+    record.push(ENCODE_END_GAME);
+    record
+}
+
+#[test]
+fn test_null_move_in_check_gives_its_offset() {
+    let fen = "4k3/8/8/8/8/8/8/4R1K1 b - - 0 1";
+    // A null move is the king's piece number, 0, with value 0.
+    let (offset, kind) = corrupt_kind(&from_fen(fen, &[0x00]));
+    assert_eq!(offset, 2 + fen.len() + 1);
+    assert!(
+        matches!(
+            kind,
+            CorruptGameKind::InvalidMove {
+                byte: 0x00,
+                reason: InvalidMoveByte::NullMoveInCheck,
+                ..
+            }
+        ),
+        "{kind:?}"
+    );
+}
+
+#[test]
+fn test_invalid_start_position_gives_its_offset() {
+    // The second FEN parses, but White has more than 16 pieces.
+    for fen in ["not a fen", "QQQQQQQQ/QQQQQQQQ/8/8/8/8/8/K6k b - - 0 1"] {
+        match corrupt_kind(&from_fen(fen, &[])) {
+            (2, CorruptGameKind::InvalidStartPosition { fen: read, reason }) => {
+                assert_eq!(read, fen);
+                assert!(!reason.is_empty(), "{fen}");
+            }
+            other => panic!("expected an invalid start position, got {other:?}"),
+        }
+    }
 }

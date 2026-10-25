@@ -200,6 +200,11 @@ pub enum CorruptGameKind {
 
     #[error("end of the game inside a variation")]
     UnclosedVariation,
+
+    /// A starting position that can't be read or that SCID can't number.
+    /// `reason` describes the problem.
+    #[error("invalid starting position {fen:?}: {reason}")]
+    InvalidStartPosition { fen: String, reason: String },
 }
 
 /// Why a move byte doesn't describe a move.
@@ -223,6 +228,9 @@ pub enum InvalidMoveByte {
 
     #[error("bad diagonal queen move")]
     BadQueenMove,
+
+    #[error("null move in check")]
+    NullMoveInCheck,
 
     #[error("{from}{to} is illegal")]
     Illegal { from: Square, to: Square },

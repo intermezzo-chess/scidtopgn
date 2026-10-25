@@ -82,10 +82,9 @@ fn square_diff(from: Square, to: Square) -> i32 {
 ///
 /// # Errors
 ///
-/// Returns [`Error::CorruptGame`] if the piece number or value is invalid, or
-/// if the move can't be played in `pos` (see [`ScidPosition::can_play`]). Its
-/// offset is the offset of `byte`. A null move is returned without checking;
-/// [`ScidPosition::play`] rejects it in check.
+/// Returns [`Error::CorruptGame`] if the piece number or value is invalid, if
+/// the move can't be played in `pos` (see [`ScidPosition::can_play`]), or if
+/// it is a null move in check. Its offset is the offset of `byte`.
 pub fn decode_move(buf: &mut ByteBuffer, pos: &ScidPosition, byte: u8) -> Result<GameMove> {
     let (number, value) = parse_move_byte(byte);
     let chess = pos.chess();
@@ -113,6 +112,9 @@ pub fn decode_move(buf: &mut ByteBuffer, pos: &ScidPosition, byte: u8) -> Result
             .ok_or_else(|| invalid(InvalidMoveByte::OffBoard))
     };
     let (to, promotion) = match role {
+        Role::King if value == 0 && chess.is_check() => {
+            return Err(invalid(InvalidMoveByte::NullMoveInCheck))
+        }
         Role::King if value == 0 => return Ok(GameMove::Null),
         Role::King => match KING_SQDIFF.get(usize::from(value)) {
             Some(&diff) => (offset(diff)?, None),

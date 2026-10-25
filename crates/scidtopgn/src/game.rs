@@ -198,19 +198,39 @@ impl Game {
 
     pub fn decode_start(&mut self, buf: &mut ByteBuffer) -> Result<()> {
         self.decode_tags(buf, false)?;
-        self.decode_start_position(buf)
+        self.decode_start_position(buf)?;
+        Ok(())
     }
 
     /// Reads the game flags and, if the game doesn't start from the standard
-    /// position, its starting FEN.
-    fn decode_start_position(&mut self, buf: &mut ByteBuffer) -> Result<()> {
+    /// position, its starting FEN. Returns the starting position.
+    fn decode_start_position(&mut self, buf: &mut ByteBuffer) -> Result<ScidPosition> {
         let flags = buf.get_byte()?;
-        self.start_position = if flags & 1 != 0 {
-            Some(chess_from_fen(&buf.get_terminated_string()?)?)
-        } else {
-            None
+        if flags & 1 == 0 {
+            self.start_position = None;
+            return Ok(ScidPosition::standard());
+        }
+
+        let offset = buf.position();
+        let fen = buf.get_terminated_string()?;
+        let invalid = |error: Error| {
+            // Keep the reason, which `InvalidFen` gives as its source.
+            let reason = match std::error::Error::source(&error) {
+                Some(source) => source.to_string(),
+                None => error.to_string(),
+            };
+            Error::CorruptGame {
+                offset,
+                kind: CorruptGameKind::InvalidStartPosition {
+                    fen: fen.clone(),
+                    reason,
+                },
+            }
         };
-        Ok(())
+        let chess = chess_from_fen(&fen).map_err(invalid)?;
+        let position = ScidPosition::from_setup_position(chess.clone()).map_err(invalid)?;
+        self.start_position = Some(chess);
+        Ok(position)
     }
 
     /// The starting position with SCID's piece numbering.
@@ -277,13 +297,12 @@ impl Game {
             self.skip_tags(buf)?;
         }
 
-        self.decode_start_position(buf)?;
+        let position = self.decode_start_position(buf)?;
 
         let start_node_idx = self.add_marker_node(Marker::StartMarker, None);
         self.first_move = Some(start_node_idx);
         self.current_move = Some(start_node_idx);
 
-        let position = self.initial_position()?;
         self.decode_variation(buf, flags, position, 0)?;
 
         if flags & GAME_DECODE_COMMENTS != 0 {
