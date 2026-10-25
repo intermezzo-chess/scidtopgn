@@ -1,3 +1,6 @@
+//! [`Game`], a chess game with its tags and its tree of moves, and how it is
+//! decoded from a SCID game record.
+
 use shakmaty::{Chess, Color, Position};
 
 use crate::bytebuf::ByteBuffer;
@@ -11,17 +14,26 @@ use crate::pgn::PgnWarning;
 use crate::position::{chess_from_fen, fen, ScidPosition};
 use crate::Date;
 
+/// The most tags a [`Game`] keeps besides the ones it has fields for.
+/// [`Game::add_tag`] drops new tags past it.
 pub const MAX_TAGS: usize = 40;
+/// The longest tag name a game record stores, in bytes. Bytes above it in a
+/// record's tags stand for common tags or the event date.
 pub const MAX_TAG_LEN: u8 = 240;
+/// The most NAGs a move keeps.
 pub const MAX_NAGS: usize = 8;
 /// The deepest a variation can be nested, counting a variation of the main
 /// line as 1. Reading and writing a game recurse once per level, so deeper
 /// nesting could overflow the stack.
 pub(crate) const MAX_VARIATION_DEPTH: u32 = 100;
 
+/// For [`Game::decode`]: read only the moves, NAGs, and variations.
 pub const GAME_DECODE_NONE: u8 = 0;
+/// For [`Game::decode`]: also read the tags stored in the record.
 pub const GAME_DECODE_TAGS: u8 = 1;
+/// For [`Game::decode`]: also read the comments.
 pub const GAME_DECODE_COMMENTS: u8 = 2;
+/// For [`Game::decode`]: read everything.
 pub const GAME_DECODE_ALL: u8 = 3;
 
 static COMMON_TAGS: [&str; 14] = [
@@ -41,28 +53,50 @@ static COMMON_TAGS: [&str; 14] = [
     "",
 ];
 
+/// What kind of node a [`MoveNode`] is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Marker {
+    /// A move.
     #[default]
     NoMarker,
+    /// The start of the main line or of a variation, before its first move.
     StartMarker,
+    /// The end of a variation. This crate ends a line where `next` is
+    /// `None` and doesn't create these nodes, but treats them as an end.
     EndMarker,
+    /// The end of the game. Like [`EndMarker`](Self::EndMarker), this crate
+    /// treats it as an end but doesn't create it.
     EndGame,
 }
 
+/// A node in a game's tree of moves: a move, or the start of a line.
+///
+/// See [`Game::moves`] for how nodes link together.
 #[derive(Debug, Clone)]
 pub struct MoveNode {
     /// The move, or `None` for a marker node.
     pub move_data: Option<GameMove>,
     /// The move in SAN, generated from the position before it.
     pub san: String,
+    /// The comment after the move. On a start marker, the comment before
+    /// the line's first move.
     pub comment: Option<String>,
+    /// The move's NAGs, such as 1 for `!`. See [`nag_to_symbol`].
     pub nags: Vec<u8>,
+    /// The index of the previous node in the line.
     pub prev: Option<usize>,
+    /// The index of the next node in the line, or `None` at its end.
     pub next: Option<usize>,
+    /// On a move, the index of the start marker of its first variation. On a
+    /// start marker, the index of the start marker of the next variation of
+    /// the same move.
     pub var_child: Option<usize>,
+    /// On a variation's start marker, the index of the move it is an
+    /// alternative to.
     pub var_parent: Option<usize>,
+    /// What kind of node this is.
     pub marker: Marker,
+    /// The number of variations of this move.
     pub num_variations: u8,
 }
 
@@ -73,6 +107,7 @@ impl Default for MoveNode {
 }
 
 impl MoveNode {
+    /// Makes an empty move node, with no move.
     pub fn new() -> Self {
         MoveNode {
             move_data: None,
@@ -88,33 +123,72 @@ impl MoveNode {
         }
     }
 
+    /// Returns whether the node's move is a null move.
     pub fn is_null_move(&self) -> bool {
         self.move_data == Some(GameMove::Null)
     }
 }
 
+/// A PGN tag that [`Game`] has no field for.
 #[derive(Debug, Clone)]
 pub struct Tag {
+    /// The tag's name, such as `Annotator`.
     pub name: String,
+    /// The tag's value.
     pub value: String,
 }
 
+/// A chess game: its tags, its moves with their variations and annotations,
+/// and the position it starts from.
+///
+/// A game comes from [`Database::get_game`](crate::Database::get_game) or
+/// from the PGN parser, and [`to_pgn`](Self::to_pgn) writes it as PGN.
+///
+/// The moves are a tree stored in [`moves`](Self::moves). See that field for
+/// how to walk it.
 #[derive(Debug, Clone)]
 pub struct Game {
+    /// The `White` tag, or `?`.
     pub white: String,
+    /// The `Black` tag, or `?`.
     pub black: String,
+    /// The `Event` tag, or `?`.
     pub event: String,
+    /// The `Site` tag, or `?`.
     pub site: String,
+    /// The `Round` tag, or `?`.
     pub round: String,
+    /// The `Date` tag.
     pub date: Date,
+    /// The `EventDate` tag, if any.
     pub event_date: Option<Date>,
+    /// The result.
     pub result: GameResult,
+    /// The `WhiteElo` tag, if any.
     pub white_elo: Option<u16>,
+    /// The `BlackElo` tag, if any.
     pub black_elo: Option<u16>,
+    /// The `ECO` tag, such as `B36f`, if any.
     pub eco: Option<String>,
+    /// Every node of the move tree, in no particular order.
+    ///
+    /// [`first_move`](Self::first_move) is the index of the main line's
+    /// start marker, a node with no move. Each node's
+    /// [`next`](MoveNode::next) is the index of the node after it in its
+    /// line, up to a node whose `next` is `None`. A move's variations are
+    /// alternatives to it, played from the position before it: its
+    /// [`var_child`](MoveNode::var_child) is the start marker of its first
+    /// variation, and each variation's start marker links to the next
+    /// variation of the same move by its own `var_child`.
     pub moves: Vec<MoveNode>,
+    /// The index in [`moves`](Self::moves) of the main line's start marker,
+    /// or `None` if the game has no move tree.
     pub first_move: Option<usize>,
+    /// The index in [`moves`](Self::moves) of the node that new moves,
+    /// variations, and annotations are added after while a game is built.
     pub current_move: Option<usize>,
+    /// The tags that have no field of their own, in the order they were
+    /// read, up to [`MAX_TAGS`].
     pub tags: Vec<Tag>,
     /// The position the game starts from, or `None` for the standard
     /// starting position.
@@ -133,6 +207,7 @@ impl Default for Game {
 }
 
 impl Game {
+    /// Makes a game with no moves, whose name tags are `?`.
     pub fn new() -> Self {
         Game {
             white: "?".to_string(),
@@ -156,6 +231,7 @@ impl Game {
         }
     }
 
+    /// Resets the game to [`Game::new`]'s.
     pub fn clear(&mut self) {
         self.white = "?".to_string();
         self.black = "?".to_string();
@@ -177,6 +253,8 @@ impl Game {
         self.warnings.clear();
     }
 
+    /// Sets tag `name` to `value`, replacing its value if it is already
+    /// present. A new tag is dropped if there are already [`MAX_TAGS`].
     pub fn add_tag(&mut self, name: &str, value: &str) {
         for tag in &mut self.tags {
             if tag.name == name {
@@ -192,10 +270,17 @@ impl Game {
         }
     }
 
+    /// Returns the value of tag `name` from [`tags`](Self::tags), if present.
     pub fn find_tag(&self, name: &str) -> Option<&String> {
         self.tags.iter().find(|t| t.name == name).map(|t| &t.value)
     }
 
+    /// Reads the start of a game record: its tags, without keeping them,
+    /// and its starting position.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::CorruptGame`] if the record is damaged.
     pub fn decode_start(&mut self, buf: &mut ByteBuffer) -> Result<()> {
         self.decode_tags(buf, false)?;
         self.decode_start_position(buf)?;
@@ -246,6 +331,13 @@ impl Game {
         }
     }
 
+    /// Reads the tags at the start of a game record, adding them to
+    /// [`tags`](Self::tags) if `store_tags` is set. The event date is read
+    /// either way.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::CorruptGame`] if the record is damaged.
     pub fn decode_tags(&mut self, buf: &mut ByteBuffer, store_tags: bool) -> Result<()> {
         let mut b = buf.get_byte()?;
 
@@ -288,6 +380,19 @@ impl Game {
         Ok(())
     }
 
+    /// Replaces the game with the one in the game record `buf`. `flags`
+    /// combines the `GAME_DECODE_*` constants to choose what to read.
+    ///
+    /// A record holds the starting position, the moves, the comments, and
+    /// the tags other than the names.
+    /// [`Database::get_game`](crate::Database::get_game) also fills in the
+    /// names, date, result, ratings, and ECO code from the index.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::CorruptGame`] if the record is damaged, and
+    /// [`Error::VariationTooDeep`] or [`Error::TooManyVariations`] if its
+    /// variations exceed what this crate reads.
     pub fn decode(&mut self, buf: &mut ByteBuffer, flags: u8) -> Result<()> {
         self.clear();
 
@@ -563,6 +668,7 @@ impl Game {
     // One parameter per Seven Tag Roster tag; grouping them would change the
     // public API.
     #[allow(clippy::too_many_arguments)]
+    /// Sets the Seven Tag Roster tags.
     pub fn load_standard_tags(
         &mut self,
         white: &str,
@@ -582,6 +688,33 @@ impl Game {
         self.result = result;
     }
 
+    /// Writes the game as PGN: its tags, then its moves with their
+    /// variations, NAGs, and comments in lines of up to 80 characters, then
+    /// the result on a line of its own.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use scidtopgn::parse_single_game;
+    ///
+    /// let game = parse_single_game(
+    ///     "[White \"Anand\"]\n[Black \"Carlsen\"]\n\n1. e4 e5 (1... c5 {Sicilian}) 1/2-1/2",
+    /// )?;
+    /// assert_eq!(
+    ///     game.to_pgn(),
+    ///     "[Event \"?\"]\n\
+    ///      [Site \"?\"]\n\
+    ///      [Date \"????.??.??\"]\n\
+    ///      [Round \"?\"]\n\
+    ///      [White \"Anand\"]\n\
+    ///      [Black \"Carlsen\"]\n\
+    ///      [Result \"1/2-1/2\"]\n\
+    ///      \n\
+    ///      1. e4 e5 (1... c5 {Sicilian})\n\
+    ///      1/2-1/2\n"
+    /// );
+    /// # Ok::<(), scidtopgn::Error>(())
+    /// ```
     pub fn to_pgn(&self) -> String {
         let mut pgn = String::new();
 

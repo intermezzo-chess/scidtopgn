@@ -1,3 +1,6 @@
+//! [`Database`], which reads and writes a SCID database's three files
+//! together.
+
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -13,6 +16,52 @@ use crate::nfile::NFile;
 use crate::position::{fen, ScidPosition};
 use crate::Date;
 
+/// A SCID database: an index file (`.si4`), a name file (`.sn4`), and a game
+/// file (`.sg4`) that share a path without the extension.
+///
+/// Games are numbered from 0 in the order they were added. A game marked as
+/// logically deleted keeps its record and its number, and the methods that
+/// read games include it. See [Logically deleted
+/// games](#logically-deleted-games).
+///
+/// Changes are written by [`flush`](Self::flush) and
+/// [`close`](Self::close). Dropping a `Database` with unwritten changes
+/// loses them.
+///
+/// # Examples
+///
+/// Import PGN into a new database, then read it back:
+///
+/// ```
+/// use scidtopgn::{parse_pgn, Database};
+///
+/// let dir = tempfile::tempdir()?;
+/// let path = dir.path().join("games");
+///
+/// let mut db = Database::create(&path)?;
+/// for game in parse_pgn("[White \"Anand\"]\n\n1. e4 e5 *\n\n[White \"Carlsen\"]\n\n1. d4 *\n")? {
+///     db.add_game(&game)?;
+/// }
+/// db.close()?;
+///
+/// let mut db = Database::open(&path)?;
+/// assert_eq!(db.num_games(), 2);
+/// for game in db.games() {
+///     print!("{}", game?.to_pgn());
+/// }
+/// # Ok::<(), scidtopgn::Error>(())
+/// ```
+///
+/// # Logically deleted games
+///
+/// SCID deletes a game by setting its delete flag. The game's record stays
+/// in the database, and its number doesn't change, until the database is
+/// compacted. [`num_games`](Self::num_games), [`games`](Self::games), and
+/// [`get_game`](Self::get_game) include deleted games, which is useful for
+/// inspecting or recovering them. The `scidtopgn` command skips them when
+/// it exports, as SCID does. To do the same, check each game's
+/// [`IndexEntry::get_delete_flag`] before reading it, as the example for
+/// [`get_entry`](Self::get_entry) shows.
 pub struct Database {
     path: PathBuf,
     index: Index,
@@ -22,6 +71,36 @@ pub struct Database {
 }
 
 impl Database {
+    /// Opens the database at `path`, given without an extension, for
+    /// reading and adding games.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::File`] naming the file that couldn't be opened or is
+    /// damaged.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use scidtopgn::{Database, DatabaseFile, Error};
+    ///
+    /// # let dir = tempfile::tempdir()?;
+    /// # let path = dir.path().join("games");
+    /// # let mut db = Database::create(&path)?;
+    /// # for pgn in ["[White \"Anand\"]\n\n1. e4 e5 *", "[White \"Carlsen\"]\n\n1. d4 d5 *"] {
+    /// #     db.add_game(&scidtopgn::parse_single_game(pgn)?)?;
+    /// # }
+    /// # db.close()?;
+    /// let db = Database::open(&path)?;
+    /// assert_eq!(db.num_games(), 2);
+    ///
+    /// let missing = Database::open(dir.path().join("missing"));
+    /// assert!(matches!(
+    ///     missing,
+    ///     Err(Error::File { file: DatabaseFile::Index, .. })
+    /// ));
+    /// # Ok::<(), scidtopgn::Error>(())
+    /// ```
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
 
@@ -42,6 +121,33 @@ impl Database {
         })
     }
 
+    /// Creates an empty database at `path`, given without an extension,
+    /// replacing the files of any database already there.
+    ///
+    /// The index and game files are created at once, and the name file when
+    /// the changes are first written.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::File`] naming the file that couldn't be created.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use scidtopgn::{parse_single_game, Database};
+    ///
+    /// let dir = tempfile::tempdir()?;
+    /// let path = dir.path().join("games");
+    ///
+    /// let mut db = Database::create(&path)?;
+    /// db.add_game(&parse_single_game("1. e4 e5 *")?)?;
+    /// db.close()?;
+    ///
+    /// assert!(path.with_extension("si4").exists());
+    /// assert!(path.with_extension("sn4").exists());
+    /// assert!(path.with_extension("sg4").exists());
+    /// # Ok::<(), scidtopgn::Error>(())
+    /// ```
     pub fn create<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
 
@@ -61,21 +167,97 @@ impl Database {
         })
     }
 
+    /// Returns the number of games, including logically deleted games.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use scidtopgn::Database;
+    ///
+    /// # let dir = tempfile::tempdir()?;
+    /// # let path = dir.path().join("games");
+    /// # let mut db = Database::create(&path)?;
+    /// # for pgn in ["[White \"Anand\"]\n\n1. e4 e5 *", "[White \"Carlsen\"]\n\n1. d4 d5 *"] {
+    /// #     db.add_game(&scidtopgn::parse_single_game(pgn)?)?;
+    /// # }
+    /// # db.close()?;
+    /// let db = Database::open(&path)?;
+    /// assert_eq!(db.num_games(), 2);
+    /// # Ok::<(), scidtopgn::Error>(())
+    /// ```
     pub fn num_games(&self) -> u32 {
         self.index.num_games()
     }
 
+    /// Returns the index entry of game `game_num`, counting from 0, or `None`
+    /// if there is no such game. Logically deleted games have entries.
+    ///
+    /// # Examples
+    ///
+    /// Read only the games that aren't logically deleted, in order:
+    ///
+    /// ```
+    /// use scidtopgn::{Database, Index};
+    ///
+    /// # let dir = tempfile::tempdir()?;
+    /// # let path = dir.path().join("games");
+    /// # let mut db = Database::create(&path)?;
+    /// # for pgn in ["[White \"Anand\"]\n\n1. e4 e5 *", "[White \"Carlsen\"]\n\n1. d4 d5 *"] {
+    /// #     db.add_game(&scidtopgn::parse_single_game(pgn)?)?;
+    /// # }
+    /// # db.close()?;
+    /// # let si4 = path.with_extension("si4");
+    /// # let mut index = Index::open(&si4)?;
+    /// # index.get_entry_mut(0).unwrap().set_delete_flag(true);
+    /// # index.flush(&mut std::fs::File::create(&si4)?)?;
+    /// let mut db = Database::open(&path)?;
+    ///
+    /// let mut white = Vec::new();
+    /// for n in 0..db.num_games() {
+    ///     if db.get_entry(n).is_some_and(|entry| !entry.get_delete_flag()) {
+    ///         white.push(db.get_game(n)?.white);
+    ///     }
+    /// }
+    ///
+    /// // Game 0 is deleted. Game 1 keeps its number.
+    /// assert_eq!(white, ["Carlsen"]);
+    /// assert_eq!(db.num_games(), 2);
+    /// # Ok::<(), scidtopgn::Error>(())
+    /// ```
     pub fn get_entry(&self, game_num: u32) -> Option<&IndexEntry> {
         self.index.get_entry(game_num)
     }
 
-    /// Reads game `game_num`, counting from 0.
+    /// Reads game `game_num`, counting from 0, including a game that is
+    /// logically deleted.
+    ///
+    /// The names, date, result, ratings, and ECO code come from the index
+    /// and name files, and the moves, comments, and other tags from the game
+    /// file. A name that is missing from the name file is `?`.
     ///
     /// # Errors
     ///
     /// Returns [`Error::GameNotFound`] if there is no such game, and
     /// [`Error::Game`], which gives the game's number counting from 1, if it
     /// can't be read.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use scidtopgn::{Database, Error};
+    ///
+    /// # let dir = tempfile::tempdir()?;
+    /// # let path = dir.path().join("games");
+    /// # let mut db = Database::create(&path)?;
+    /// # for pgn in ["[White \"Anand\"]\n\n1. e4 e5 *", "[White \"Carlsen\"]\n\n1. d4 d5 *"] {
+    /// #     db.add_game(&scidtopgn::parse_single_game(pgn)?)?;
+    /// # }
+    /// # db.close()?;
+    /// let mut db = Database::open(&path)?;
+    /// assert_eq!(db.get_game(1)?.white, "Carlsen");
+    /// assert!(matches!(db.get_game(2), Err(Error::GameNotFound { number: 3 })));
+    /// # Ok::<(), scidtopgn::Error>(())
+    /// ```
     pub fn get_game(&mut self, game_num: u32) -> Result<Game> {
         let number = u64::from(game_num) + 1;
         let entry = self
@@ -157,12 +339,33 @@ impl Database {
         Ok(game)
     }
 
-    /// Adds `game` and returns its number, counting from 0.
+    /// Adds `game` and returns its number, counting from 0. The game is
+    /// written to the files by [`flush`](Self::flush) or
+    /// [`close`](Self::close).
     ///
     /// # Errors
     ///
     /// Returns [`Error::GameTooLarge`] if the game's record is longer than
-    /// 131,071 bytes, the most the index can record.
+    /// 131,071 bytes, the most the index can record,
+    /// [`Error::IndexFull`] or [`Error::NameBaseFull`] if the database can't
+    /// hold another game or name, [`Error::InvalidMove`] or
+    /// [`Error::InvalidFen`] if the game's moves or starting position can't
+    /// be stored, and [`Error::Io`] if the game file can't be written.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use scidtopgn::{parse_single_game, Database};
+    ///
+    /// let dir = tempfile::tempdir()?;
+    /// let mut db = Database::create(dir.path().join("games"))?;
+    ///
+    /// let game = parse_single_game("[White \"Anand\"]\n\n1. e4 e5 *")?;
+    /// assert_eq!(db.add_game(&game)?, 0);
+    /// assert_eq!(db.add_game(&game)?, 1);
+    /// db.close()?;
+    /// # Ok::<(), scidtopgn::Error>(())
+    /// ```
     pub fn add_game(&mut self, game: &Game) -> Result<u32> {
         let encoded_data = self.encode_game(game)?;
         let buf = ByteBuffer::from_slice(&encoded_data);
@@ -365,6 +568,13 @@ impl Database {
         Ok(())
     }
 
+    /// Writes the games added since the database was opened, created, or
+    /// last flushed: the game file's pending data, then the name file, then
+    /// the index file. Does nothing if no game was added.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Io`] if a file can't be written.
     pub fn flush(&mut self) -> Result<()> {
         if !self.modified {
             return Ok(());
@@ -385,10 +595,59 @@ impl Database {
         Ok(())
     }
 
+    /// Writes any changes, as [`flush`](Self::flush) does, and closes the
+    /// database.
+    ///
+    /// # Errors
+    ///
+    /// The same as [`flush`](Self::flush).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use scidtopgn::{parse_single_game, Database};
+    ///
+    /// let dir = tempfile::tempdir()?;
+    /// let path = dir.path().join("games");
+    /// let mut db = Database::create(&path)?;
+    /// db.add_game(&parse_single_game("1. e4 *")?)?;
+    /// db.close()?;
+    ///
+    /// assert_eq!(Database::open(&path)?.num_games(), 1);
+    /// # Ok::<(), scidtopgn::Error>(())
+    /// ```
     pub fn close(mut self) -> Result<()> {
         self.flush()
     }
 
+    /// Returns an iterator that reads every game in order, including
+    /// logically deleted games.
+    ///
+    /// Each item is the result of [`get_game`](Self::get_game). A game that
+    /// can't be read gives an error, and the iterator goes on to the next
+    /// game. To skip deleted games, see the example for
+    /// [`get_entry`](Self::get_entry).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use scidtopgn::Database;
+    ///
+    /// # let dir = tempfile::tempdir()?;
+    /// # let path = dir.path().join("games");
+    /// # let mut db = Database::create(&path)?;
+    /// # for pgn in ["[White \"Anand\"]\n\n1. e4 e5 *", "[White \"Carlsen\"]\n\n1. d4 d5 *"] {
+    /// #     db.add_game(&scidtopgn::parse_single_game(pgn)?)?;
+    /// # }
+    /// # db.close()?;
+    /// let mut db = Database::open(&path)?;
+    /// let white = db
+    ///     .games()
+    ///     .map(|game| Ok(game?.white))
+    ///     .collect::<scidtopgn::Result<Vec<_>>>()?;
+    /// assert_eq!(white, ["Anand", "Carlsen"]);
+    /// # Ok::<(), scidtopgn::Error>(())
+    /// ```
     pub fn games(&mut self) -> GameIterator<'_> {
         let total = self.num_games();
         GameIterator {
@@ -398,23 +657,29 @@ impl Database {
         }
     }
 
+    /// Returns the index.
     pub fn index(&self) -> &Index {
         &self.index
     }
 
+    /// Returns the name file.
     pub fn nfile(&self) -> &NFile {
         &self.nfile
     }
 
+    /// Returns the game file.
     pub fn gfile(&self) -> &GFile {
         &self.gfile
     }
 
+    /// Returns the database's path, without an extension.
     pub fn path(&self) -> &Path {
         &self.path
     }
 }
 
+/// An iterator over the games of a [`Database`], made by
+/// [`Database::games`].
 pub struct GameIterator<'a> {
     db: &'a mut Database,
     current: u32,

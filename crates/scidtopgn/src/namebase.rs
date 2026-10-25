@@ -1,21 +1,33 @@
+//! [`NameBase`], the player, event, site, and round names stored in a
+//! `.sn4` file.
+
 use std::collections::BTreeMap;
 use std::fmt;
 use std::io::{Read, Write};
 
 use crate::error::{Error, Result};
 
+/// The first eight bytes of a `.sn4` file.
 pub const NAMEBASE_MAGIC: &[u8; 8] = b"Scid.sn\0";
+/// The number of kinds of name: [`NameType`] has one variant per kind.
 pub const NUM_NAME_TYPES: usize = 4;
 
+/// A kind of name in the name file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NameType {
+    /// A player: the `White` and `Black` tags.
     Player = 0,
+    /// An event: the `Event` tag.
     Event = 1,
+    /// A site: the `Site` tag.
     Site = 2,
+    /// A round: the `Round` tag.
     Round = 3,
 }
 
 impl NameType {
+    /// Returns the most names of this kind a database can hold, which is set
+    /// by the width of the ID field in an index entry.
     pub const fn max_id(self) -> u32 {
         match self {
             NameType::Player => 1_048_575,
@@ -25,11 +37,15 @@ impl NameType {
         }
     }
 
+    /// Returns the kind's number, from 0 to 3, as the name file orders them.
     pub fn as_usize(self) -> usize {
         self as usize
     }
 }
 
+/// Converts a kind's number, as [`NameType::as_usize`] returns it.
+///
+/// Fails with [`Error::InvalidNameType`] for a number above 3.
 impl TryFrom<usize> for NameType {
     type Error = Error;
 
@@ -44,6 +60,7 @@ impl TryFrom<usize> for NameType {
     }
 }
 
+/// Names the kind in lowercase, such as `player`.
 impl fmt::Display for NameType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
@@ -55,13 +72,32 @@ impl fmt::Display for NameType {
     }
 }
 
+/// A name and how many games use it.
 #[derive(Debug, Clone)]
 pub struct NameEntry {
+    /// The ID index entries use to refer to the name.
     pub id: u32,
+    /// The name.
     pub name: String,
+    /// The number of games that use the name.
     pub frequency: u32,
 }
 
+/// The names of a database, by kind, with the IDs index entries refer to
+/// them by.
+///
+/// # Examples
+///
+/// ```
+/// use scidtopgn::{NameBase, NameType};
+///
+/// let mut names = NameBase::new();
+/// let id = names.add_name(NameType::Player, "Carlsen, Magnus")?;
+/// assert_eq!(names.add_name(NameType::Player, "Carlsen, Magnus")?, id);
+/// assert_eq!(names.get_name(NameType::Player, id), Some("Carlsen, Magnus"));
+/// assert_eq!(names.find_name(NameType::Event, "Carlsen, Magnus"), None);
+/// # Ok::<(), scidtopgn::Error>(())
+/// ```
 pub struct NameBase {
     trees: [BTreeMap<String, u32>; NUM_NAME_TYPES],
     by_id: [Vec<Option<NameEntry>>; NUM_NAME_TYPES],
@@ -77,6 +113,7 @@ impl Default for NameBase {
 }
 
 impl NameBase {
+    /// Makes an empty name base.
     pub fn new() -> Self {
         NameBase {
             trees: [
@@ -92,6 +129,7 @@ impl NameBase {
         }
     }
 
+    /// Removes every name and resets the timestamp.
     pub fn clear(&mut self) {
         for i in 0..NUM_NAME_TYPES {
             self.trees[i].clear();
@@ -102,22 +140,33 @@ impl NameBase {
         self.timestamp = 0;
     }
 
+    /// Sets the timestamp written to the file's header.
     pub fn set_timestamp(&mut self, ts: u32) {
         self.timestamp = ts;
     }
 
+    /// Returns the timestamp from the file's header.
     pub fn timestamp(&self) -> u32 {
         self.timestamp
     }
 
+    /// Returns the number of names of kind `ntype`.
     pub fn count(&self, ntype: NameType) -> u32 {
         self.num_names[ntype.as_usize()]
     }
 
+    /// Returns the highest frequency of any name of kind `ntype`.
     pub fn max_frequency(&self, ntype: NameType) -> u32 {
         self.max_frequency[ntype.as_usize()]
     }
 
+    /// Returns the ID of `name`, adding it with a frequency of 0 if it isn't
+    /// already present. IDs count from 0 in the order names are added.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NameBaseFull`] if there are already
+    /// [`ntype.max_id()`](NameType::max_id) names of kind `ntype`.
     pub fn add_name(&mut self, ntype: NameType, name: &str) -> Result<u32> {
         let idx = ntype.as_usize();
 
@@ -147,10 +196,12 @@ impl NameBase {
         Ok(id)
     }
 
+    /// Returns the ID of `name`, or `None` if it isn't present.
     pub fn find_name(&self, ntype: NameType, name: &str) -> Option<u32> {
         self.trees[ntype.as_usize()].get(name).copied()
     }
 
+    /// Returns the name with ID `id`, or `None` if there is none.
     pub fn get_name(&self, ntype: NameType, id: u32) -> Option<&str> {
         self.by_id[ntype.as_usize()]
             .get(id as usize)?
@@ -158,6 +209,7 @@ impl NameBase {
             .map(|e| e.name.as_str())
     }
 
+    /// Returns the frequency of the name with ID `id`, or 0 if there is none.
     pub fn get_frequency(&self, ntype: NameType, id: u32) -> u32 {
         self.by_id[ntype.as_usize()]
             .get(id as usize)
@@ -165,6 +217,7 @@ impl NameBase {
             .unwrap_or(0)
     }
 
+    /// Adds 1 to the frequency of the name with ID `id`, if there is one.
     pub fn increment_frequency(&mut self, ntype: NameType, id: u32) {
         let idx = ntype.as_usize();
         if let Some(Some(entry)) = self.by_id[idx].get_mut(id as usize) {
@@ -175,6 +228,8 @@ impl NameBase {
         }
     }
 
+    /// Returns the ID, name, and frequency of every name of kind `ntype`, in
+    /// ID order.
     pub fn get_all_names(&self, ntype: NameType) -> Vec<(u32, String, u32)> {
         self.by_id[ntype.as_usize()]
             .iter()
@@ -253,6 +308,15 @@ fn compute_prefix(s1: &str, s2: &str) -> u8 {
 }
 
 impl NameBase {
+    /// Reads a `.sn4` file into this name base, which should be empty.
+    /// Control characters and surrounding spaces are removed from each name.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidMagic`] if the data doesn't start with
+    /// [`NAMEBASE_MAGIC`], [`Error::NamePrefixTooLong`] or
+    /// [`Error::NameNotUtf8`] for a damaged name, and [`Error::Io`] if the
+    /// data can't be read or ends early.
     pub fn read_sn4<R: Read>(&mut self, reader: &mut R) -> Result<()> {
         let mut magic = [0u8; 8];
         reader.read_exact(&mut magic)?;
@@ -349,6 +413,12 @@ impl NameBase {
         Ok(())
     }
 
+    /// Writes the names as a `.sn4` file, sorted by name within each kind.
+    /// A name longer than 255 bytes is cut to 255.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Io`] if the data can't be written.
     pub fn write_sn4<W: Write>(&self, writer: &mut W) -> Result<()> {
         writer.write_all(NAMEBASE_MAGIC)?;
         write_four_bytes(writer, self.timestamp)?;

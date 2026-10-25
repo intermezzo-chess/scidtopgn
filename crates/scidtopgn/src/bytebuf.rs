@@ -1,5 +1,30 @@
+//! [`ByteBuffer`], which reads and writes the bytes of a game record.
+
 use crate::error::{CorruptGameKind, Error, Result};
 
+/// A buffer for reading and writing a game record's bytes.
+///
+/// Reads start at a read position and stop at the end of the data written so
+/// far. A buffer made with [`from_slice`](Self::from_slice) or
+/// [`provide_external`](Self::provide_external) holds existing data to read
+/// and can't be written. Multi-byte numbers are big-endian, as SCID stores
+/// them.
+///
+/// # Examples
+///
+/// ```
+/// use scidtopgn::ByteBuffer;
+///
+/// let mut buf = ByteBuffer::new();
+/// buf.put_u16(0x1234)?;
+/// buf.put_terminated_string("e4")?;
+/// assert_eq!(buf.as_slice(), [0x12, 0x34, b'e', b'4', 0]);
+///
+/// let mut read = ByteBuffer::from_slice(buf.as_slice());
+/// assert_eq!(read.get_u16()?, 0x1234);
+/// assert_eq!(read.get_terminated_string()?, "e4");
+/// # Ok::<(), scidtopgn::Error>(())
+/// ```
 pub struct ByteBuffer {
     buffer: Vec<u8>,
     read_pos: usize,
@@ -8,10 +33,14 @@ pub struct ByteBuffer {
 }
 
 impl ByteBuffer {
+    /// Makes an empty buffer for writing, with room for 4,096 bytes before
+    /// it reallocates.
     pub fn new() -> Self {
         Self::with_capacity(4096)
     }
 
+    /// Makes an empty buffer for writing, with room for `capacity` bytes
+    /// before it reallocates.
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             buffer: Vec::with_capacity(capacity),
@@ -21,6 +50,7 @@ impl ByteBuffer {
         }
     }
 
+    /// Makes a read-only buffer holding a copy of `data`.
     pub fn from_slice(data: &[u8]) -> Self {
         Self {
             buffer: data.to_vec(),
@@ -30,6 +60,7 @@ impl ByteBuffer {
         }
     }
 
+    /// Discards the data and makes the buffer writable.
     pub fn empty(&mut self) {
         self.buffer.clear();
         self.read_pos = 0;
@@ -37,26 +68,32 @@ impl ByteBuffer {
         self.external = false;
     }
 
+    /// Moves the read position back to the first byte.
     pub fn back_to_start(&mut self) {
         self.read_pos = 0;
     }
 
+    /// Returns the number of bytes of data.
     pub fn len(&self) -> usize {
         self.write_pos
     }
 
+    /// Returns whether the buffer has no data.
     pub fn is_empty(&self) -> bool {
         self.write_pos == 0
     }
 
+    /// Returns the read position: the number of bytes read or skipped.
     pub fn position(&self) -> usize {
         self.read_pos
     }
 
+    /// Returns the data.
     pub fn as_slice(&self) -> &[u8] {
         &self.buffer[..self.write_pos]
     }
 
+    /// Returns the data, consuming the buffer.
     pub fn into_vec(self) -> Vec<u8> {
         let mut v = self.buffer;
         v.truncate(self.write_pos);
@@ -71,6 +108,11 @@ impl ByteBuffer {
         }
     }
 
+    /// Reads a byte.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::CorruptGame`] if the data ends first.
     pub fn get_byte(&mut self) -> Result<u8> {
         if self.read_pos >= self.write_pos {
             return Err(self.unexpected_end());
@@ -80,6 +122,12 @@ impl ByteBuffer {
         Ok(b)
     }
 
+    /// Writes a byte.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::BufferFull`] if the buffer was made from existing
+    /// data, which is read-only.
     pub fn put_byte(&mut self, value: u8) -> Result<()> {
         if self.external {
             return Err(Error::BufferFull);
@@ -89,6 +137,11 @@ impl ByteBuffer {
         Ok(())
     }
 
+    /// Reads a big-endian `u16`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::CorruptGame`] if the data ends first.
     pub fn get_u16(&mut self) -> Result<u16> {
         if self.read_pos + 2 > self.write_pos {
             return Err(self.unexpected_end());
@@ -99,6 +152,12 @@ impl ByteBuffer {
         Ok((high << 8) | low)
     }
 
+    /// Writes a big-endian `u16`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::BufferFull`] if the buffer was made from existing
+    /// data, which is read-only.
     pub fn put_u16(&mut self, value: u16) -> Result<()> {
         if self.external {
             return Err(Error::BufferFull);
@@ -111,6 +170,11 @@ impl ByteBuffer {
         Ok(())
     }
 
+    /// Moves the read position past `count` bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::CorruptGame`] if the data ends first.
     pub fn skip(&mut self, count: usize) -> Result<()> {
         if self.read_pos + count > self.write_pos {
             return Err(self.unexpected_end());
@@ -119,6 +183,12 @@ impl ByteBuffer {
         Ok(())
     }
 
+    /// Reads `length` bytes as a string. Bytes that aren't valid UTF-8
+    /// become U+FFFD.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::CorruptGame`] if the data ends first.
     pub fn get_fixed_string(&mut self, length: usize) -> Result<String> {
         if self.read_pos + length > self.write_pos {
             return Err(self.unexpected_end());
@@ -128,6 +198,13 @@ impl ByteBuffer {
         Ok(s.to_string())
     }
 
+    /// Writes exactly `length` bytes: the start of `s`, padded with NULs if
+    /// `s` is shorter.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::BufferFull`] if the buffer was made from existing
+    /// data, which is read-only.
     pub fn put_fixed_string(&mut self, s: &str, length: usize) -> Result<()> {
         if self.external {
             return Err(Error::BufferFull);
@@ -144,7 +221,8 @@ impl ByteBuffer {
         Ok(())
     }
 
-    /// Reads a string up to its terminating NUL, and the NUL.
+    /// Reads a string up to its terminating NUL, and the NUL. Bytes that
+    /// aren't valid UTF-8 become U+FFFD.
     ///
     /// # Errors
     ///
@@ -161,6 +239,12 @@ impl ByteBuffer {
         Ok(s)
     }
 
+    /// Writes `s` followed by a NUL.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::BufferFull`] if the buffer was made from existing
+    /// data, which is read-only.
     pub fn put_terminated_string(&mut self, s: &str) -> Result<()> {
         if self.external {
             return Err(Error::BufferFull);
@@ -173,6 +257,8 @@ impl ByteBuffer {
         Ok(())
     }
 
+    /// Replaces the data with a copy of `data`, to read from the start. The
+    /// buffer becomes read-only.
     pub fn provide_external(&mut self, data: &[u8]) {
         self.buffer = data.to_vec();
         self.read_pos = 0;
@@ -180,6 +266,7 @@ impl ByteBuffer {
         self.external = true;
     }
 
+    /// Returns the number of bytes of data, like [`len`](Self::len).
     pub fn byte_count(&self) -> usize {
         self.write_pos
     }

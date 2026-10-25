@@ -1,15 +1,41 @@
+//! [`Date`], SCID's packed date, and functions on packed dates.
+
 use crate::error::{Error, Result};
 
 const YEAR_SHIFT: u32 = 9;
 const MONTH_SHIFT: u32 = 5;
+/// The latest year a [`Date`] can hold.
 pub const YEAR_MAX: u16 = 2047;
 
+/// A date as SCID stores it: a year, month, and day packed into one number.
+/// A part that is 0 is unknown, as `?` is in PGN.
+///
+/// Dates compare in calendar order, with unknown parts first.
+///
+/// # Examples
+///
+/// ```
+/// use scidtopgn::Date;
+///
+/// let date = Date::from_string("2022.12.??");
+/// assert_eq!((date.year(), date.month(), date.day()), (2022, 12, 0));
+/// assert_eq!(date.to_string(), "2022.12.??");
+/// assert_eq!(Date::new(2022, 12, 0)?, date);
+/// # Ok::<(), scidtopgn::Error>(())
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Date(u32);
 
 impl Date {
+    /// The date with every part unknown, `????.??.??`.
     pub const ZERO: Date = Date(0);
 
+    /// Makes a date. Use 0 for a part that is unknown.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Parse`] if `year` is after [`YEAR_MAX`], `month` is
+    /// after 12, or `day` is after 31.
     pub fn new(year: u16, month: u8, day: u8) -> Result<Self> {
         if year > YEAR_MAX {
             return Err(Error::Parse {
@@ -33,30 +59,38 @@ impl Date {
         Ok(Date(value))
     }
 
+    /// Makes a date from its packed form, as [`raw`](Self::raw) returns it.
     pub fn from_raw(value: u32) -> Self {
         Date(value)
     }
 
+    /// Returns the packed form SCID stores.
     pub fn raw(self) -> u32 {
         self.0
     }
 
+    /// Returns the year, or 0 if it is unknown.
     pub fn year(self) -> u16 {
         (self.0 >> YEAR_SHIFT) as u16
     }
 
+    /// Returns the month, from 1 to 12, or 0 if it is unknown.
     pub fn month(self) -> u8 {
         ((self.0 >> MONTH_SHIFT) & 15) as u8
     }
 
+    /// Returns the day of the month, or 0 if it is unknown.
     pub fn day(self) -> u8 {
         (self.0 & 31) as u8
     }
 
+    /// Returns the packed month and day without the year.
     pub fn month_day(self) -> u16 {
         (self.0 & 511) as u16
     }
 
+    /// Reads a PGN date such as `2022.12.19`. A part that is missing, isn't
+    /// a number, or is out of range is unknown.
     pub fn from_string(s: &str) -> Self {
         let parts: Vec<&str> = s.split('.').collect();
         let year = parts
@@ -74,10 +108,14 @@ impl Date {
         Date(value)
     }
 
+    /// Returns whether any part of the date is known.
     pub fn is_valid(self) -> bool {
         self.0 != 0
     }
 
+    /// Moves the date `num_months` months later, or earlier if it is
+    /// negative, keeping the day. Returns [`Date::ZERO`] if the result isn't
+    /// a date this type can hold.
     pub fn add_months(self, num_months: i32) -> Self {
         let mut year = self.year() as i32;
         let mut month = self.month() as i32;
@@ -109,6 +147,8 @@ impl Date {
     }
 }
 
+/// Formats the date as PGN writes it, with `?` for unknown parts, such as
+/// `2022.12.??`.
 impl std::fmt::Display for Date {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let year = self.year();
@@ -129,30 +169,40 @@ impl std::fmt::Display for Date {
     }
 }
 
+/// Packs a year, month, and day as SCID stores them, without checking their
+/// ranges. [`Date::new`] checks them.
 pub fn date_make(year: u16, month: u8, day: u8) -> u32 {
     ((year as u32) << YEAR_SHIFT) | ((month as u32) << MONTH_SHIFT) | (day as u32)
 }
 
+/// Returns the year of a packed date. See [`Date::year`].
 pub fn date_get_year(date: u32) -> u16 {
     (date >> YEAR_SHIFT) as u16
 }
 
+/// Returns the month of a packed date. See [`Date::month`].
 pub fn date_get_month(date: u32) -> u8 {
     ((date >> MONTH_SHIFT) & 15) as u8
 }
 
+/// Returns the day of a packed date. See [`Date::day`].
 pub fn date_get_day(date: u32) -> u8 {
     (date & 31) as u8
 }
 
+/// Formats a packed date as PGN writes it. See [`Date`]'s `Display`.
 pub fn date_decode_to_string(date: u32) -> String {
     Date::from_raw(date).to_string()
 }
 
+/// Reads a PGN date into its packed form. See [`Date::from_string`].
 pub fn date_encode_from_string(s: &str) -> u32 {
     Date::from_string(s).raw()
 }
 
+/// Returns whether `s` looks like a PGN date: three parts separated by
+/// dots, each made of digits or of `?` but not both, with a year, month, and
+/// day no larger than [`YEAR_MAX`], 12, and 31.
 pub fn date_valid_string(s: &str) -> bool {
     let parts: Vec<&str> = s.split('.').collect();
     if parts.len() != 3 {

@@ -223,10 +223,12 @@ impl ScidPosition {
         Ok(ScidPosition { chess, pieces })
     }
 
+    /// Returns the chess position.
     pub fn chess(&self) -> &Chess {
         &self.chess
     }
 
+    /// Returns SCID's numbering of the pieces.
     pub fn pieces(&self) -> &PieceList {
         &self.pieces
     }
