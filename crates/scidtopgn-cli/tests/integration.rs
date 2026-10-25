@@ -217,8 +217,14 @@ fn copy_with_deleted(dir: &std::path::Path, name: &str, deleted: &[u32]) -> std:
         std::fs::copy(src.with_extension(ext), dst.with_extension(ext))
             .expect("Failed to copy database");
     }
+    set_deleted(&dst, deleted);
+    dst
+}
 
-    let si4 = dst.with_extension("si4");
+/// Sets the logical delete flag on the given entries of the database at
+/// `db`, directly in its .si4. No other entry may already be deleted.
+fn set_deleted(db: &Path, deleted: &[u32]) {
+    let si4 = db.with_extension("si4");
     let mut bytes = std::fs::read(&si4).expect("Failed to read index");
     for &n in deleted {
         let pos = scidtopgn::index::INDEX_HEADER_SIZE
@@ -228,14 +234,13 @@ fn copy_with_deleted(dir: &std::path::Path, name: &str, deleted: &[u32]) -> std:
     }
     std::fs::write(&si4, bytes).expect("Failed to write index");
 
-    let db = scidtopgn::Database::open(&dst).expect("Failed to open copied database");
+    let db = scidtopgn::Database::open(db).expect("Failed to open database");
     for n in 0..db.num_games() {
         assert_eq!(
             db.get_entry(n).unwrap().get_delete_flag(),
             deleted.contains(&n)
         );
     }
-    dst
 }
 
 fn database_bytes(db: &std::path::Path) -> Vec<Vec<u8>> {
@@ -765,7 +770,7 @@ fn test_cli_without_arguments() {
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("Specify a database or use a subcommand (export/import)"),
+        stderr.contains("Specify a database or use a subcommand (export/import/info)"),
         "{stderr}"
     );
 }
@@ -837,7 +842,10 @@ fn test_cli_verbose_progress() {
         .map(|n| format!("[Event \"Game {n}\"]\n\n1. e4 *\n\n"))
         .collect();
     let (db_path, stderr) = import_pgn(temp.path(), &pgn);
-    assert!(stderr.contains("Imported 100 games...\n"), "{stderr}");
+    let tenths: String = (1..=10)
+        .map(|n| format!("Processed {}% ({}/100 games)\n", n * 10, n * 10))
+        .collect();
+    assert!(stderr.contains(&tenths), "{stderr}");
 
     let output = cli()
         .arg(&db_path)
@@ -846,10 +854,7 @@ fn test_cli_verbose_progress() {
         .expect("Failed to run CLI");
     assert!(output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert_eq!(
-        stderr,
-        "Processed 100/100 games\nDone. 100 games exported.\n"
-    );
+    assert_eq!(stderr, format!("{tenths}Done. 100 games exported.\n"));
 
     // Importing again appends, and --overwrite replaces.
     let pgn_path = temp.path().join("input.pgn");
@@ -898,4 +903,382 @@ fn test_cli_round_trip_keeps_games_without_moves() {
         stdout.contains(&format!("[Result \"1/2-1/2\"]\n{fen}\n1/2-1/2\n")),
         "{stdout}"
     );
+}
+
+/// Runs the CLI on `db` with `args`, without and then with the `export`
+/// subcommand.
+fn export_outputs(db: &Path, args: &[&str]) -> [std::process::Output; 2] {
+    [&[][..], &["export"][..]].map(|subcommand| {
+        cli()
+            .args(subcommand)
+            .arg(db)
+            .args(args)
+            .output()
+            .expect("Failed to run CLI")
+    })
+}
+
+#[test]
+fn test_cli_count_includes_deleted_games() {
+    for (deleted, exported) in [(&[][..], 5), (&[1, 3][..], 3), (&[0, 1, 2, 3, 4][..], 0)] {
+        let temp = TempDir::new().expect("Failed to create temp dir");
+        let db = copy_with_deleted(temp.path(), "five", deleted);
+        for output in export_outputs(&db, &["--count"]) {
+            assert!(output.status.success(), "{deleted:?}");
+            assert_eq!(
+                String::from_utf8_lossy(&output.stdout),
+                "5 games\n",
+                "{deleted:?}"
+            );
+        }
+        let pgn = export_both_ways(&db);
+        assert_eq!(pgn.matches("[Event \"").count(), exported, "{deleted:?}");
+    }
+
+    for args in [&["--help"][..], &["export", "--help"]] {
+        let output = cli().args(args).output().expect("Failed to run CLI");
+        let help = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            help.contains(
+                "This includes logically deleted games, so it can be more than the number exported"
+            ),
+            "{help}"
+        );
+    }
+}
+
+/// The PGN that export writes for the given games, counting from 0.
+fn pgn_of(db: &Path, games: &[u32]) -> String {
+    let mut db = scidtopgn::Database::open(db).expect("Failed to open database");
+    games
+        .iter()
+        .map(|&n| format!("{}\n", db.get_game(n).unwrap().to_pgn()))
+        .collect()
+}
+
+#[test]
+fn test_cli_export_selected_games() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    // Game 3 is deleted.
+    let db = copy_with_deleted(temp.path(), "five", &[2]);
+    for (games, expected) in [
+        ("2", &[1][..]),
+        ("4,1-2,2", &[0, 1, 3]),
+        ("2-4", &[1, 3]),
+        ("3", &[]),
+        ("5,1-5", &[0, 1, 3, 4]),
+    ] {
+        for output in export_outputs(&db, &["--games", games]) {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(output.status.success(), "{games}: {stderr}");
+            assert_eq!(
+                String::from_utf8_lossy(&output.stdout),
+                pgn_of(&db, expected),
+                "{games}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_cli_export_rejects_bad_game_selections() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let out = temp.path().join("out.pgn");
+    let out = out.to_str().expect("temp path should be UTF-8");
+    let five = Path::new("tests/data/five");
+    for (games, message) in [
+        ("0", "games are numbered from 1"),
+        ("3-1", "the range 3-1 ends before it starts"),
+        ("x", "\"x\" isn't a game number"),
+        ("1,,2", "\"\" isn't a game number"),
+        ("6", "--games: no game 6 in the database, which has 5 games"),
+        (
+            "2,4-9",
+            "--games: no game 9 in the database, which has 5 games",
+        ),
+    ] {
+        for output in export_outputs(five, &["--games", games, "-o", out]) {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(!output.status.success(), "{games}");
+            assert!(stderr.contains(message), "{games}: {stderr}");
+            assert!(!Path::new(out).exists(), "{games}: no output file");
+        }
+    }
+
+    for output in export_outputs(five, &["--games", "1", "--count"]) {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success());
+        assert!(stderr.contains("cannot be used with"), "{stderr}");
+    }
+}
+
+#[test]
+fn test_cli_verbose_progress_for_selected_games() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    // Game 3 is deleted, and still counts toward the progress.
+    let db = copy_with_deleted(temp.path(), "five", &[2]);
+    for output in export_outputs(&db, &["--games", "2-4", "--verbose"]) {
+        assert!(output.status.success());
+        assert_eq!(
+            String::from_utf8_lossy(&output.stderr),
+            format!("{}Done. 2 games exported.\n", progress_of_3())
+        );
+    }
+
+    let pgn: String = (1..=3)
+        .map(|n| format!("[Event \"Game {n}\"]\n\n1. e4 *\n\n"))
+        .collect();
+    let (_, stderr) = import_pgn(temp.path(), &pgn);
+    assert!(stderr.contains(&progress_of_3()), "{stderr}");
+}
+
+/// The progress `--verbose` reports for 3 games: each tenth once, with
+/// the game that reached it.
+fn progress_of_3() -> String {
+    (1..=10u32)
+        .map(|tenth| {
+            let done = (tenth * 3).div_ceil(10);
+            format!("Processed {}% ({done}/3 games)\n", tenth * 10)
+        })
+        .collect()
+}
+
+/// Runs `info` on `db` and returns its output.
+fn info(db: &Path) -> String {
+    let output = cli()
+        .arg("info")
+        .arg(db)
+        .output()
+        .expect("Failed to run CLI");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+    assert!(stderr.is_empty(), "{stderr}");
+    String::from_utf8(output.stdout).expect("Output should be UTF-8")
+}
+
+#[test]
+fn test_cli_info() {
+    let names = "Player names: 10\nEvent names: 3\nSite names: 3\nRound names: 5\n";
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let db = copy_with_deleted(temp.path(), "five", &[1, 3]);
+    assert_eq!(
+        info(&db),
+        format!(
+            "Total games: 5\nDeleted games: 2\nActive games: 3\n{names}\
+             Years of active games: 2022-2022\n"
+        )
+    );
+
+    set_deleted(&db, &[0, 1, 2, 3, 4]);
+    assert_eq!(
+        info(&db),
+        format!(
+            "Total games: 5\nDeleted games: 5\nActive games: 0\n{names}\
+             Years of active games: unknown\n"
+        )
+    );
+}
+
+#[test]
+fn test_cli_info_years() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let pgn = "[Event \"A\"]\n[Date \"2005.03.01\"]\n\n1. e4 *\n\n\
+               [Event \"B\"]\n[Date \"2020.??.??\"]\n\n1. d4 *\n\n\
+               [Event \"C\"]\n\n1. c4 *\n\n\
+               [Event \"D\"]\n[Date \"1990.01.01\"]\n\n1. f4 *\n";
+    let (db, _) = import_pgn(temp.path(), pgn);
+    assert!(
+        info(&db).ends_with("Active games: 4\nPlayer names: 1\nEvent names: 4\nSite names: 1\nRound names: 1\nYears of active games: 1990-2020\n"),
+        "{}",
+        info(&db)
+    );
+
+    // Deleted games don't count.
+    set_deleted(&db, &[1]);
+    assert!(info(&db).ends_with("Years of active games: 1990-2005\n"));
+
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let (db, _) = import_pgn(temp.path(), "[Event \"C\"]\n\n1. c4 *\n");
+    assert!(info(&db).ends_with("Years of active games: unknown\n"));
+}
+
+#[test]
+fn test_cli_info_reads_only_the_index_and_name_files() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let db = copy_with_deleted(temp.path(), "five", &[]);
+    let sg4 = db.with_extension("sg4");
+    let expected = info(&db);
+
+    // Read-only, so it can't be opened for writing as `Database::open` does.
+    let mut permissions = std::fs::metadata(&sg4).unwrap().permissions();
+    permissions.set_readonly(true);
+    std::fs::set_permissions(&sg4, permissions.clone()).unwrap();
+    assert_eq!(info(&db), expected);
+    #[allow(clippy::permissions_set_readonly_false)]
+    permissions.set_readonly(false);
+    std::fs::set_permissions(&sg4, permissions).unwrap();
+
+    // Damaged, so export fails.
+    std::fs::write(&sg4, []).expect("Failed to truncate .sg4");
+    let output = cli().arg(&db).output().expect("Failed to run CLI");
+    assert!(!output.status.success(), "export should fail");
+    assert_eq!(info(&db), expected);
+
+    std::fs::remove_file(&sg4).expect("Failed to remove .sg4");
+    assert_eq!(info(&db), expected);
+}
+
+#[test]
+fn test_cli_quiet_hides_stdout_errors() {
+    for args in [
+        &["tests/data/five", "--quiet"][..],
+        &["tests/data/five", "--count", "--quiet"],
+        &["export", "tests/data/five", "--count", "--quiet"],
+        &["info", "tests/data/five", "--quiet"],
+        &["info", "tests/data/five"],
+    ] {
+        // Writing to a pipe whose reading end is closed fails.
+        let (reader, writer) = std::io::pipe().expect("Failed to create pipe");
+        drop(reader);
+        let output = cli()
+            .args(args)
+            .stdout(writer)
+            .output()
+            .expect("Failed to run CLI");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{args:?}: {stderr}");
+        assert!(!stderr.contains("panicked"), "{args:?}: {stderr}");
+        if args.contains(&"--quiet") {
+            assert!(stderr.is_empty(), "{args:?}: {stderr}");
+        } else {
+            assert!(stderr.starts_with("Error: "), "{args:?}: {stderr}");
+        }
+    }
+}
+
+#[test]
+fn test_cli_quiet_import_writes_nothing_to_stderr() {
+    let castled = "[Event \"Castled\"]\n[Result \"1-0\"]\n\n1. e4 e5 2. Nf3 Nf6 3. Bc4 Bc5\n4. Ke2 Ke7 5. Ke1 Ke8 6. O-O 1-0\n";
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let pgn = temp.path().join("input.pgn");
+    std::fs::write(&pgn, [castled, ILLEGAL_GAME, VALID_GAME].join("\n"))
+        .expect("Failed to write PGN");
+
+    for (flag, warns) in [("--on-error=skip", true), ("--quiet", false)] {
+        let db = temp.path().join(flag.trim_start_matches('-'));
+        let output = cli()
+            .arg("import")
+            .arg(&pgn)
+            .arg("-o")
+            .arg(&db)
+            .arg(flag)
+            .output()
+            .expect("Failed to run CLI");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{flag}: {stderr}");
+        assert_eq!(
+            stderr.contains(
+                "Warning: PGN game 1, line 5: \"O-O\" castles without the castling right"
+            ),
+            warns,
+            "{flag}: {stderr}"
+        );
+        assert_eq!(
+            stderr.contains("Warning: skipping PGN game 2"),
+            warns,
+            "{flag}: {stderr}"
+        );
+        if !warns {
+            assert!(stderr.is_empty(), "{flag}: {stderr}");
+        }
+        assert_eq!(imported_events(&db), ["Castled", "Valid"], "{flag}");
+    }
+}
+
+#[test]
+fn test_cli_quiet_hides_errors() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let missing = temp.path().join("missing");
+    let missing = missing.to_str().expect("temp path should be UTF-8");
+    let db = temp.path().join("db");
+    let db = db.to_str().expect("temp path should be UTF-8");
+    for args in [
+        &[missing, "--quiet"][..],
+        &["export", missing, "-q"],
+        &["info", missing, "--quiet"],
+        &["import", missing, "-o", db, "--quiet"],
+    ] {
+        let output = cli().args(args).output().expect("Failed to run CLI");
+        assert_eq!(output.status.code(), Some(1), "{args:?}");
+        assert!(output.stderr.is_empty(), "{args:?}");
+        assert!(output.stdout.is_empty(), "{args:?}");
+    }
+
+    // A command's results are still written.
+    let five = Path::new("tests/data/five");
+    for output in export_outputs(five, &["--quiet"]) {
+        assert!(output.status.success());
+        assert!(output.stderr.is_empty());
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(stdout.matches("[Event \"").count(), 5);
+    }
+    for output in export_outputs(five, &["--count", "--quiet"]) {
+        assert!(output.stderr.is_empty());
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "5 games\n");
+    }
+    let output = cli()
+        .args(["info", "tests/data/five", "--quiet"])
+        .output()
+        .expect("Failed to run CLI");
+    assert!(output.stderr.is_empty());
+    assert!(String::from_utf8_lossy(&output.stdout).starts_with("Total games: 5\n"));
+
+    // --quiet and --verbose can't be combined.
+    for args in [
+        &["tests/data/five", "-q", "-v"][..],
+        &["export", "tests/data/five", "--quiet", "--verbose"],
+        &["import", "tests/data/five.pgn", "-o", db, "-q", "-v"],
+    ] {
+        let output = cli().args(args).output().expect("Failed to run CLI");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success(), "{args:?}");
+        assert!(stderr.contains("cannot be used with"), "{args:?}: {stderr}");
+    }
+    assert!(!Path::new(db).with_extension("si4").exists());
+}
+
+#[test]
+fn test_cli_rejects_options_before_a_subcommand() {
+    // Run in the temp dir with relative paths, so the suggested command
+    // needs no quoting on any platform.
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    copy_with_deleted(temp.path(), "five", &[]);
+    for (args, fixed) in [
+        (
+            &["--games", "6", "export", "five", "-o", "out.pgn"][..],
+            "scidtopgn export five -o out.pgn --games 6",
+        ),
+        (
+            &["--games", "1", "export", "five", "-o", "out.pgn"],
+            "scidtopgn export five -o out.pgn --games 1",
+        ),
+        (
+            &["--quiet", "export", "missing"],
+            "scidtopgn export missing --quiet",
+        ),
+    ] {
+        let output = cli()
+            .current_dir(temp.path())
+            .args(args)
+            .output()
+            .expect("Failed to run CLI");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(2), "{args:?}: {stderr}");
+        assert!(stderr.contains(fixed), "{args:?}: {stderr}");
+        assert!(output.stdout.is_empty(), "{args:?}");
+        assert!(
+            !temp.path().join("out.pgn").exists(),
+            "{args:?}: nothing is exported"
+        );
+    }
 }

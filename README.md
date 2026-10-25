@@ -31,6 +31,8 @@ scidtopgn import games.pgn -o mydb
 
 > [!NOTE]
 > Specify database paths *without* extensions — use `mydb`, not `mydb.si4`.
+>
+> With a subcommand, put options after it: `scidtopgn export mydb --games 1-5`, not `scidtopgn --games 1-5 export mydb`. Options before a subcommand are rejected, and the error shows the corrected command when it can.
 
 ## CLI usage
 
@@ -39,9 +41,14 @@ scidtopgn import games.pgn -o mydb
 ```bash
 scidtopgn /path/to/database              # stdout
 scidtopgn /path/to/database -o out.pgn   # to file
-scidtopgn /path/to/database --count      # just tell me how many games
+scidtopgn /path/to/database --count      # just tell me how many games are stored
+scidtopgn /path/to/database --games 10-20  # only games 10 to 20
 scidtopgn export /path/to/database       # explicit subcommand, same thing
 ```
+
+Export skips games that SCID has logically deleted. `--count` counts every stored game, deleted or not, so it can be more than the number of games exported. `scidtopgn info` shows both numbers.
+
+`--games` takes game numbers, counting from 1, and ranges that include both ends, separated by commas, such as `1-5,8,12-14`. The games are exported in database order, each once, and deleted games in the selection are still skipped. A number past the last stored game is an error, and no output is written.
 
 #### Export arguments
 
@@ -49,9 +56,11 @@ scidtopgn export /path/to/database       # explicit subcommand, same thing
 |----------|-------|----------|---------|-------------|
 | `database` | - | Yes | - | Path to SCID database (without file extension) |
 | `--output` | `-o` | No | stdout | Output file path |
-| `--count` | - | No | - | Just print the number of games and exit |
+| `--count` | - | No | - | Print the number of stored games, including logically deleted games, and exit |
+| `--games` | - | No | all | Export only these games, such as `10-20` or `1-5,8`. Can't be combined with `--count` |
 | `--overwrite` | - | No | - | Overwrite the output file if it already exists |
-| `--verbose` | `-v` | No | - | Verbose output |
+| `--verbose` | `-v` | No | - | Show progress at each 10% of the games, and a summary |
+| `--quiet` | `-q` | No | - | Write nothing to stderr, not even errors. Can't be combined with `--verbose` |
 
 ### Import (PGN → SCID)
 
@@ -74,7 +83,33 @@ Import reads the same PGN notation as SCID, such as `0-0`, `ed` for `exd5`, `e2-
 | `--output` | `-o` | Yes | - | Output database path (without file extension) |
 | `--overwrite` | - | No | - | Overwrite existing database instead of appending |
 | `--on-error` | - | No | `skip` | Error handling strategy: `skip` or `abort` |
-| `--verbose` | `-v` | No | - | Verbose output |
+| `--verbose` | `-v` | No | - | Show progress at each 10% of the games, and a summary |
+| `--quiet` | `-q` | No | - | Write nothing to stderr, not even errors or skipped games. Can't be combined with `--verbose` |
+
+With `--quiet` and the default `--on-error skip`, import doesn't report the games it skips, and it still exits with status 0. Use `--on-error abort` to make a bad game an error.
+
+### Database info
+
+```bash
+scidtopgn info /path/to/database
+```
+
+```text
+Total games: 5
+Deleted games: 2
+Active games: 3
+Player names: 10
+Event names: 3
+Site names: 3
+Round names: 5
+Years of active games: 2022-2022
+```
+
+Total games counts every stored game, and Active games those export writes. The name counts are the names stored in the database's name file, which can include names used only by deleted games. The years come from active games with a known date, or are `unknown`. `info` reads only the index and name files, so it works even when some games are damaged. It accepts `--quiet`.
+
+### Quiet mode
+
+With `--quiet`, a command writes nothing to stderr: no warnings, progress, or error messages. Only the exit status shows whether it failed. Its results are still written, such as PGN, the `--count` line, and `info`'s output. Mistakes in the arguments themselves, such as an unknown option, are still reported.
 
 ## Use it as a library
 
