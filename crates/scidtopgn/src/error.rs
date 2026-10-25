@@ -68,10 +68,6 @@ pub enum Error {
     #[error("Game data at byte {offset}, {length} bytes long, is past the end of the game file")]
     GameOutOfRange { offset: u32, length: u32 },
 
-    /// An index entry whose game record crosses a game file block boundary.
-    #[error("Game data at byte {offset}, {length} bytes long, crosses a block boundary")]
-    GameSpansBlocks { offset: u32, length: u32 },
-
     /// A file that doesn't start with the magic number of its SCID file type.
     #[error("Not a SCID file: wrong magic number")]
     InvalidMagic,

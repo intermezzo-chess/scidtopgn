@@ -7,6 +7,9 @@ use crate::error::{DatabaseFile, Error, Result};
 
 pub const GFILE_SUFFIX: &str = ".sg4";
 pub const GF_BLOCKSIZE: usize = 131_072;
+/// The longest game record a database can store. The index stores a
+/// record's length in 17 bits.
+pub(crate) const MAX_GAME_LENGTH: usize = GF_BLOCKSIZE - 1;
 
 struct GfBlock {
     block_num: i32,
@@ -213,43 +216,40 @@ impl GFile {
         Ok(())
     }
 
-    /// Reads the `length` bytes of game data at `offset` into `buf`.
+    /// Reads the `length` bytes of game data at `offset` into `buf`. Like
+    /// SCID, it reads a record that crosses a block boundary.
     ///
     /// # Errors
     ///
     /// Returns [`Error::GameOutOfRange`] if the data extends past the end of
-    /// the file, and [`Error::GameSpansBlocks`] if it crosses a block
-    /// boundary.
+    /// the file.
     pub fn read_game(&mut self, buf: &mut ByteBuffer, offset: u32, length: u32) -> Result<()> {
         if u64::from(offset) + u64::from(length) > self.file_size() {
             return Err(Error::GameOutOfRange { offset, length });
         }
-        if length == 0 {
-            buf.provide_external(&[]);
-            return Ok(());
+
+        let mut pos = offset as usize;
+        let end = pos + length as usize;
+        let mut data = Vec::with_capacity(length as usize);
+        while pos < end {
+            let block_num = pos / GF_BLOCKSIZE;
+            if self.current_block.block_num != block_num as i32 {
+                self.fetch_block(block_num as u32)?;
+            }
+            let start = pos % GF_BLOCKSIZE;
+            let count = (GF_BLOCKSIZE - start).min(end - pos);
+            data.extend_from_slice(&self.current_block.data[start..start + count]);
+            pos += count;
         }
 
-        let block_num = offset as usize / GF_BLOCKSIZE;
-        let end_block_num = (offset as usize + length as usize - 1) / GF_BLOCKSIZE;
-        if end_block_num != block_num {
-            return Err(Error::GameSpansBlocks { offset, length });
-        }
-
-        if self.current_block.block_num != block_num as i32 {
-            self.fetch_block(block_num as u32)?;
-        }
-
-        let start = (offset as usize) % GF_BLOCKSIZE;
-        let game_data = &self.current_block.data[start..start + length as usize];
-
-        buf.provide_external(game_data);
+        buf.provide_external(&data);
 
         Ok(())
     }
 
-    pub fn read_game_data(&mut self, offset: u32, length: u16) -> Result<Vec<u8>> {
+    pub fn read_game_data(&mut self, offset: u32, length: u32) -> Result<Vec<u8>> {
         let mut buf = ByteBuffer::new();
-        self.read_game(&mut buf, offset, length as u32)?;
+        self.read_game(&mut buf, offset, length)?;
         Ok(buf.as_slice().to_vec())
     }
 
@@ -257,7 +257,8 @@ impl GFile {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::GameTooLarge`] if the record is longer than a block.
+    /// Returns [`Error::GameTooLarge`] if the record is longer than
+    /// 131,071 bytes, the most the index can record.
     pub fn add_game(&mut self, buf: &ByteBuffer) -> Result<u32> {
         if self.handle.is_none() {
             return Err(Error::FileNotOpen);
@@ -268,10 +269,10 @@ impl GFile {
         }
 
         let data_len = buf.byte_count();
-        if data_len > GF_BLOCKSIZE {
+        if data_len > MAX_GAME_LENGTH {
             return Err(Error::GameTooLarge {
                 length: data_len,
-                max: GF_BLOCKSIZE,
+                max: MAX_GAME_LENGTH,
             });
         }
 
@@ -518,5 +519,64 @@ mod tests {
         assert_eq!(gf.read_game_data(second, 200).unwrap(), [8; 200]);
         let end = (GF_BLOCKSIZE - 101) as u32;
         assert_eq!(gf.read_game_data(end, 1).unwrap(), [7]);
+    }
+
+    #[test]
+    fn test_gfile_read_across_blocks() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("blocks");
+        // Two full blocks and a partial one, with no two neighbors alike.
+        let data: Vec<u8> = (0..2 * GF_BLOCKSIZE + 10)
+            .map(|i| (i % 251) as u8)
+            .collect();
+        std::fs::write(path.with_extension("sg4"), &data).unwrap();
+        let read = |offset: usize, length: usize| data[offset..offset + length].to_vec();
+
+        let mut gf = GFile::open(&path).unwrap();
+        let block = GF_BLOCKSIZE;
+        // Ends at the end of a block.
+        assert_eq!(
+            gf.read_game_data(block as u32 - 2, 2).unwrap(),
+            read(block - 2, 2)
+        );
+        // Fills a block.
+        assert_eq!(
+            gf.read_game_data(block as u32, block as u32).unwrap(),
+            read(block, block)
+        );
+        // Crosses one boundary.
+        assert_eq!(
+            gf.read_game_data(block as u32 - 2, 4).unwrap(),
+            read(block - 2, 4)
+        );
+        // Crosses two, into the last, partial block.
+        let length = block + 3;
+        assert_eq!(
+            gf.read_game_data(block as u32 - 1, length as u32).unwrap(),
+            read(block - 1, length)
+        );
+        assert!(gf.read_game_data(block as u32, 0).unwrap().is_empty());
+        assert!(matches!(
+            gf.read_game_data(2 * block as u32 + 8, 3),
+            Err(Error::GameOutOfRange { .. })
+        ));
+    }
+
+    #[test]
+    fn test_gfile_read_across_blocks_before_writing() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("blocks");
+        // A last block with room for 100 more bytes.
+        std::fs::write(path.with_extension("sg4"), vec![7; GF_BLOCKSIZE - 100]).unwrap();
+
+        let mut gf = GFile::open(&path).unwrap();
+        // Starts the next block, which isn't written yet.
+        gf.add_game_data(&[8; 200]).unwrap();
+        // The last game, the padding after it, and the start of the new game.
+        let mut expected = vec![7];
+        expected.extend([0; 100]);
+        expected.extend([8, 8]);
+        let offset = (GF_BLOCKSIZE - 101) as u32;
+        assert_eq!(gf.read_game_data(offset, 103).unwrap(), expected);
     }
 }

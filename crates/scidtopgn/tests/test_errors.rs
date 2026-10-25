@@ -169,24 +169,6 @@ fn test_get_game_rejects_a_record_past_the_end_of_the_file() {
 }
 
 #[test]
-fn test_read_game_rejects_a_record_across_blocks() {
-    let temp = TempDir::new().unwrap();
-    let path = temp.path().join("blocks");
-    let mut gfile = GFile::create(&path).unwrap();
-    gfile.add_game_data(&vec![0; GF_BLOCKSIZE - 10]).unwrap();
-    let second = gfile.add_game_data(&[0; 100]).unwrap();
-    assert_eq!(second as usize, GF_BLOCKSIZE);
-    gfile.flush().unwrap();
-
-    let mut buf = ByteBuffer::new();
-    let offset = GF_BLOCKSIZE as u32 - 5;
-    assert!(matches!(
-        gfile.read_game(&mut buf, offset, 10),
-        Err(Error::GameSpansBlocks { length: 10, .. })
-    ));
-}
-
-#[test]
 fn test_name_prefix_longer_than_the_name() {
     let mut sn4 = b"Scid.sn\0".to_vec();
     sn4.extend([0; 4]); // timestamp
@@ -228,16 +210,17 @@ fn test_add_game_rejects_a_game_too_large_to_store() {
 }
 
 #[test]
-fn test_game_file_rejects_a_record_larger_than_a_block() {
+fn test_game_file_rejects_a_record_longer_than_the_index_can_record() {
     let temp = TempDir::new().unwrap();
     let mut gfile = GFile::create(temp.path().join("large")).unwrap();
     assert!(matches!(
-        gfile.add_game_data(&vec![0; GF_BLOCKSIZE + 1]),
+        gfile.add_game_data(&vec![0; GF_BLOCKSIZE]),
         Err(Error::GameTooLarge {
-            max: GF_BLOCKSIZE,
-            ..
+            length: GF_BLOCKSIZE,
+            max: 131_071,
         })
     ));
+    assert_eq!(gfile.add_game_data(&vec![0; GF_BLOCKSIZE - 1]).unwrap(), 0);
 }
 
 #[test]
