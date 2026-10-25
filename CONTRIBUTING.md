@@ -43,7 +43,7 @@ reference the issue the PR addresses.
 - **Each SCID file has its own module.** `index.rs` handles the `.si4` index,
   `nfile.rs` and `namebase.rs` handle the `.sn4` name base, and `gfile.rs`
   handles the `.sg4` game file. Move and game decoding live in `game.rs`,
-  `mov.rs`, `position.rs`, and `private/decoding.rs`. `database.rs` ties the
+  `mov.rs`, and `position.rs`. `database.rs` ties the
   three files together. See [SCID_DATABASE_FORMAT.md](SCID_DATABASE_FORMAT.md)
   for the binary layout.
 - **Chess rules come from [shakmaty](https://crates.io/crates/shakmaty).**

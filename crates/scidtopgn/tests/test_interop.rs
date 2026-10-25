@@ -14,7 +14,6 @@
 
 use std::path::PathBuf;
 
-use scidtopgn::private::skip_tags;
 use scidtopgn::shakmaty::{Color, Position};
 use scidtopgn::{parse_pgn, ByteBuffer, Database, Game, Marker, ENCODE_END_GAME};
 use tempfile::TempDir;
@@ -79,12 +78,33 @@ fn records(path: &std::path::Path) -> Vec<Vec<u8>> {
         .collect()
 }
 
+/// Moves `buf` past the tags at the start of a game record: the compact
+/// event date (255), common tags stored by code (241 to 254), and tags
+/// stored by name, up to the 0 that ends them.
+fn skip_tags(buf: &mut ByteBuffer) {
+    loop {
+        match buf.get_byte().unwrap() {
+            0 => break,
+            255 => buf.skip(3).unwrap(),
+            code if code > 240 => {
+                let len = buf.get_byte().unwrap();
+                buf.skip(usize::from(len)).unwrap();
+            }
+            name_len => {
+                buf.skip(usize::from(name_len)).unwrap();
+                let len = buf.get_byte().unwrap();
+                buf.skip(usize::from(len)).unwrap();
+            }
+        }
+    }
+}
+
 /// The parts of a game record that encode the game rather than its tags:
 /// whether it starts from a FEN, the FEN, the moves, and the comments. SCID
 /// also stores promotion flags, which this crate doesn't write.
 fn move_section(record: &[u8]) -> (bool, Vec<u8>) {
     let mut buf = ByteBuffer::from_slice(record);
-    skip_tags(&mut buf).unwrap();
+    skip_tags(&mut buf);
     let flags = buf.get_byte().unwrap();
     let rest = record[buf.position()..].to_vec();
     assert!(rest.contains(&ENCODE_END_GAME));

@@ -11,7 +11,6 @@ pub mod namebase;
 pub mod nfile;
 pub mod pgn;
 pub mod position;
-pub mod private;
 
 pub use bytebuf::ByteBuffer;
 pub use common::GameResult;
