@@ -163,14 +163,21 @@ fn check_option_placement(args: &[OsString], matches: &ArgMatches) -> Result<(),
 }
 
 /// Joins `args` with spaces, quoting any that the shell would split or
-/// change.
+/// change. On Windows, paths keep their backslashes, and quotes are double,
+/// as both cmd.exe and PowerShell read them.
 fn shell_words(args: &[OsString]) -> String {
-    let plain = |c: char| c.is_ascii_alphanumeric() || "-_./:=,+@%".contains(c);
+    let plain = |c: char| {
+        c.is_ascii_alphanumeric()
+            || "-_./:=,+@%".contains(c)
+            || (cfg!(windows) && "\\~".contains(c))
+    };
     args.iter()
         .map(|arg| {
             let arg = arg.to_string_lossy();
             if !arg.is_empty() && arg.chars().all(plain) {
                 arg.into_owned()
+            } else if cfg!(windows) {
+                format!("\"{arg}\"")
             } else {
                 format!("'{}'", arg.replace('\'', "'\\''"))
             }
@@ -325,7 +332,19 @@ mod tests {
             ),
             (
                 &["-o", "my file's.pgn", "export", "mydb"],
-                r"scidtopgn export mydb -o 'my file'\''s.pgn'",
+                if cfg!(windows) {
+                    r#"scidtopgn export mydb -o "my file's.pgn""#
+                } else {
+                    r"scidtopgn export mydb -o 'my file'\''s.pgn'"
+                },
+            ),
+            (
+                &["-o", r"C:\Users\RUNNER~1\out.pgn", "export", "mydb"],
+                if cfg!(windows) {
+                    r"scidtopgn export mydb -o C:\Users\RUNNER~1\out.pgn"
+                } else {
+                    r"scidtopgn export mydb -o 'C:\Users\RUNNER~1\out.pgn'"
+                },
             ),
         ] {
             let message = misplaced(args);

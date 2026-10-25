@@ -1249,28 +1249,36 @@ fn test_cli_quiet_hides_errors() {
 
 #[test]
 fn test_cli_rejects_options_before_a_subcommand() {
+    // Run in the temp dir with relative paths, so the suggested command
+    // needs no quoting on any platform.
     let temp = TempDir::new().expect("Failed to create temp dir");
-    let out = temp.path().join("out.pgn");
-    let out = out.to_str().expect("temp path should be UTF-8");
+    copy_with_deleted(temp.path(), "five", &[]);
     for (args, fixed) in [
         (
-            &["--games", "6", "export", "tests/data/five", "-o", out][..],
-            format!("scidtopgn export tests/data/five -o {out} --games 6"),
+            &["--games", "6", "export", "five", "-o", "out.pgn"][..],
+            "scidtopgn export five -o out.pgn --games 6",
         ),
         (
-            &["--games", "1", "export", "tests/data/five", "-o", out],
-            format!("scidtopgn export tests/data/five -o {out} --games 1"),
+            &["--games", "1", "export", "five", "-o", "out.pgn"],
+            "scidtopgn export five -o out.pgn --games 1",
         ),
         (
-            &["--quiet", "export", "tests/data/missing"],
-            "scidtopgn export tests/data/missing --quiet".to_string(),
+            &["--quiet", "export", "missing"],
+            "scidtopgn export missing --quiet",
         ),
     ] {
-        let output = cli().args(args).output().expect("Failed to run CLI");
+        let output = cli()
+            .current_dir(temp.path())
+            .args(args)
+            .output()
+            .expect("Failed to run CLI");
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert_eq!(output.status.code(), Some(2), "{args:?}: {stderr}");
-        assert!(stderr.contains(&fixed), "{args:?}: {stderr}");
+        assert!(stderr.contains(fixed), "{args:?}: {stderr}");
         assert!(output.stdout.is_empty(), "{args:?}");
-        assert!(!Path::new(out).exists(), "{args:?}: nothing is exported");
+        assert!(
+            !temp.path().join("out.pgn").exists(),
+            "{args:?}: nothing is exported"
+        );
     }
 }
