@@ -804,7 +804,8 @@ fn test_cli_missing_inputs() {
         .expect("Failed to run CLI");
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("No such file or directory"), "{stderr}");
+    // The message differs by platform; the error code doesn't.
+    assert!(stderr.contains("(os error 2)"), "{stderr}");
     assert!(!temp.path().join("db.si4").exists());
 }
 
