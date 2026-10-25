@@ -11,7 +11,7 @@ use clap::Parser;
 
 use args::{Cli, Command, ExportArgs, ImportArgs, InfoArgs};
 use report::{Progress, Verbosity};
-use scidtopgn::{Database, NameType, PgnParser};
+use scidtopgn::{Database, Index, NFile, NameType, PgnParser};
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
@@ -56,7 +56,7 @@ fn export_command(args: &ExportArgs, verbosity: Verbosity) -> Result<()> {
         .with_context(|| format!("Failed to open database '{}'", args.database))?;
 
     if args.count {
-        println!("{} games", db.num_games());
+        writeln!(std::io::stdout(), "{} games", db.num_games())?;
         return Ok(());
     }
 
@@ -96,6 +96,7 @@ fn export_command(args: &ExportArgs, verbosity: Verbosity) -> Result<()> {
         }
         progress.advance();
     }
+    writer.flush()?;
 
     verbosity.info(format_args!("Done. {} games exported.", exported));
 
@@ -193,13 +194,18 @@ fn import_command(args: &ImportArgs, verbosity: Verbosity) -> Result<()> {
 }
 
 fn info_command(args: &InfoArgs) -> Result<()> {
-    // Read no game records, so damaged games don't matter.
-    let db = Database::open(&args.database)
-        .with_context(|| format!("Failed to open database '{}'", args.database))?;
+    // Read only the index and name files, so the game file can be damaged,
+    // missing, or read-only.
+    let path = std::path::Path::new(&args.database);
+    let open = || -> scidtopgn::Result<(Index, NFile)> {
+        Ok((Index::open(path.with_extension("si4"))?, NFile::open(path)?))
+    };
+    let (index, nfile) =
+        open().with_context(|| format!("Failed to open database '{}'", args.database))?;
 
     let mut deleted = 0u32;
     let mut years: Option<(u16, u16)> = None;
-    for entry in db.index().entries() {
+    for entry in index.entries() {
         if entry.get_delete_flag() {
             deleted += 1;
             continue;
@@ -213,18 +219,20 @@ fn info_command(args: &InfoArgs) -> Result<()> {
         }
     }
 
-    let total = db.num_games();
-    let names = db.nfile().namebase();
-    println!("Total games: {total}");
-    println!("Deleted games: {deleted}");
-    println!("Active games: {}", total - deleted);
-    println!("Player names: {}", names.count(NameType::Player));
-    println!("Event names: {}", names.count(NameType::Event));
-    println!("Site names: {}", names.count(NameType::Site));
-    println!("Round names: {}", names.count(NameType::Round));
+    let total = index.num_games();
+    let names = nfile.namebase();
+    let mut out = std::io::stdout().lock();
+    writeln!(out, "Total games: {total}")?;
+    writeln!(out, "Deleted games: {deleted}")?;
+    writeln!(out, "Active games: {}", total - deleted)?;
+    writeln!(out, "Player names: {}", names.count(NameType::Player))?;
+    writeln!(out, "Event names: {}", names.count(NameType::Event))?;
+    writeln!(out, "Site names: {}", names.count(NameType::Site))?;
+    writeln!(out, "Round names: {}", names.count(NameType::Round))?;
     match years {
-        Some((first, last)) => println!("Years of active games: {first}-{last}"),
-        None => println!("Years of active games: unknown"),
+        Some((first, last)) => writeln!(out, "Years of active games: {first}-{last}")?,
+        None => writeln!(out, "Years of active games: unknown")?,
     }
+    out.flush()?;
     Ok(())
 }

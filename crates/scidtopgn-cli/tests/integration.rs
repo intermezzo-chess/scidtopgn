@@ -1021,12 +1021,26 @@ fn test_cli_verbose_progress_for_selected_games() {
         assert!(output.status.success());
         assert_eq!(
             String::from_utf8_lossy(&output.stderr),
-            "Processed 30% (1/3 games)\n\
-             Processed 60% (2/3 games)\n\
-             Processed 100% (3/3 games)\n\
-             Done. 2 games exported.\n"
+            format!("{}Done. 2 games exported.\n", progress_of_3())
         );
     }
+
+    let pgn: String = (1..=3)
+        .map(|n| format!("[Event \"Game {n}\"]\n\n1. e4 *\n\n"))
+        .collect();
+    let (_, stderr) = import_pgn(temp.path(), &pgn);
+    assert!(stderr.contains(&progress_of_3()), "{stderr}");
+}
+
+/// The progress `--verbose` reports for 3 games: each tenth once, with
+/// the game that reached it.
+fn progress_of_3() -> String {
+    (1..=10u32)
+        .map(|tenth| {
+            let done = (tenth * 3).div_ceil(10);
+            format!("Processed {}% ({done}/3 games)\n", tenth * 10)
+        })
+        .collect()
 }
 
 /// Runs `info` on `db` and returns its output.
@@ -1089,14 +1103,57 @@ fn test_cli_info_years() {
 }
 
 #[test]
-fn test_cli_info_ignores_damaged_games() {
+fn test_cli_info_reads_only_the_index_and_name_files() {
     let temp = TempDir::new().expect("Failed to create temp dir");
     let db = copy_with_deleted(temp.path(), "five", &[]);
-    std::fs::write(db.with_extension("sg4"), []).expect("Failed to truncate .sg4");
+    let sg4 = db.with_extension("sg4");
+    let expected = info(&db);
 
+    // Read-only, so it can't be opened for writing as `Database::open` does.
+    let mut permissions = std::fs::metadata(&sg4).unwrap().permissions();
+    permissions.set_readonly(true);
+    std::fs::set_permissions(&sg4, permissions.clone()).unwrap();
+    assert_eq!(info(&db), expected);
+    #[allow(clippy::permissions_set_readonly_false)]
+    permissions.set_readonly(false);
+    std::fs::set_permissions(&sg4, permissions).unwrap();
+
+    // Damaged, so export fails.
+    std::fs::write(&sg4, []).expect("Failed to truncate .sg4");
     let output = cli().arg(&db).output().expect("Failed to run CLI");
     assert!(!output.status.success(), "export should fail");
-    assert!(info(&db).contains("Active games: 5\n"));
+    assert_eq!(info(&db), expected);
+
+    std::fs::remove_file(&sg4).expect("Failed to remove .sg4");
+    assert_eq!(info(&db), expected);
+}
+
+#[test]
+fn test_cli_quiet_hides_stdout_errors() {
+    for args in [
+        &["tests/data/five", "--quiet"][..],
+        &["tests/data/five", "--count", "--quiet"],
+        &["export", "tests/data/five", "--count", "--quiet"],
+        &["info", "tests/data/five", "--quiet"],
+        &["info", "tests/data/five"],
+    ] {
+        // Writing to a pipe whose reading end is closed fails.
+        let (reader, writer) = std::io::pipe().expect("Failed to create pipe");
+        drop(reader);
+        let output = cli()
+            .args(args)
+            .stdout(writer)
+            .output()
+            .expect("Failed to run CLI");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{args:?}: {stderr}");
+        assert!(!stderr.contains("panicked"), "{args:?}: {stderr}");
+        if args.contains(&"--quiet") {
+            assert!(stderr.is_empty(), "{args:?}: {stderr}");
+        } else {
+            assert!(stderr.starts_with("Error: "), "{args:?}: {stderr}");
+        }
+    }
 }
 
 #[test]

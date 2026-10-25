@@ -54,19 +54,19 @@ impl Progress {
         }
     }
 
-    /// Counts one more game done. When several tenths are reached at once,
-    /// as with fewer than 10 games, only the last is reported.
+    /// Counts one more game done. Each tenth is reported once, so with fewer
+    /// than 10 games one game can report several.
     pub fn advance(&mut self) {
         if self.done == self.total {
             return;
         }
         self.done += 1;
         let tenths = self.done * 10 / self.total;
-        if tenths > self.tenths {
-            self.tenths = tenths;
+        while self.tenths < tenths {
+            self.tenths += 1;
             self.verbosity.info(format_args!(
                 "Processed {}% ({}/{} games)",
-                tenths * 10,
+                self.tenths * 10,
                 self.done,
                 self.total
             ));
