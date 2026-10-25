@@ -236,12 +236,47 @@ fn test_comment_text_round_trips() {
 fn test_comments_keep_their_whitespace_in_the_database() {
     let mut game = scidtopgn::parse_single_game("[Event \"x\"]\n\n1. e4 e5 *\n").unwrap();
     let multi_line = "line one\nline two\n\n  indented\ttab ";
-    let long = "x".repeat(60_000);
     game.moves[1].comment = Some(multi_line.to_string());
-    game.moves[2].comment = Some(long.clone());
 
     let reread = scid_round_trip(&game);
-    assert_eq!(comments(&reread), [multi_line, long.as_str()]);
+    assert_eq!(comments(&reread), [multi_line]);
+}
+
+/// The SAN and comment of each of `game`'s moves that has a comment.
+fn move_comments(game: &Game) -> Vec<(String, String)> {
+    game.moves
+        .iter()
+        .filter_map(|node| Some((node.san.clone(), node.comment.clone()?)))
+        .collect()
+}
+
+#[test]
+fn test_long_comment_round_trips() {
+    // One comment per game: two would make a record over 64 KiB (#52).
+    let long = "x".repeat(60_000);
+    for (movetext, san) in [
+        (format!("1. e4 {{{long}}} e5 *"), "e4"),
+        (format!("1. e4 e5 (1... c5 {{{long}}}) *"), "c5"),
+    ] {
+        let expected = [(san.to_string(), long.clone())];
+        let pgn = format!("[Event \"x\"]\n\n{movetext}\n");
+        let game = scidtopgn::parse_single_game(&pgn).unwrap();
+        assert_eq!(move_comments(&game), expected, "{san}: after PGN import");
+
+        let reread = scid_round_trip(&game);
+        assert_eq!(
+            move_comments(&reread),
+            expected,
+            "{san}: after a SCID round trip"
+        );
+        let reimported = scidtopgn::parse_single_game(&reread.to_pgn()).unwrap();
+        assert_eq!(
+            move_comments(&reimported),
+            expected,
+            "{san}: after PGN to SCID to PGN"
+        );
+        assert_eq!(reimported.moves.len(), game.moves.len(), "{san}");
+    }
 }
 
 #[test]
