@@ -93,6 +93,8 @@ let game = db.get_game(0)?;
 println!("{} vs {}", game.white, game.black);
 ```
 
+`games()` and `get_game()` include games that SCID has logically deleted, unlike the CLI's export. The [API documentation](https://docs.rs/scidtopgn) shows how to skip them and covers the rest of the library. To build it locally, run `cargo doc -p scidtopgn --open`.
+
 ## Building & testing
 
 ```bash

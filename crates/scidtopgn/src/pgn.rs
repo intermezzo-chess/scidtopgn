@@ -1,3 +1,14 @@
+//! Reading games from PGN text.
+//!
+//! [`parse_pgn`] reads every game and stops at the first that fails.
+//! [`PgnParser`] yields each game or its error, so a caller can skip games
+//! that fail. Each [`Game`] records problems that didn't stop it from being
+//! read in [`Game::warnings`].
+//!
+//! The parser reads the notations SCID reads, not only standard SAN.
+//! `docs/PGN_IMPORT.md` in the repository records where it differs from
+//! SCID, and why.
+
 use std::fmt;
 
 use shakmaty::san::{San, SanError};
@@ -20,9 +31,12 @@ pub struct PgnWarning {
     pub game: usize,
     /// The line of the input the warning is about.
     pub line: u32,
+    /// What the warning is about.
     pub kind: PgnWarningKind,
 }
 
+/// Gives the game, the line, and the problem, such as
+/// `PGN game 1, line 3: skipped unknown text "zz"`.
 impl fmt::Display for PgnWarning {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
@@ -39,31 +53,55 @@ impl fmt::Display for PgnWarning {
 pub enum PgnWarningKind {
     /// Text in the moves that isn't a move, an annotation, or a result, such
     /// as `zz` or `nf3`. It is skipped.
-    UnknownText { text: String },
+    UnknownText {
+        /// The text skipped.
+        text: String,
+    },
     /// Castling after the king or rook has moved and returned. SCID plays
     /// it, so this crate does too.
-    CastlingWithoutRight { text: String },
+    CastlingWithoutRight {
+        /// The move as written.
+        text: String,
+    },
     /// `O-O` played as `O-O-O` because only queenside castling is legal, as
     /// SCID does.
-    KingsideReadAsQueenside { text: String },
+    KingsideReadAsQueenside {
+        /// The move as written.
+        text: String,
+    },
     /// Castling rights in the `FEN` tag that don't fit the position. They
     /// are dropped.
-    FenCastlingRights { rights: String },
+    FenCastlingRights {
+        /// The rights dropped, in FEN notation.
+        rights: String,
+    },
     /// An en passant square in the `FEN` tag that no pawn could have just
     /// moved past. It is dropped.
-    FenEnPassant { square: Square },
+    FenEnPassant {
+        /// The square dropped.
+        square: Square,
+    },
     /// The result at the end of the moves differs from the `Result` tag.
     /// The result at the end of the moves is used.
-    ResultMismatch { tag: GameResult, moves: GameResult },
+    ResultMismatch {
+        /// The result in the `Result` tag.
+        tag: GameResult,
+        /// The result at the end of the moves.
+        moves: GameResult,
+    },
     /// The moves don't end with a result, so the `Result` tag, if any, is
     /// used.
-    MissingResult { tag: Option<GameResult> },
+    MissingResult {
+        /// The result in the `Result` tag, if there is one.
+        tag: Option<GameResult>,
+    },
     /// Text that isn't valid UTF-8, read with [`PgnParser::from_bytes`]. Its
     /// bytes are read as Windows-1252. Given once per game, on the first
     /// line with such bytes.
     NotUtf8,
 }
 
+/// Describes the problem in a phrase, such as `skipped unknown text "zz"`.
 impl fmt::Display for PgnWarningKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -155,6 +193,28 @@ impl From<Move> for ParsedMove {
 /// line, such as notes before the first game, is kept as the comment before
 /// the game's first move, and text after the last game is dropped. After an
 /// error it resumes at the next game's tags.
+///
+/// # Examples
+///
+/// Keep the games that parse and report the others:
+///
+/// ```
+/// use scidtopgn::PgnParser;
+///
+/// let pgn = "[Event \"A\"]\n\n1. e4 e5 *\n\n\
+///            [Event \"B\"]\n\n1. e4 Ke7 Ke2 *\n\n\
+///            [Event \"C\"]\n\n1. d4 d5 1-0\n";
+///
+/// let mut games = Vec::new();
+/// for result in PgnParser::new(pgn) {
+///     match result {
+///         Ok(game) => games.push(game),
+///         Err(err) => eprintln!("skipped: {err}"),
+///     }
+/// }
+/// let events: Vec<_> = games.iter().map(|game| game.event.as_str()).collect();
+/// assert_eq!(events, ["A", "C"]);
+/// ```
 pub struct PgnParser {
     input: Vec<char>,
     pos: usize,
@@ -167,6 +227,7 @@ pub struct PgnParser {
 }
 
 impl PgnParser {
+    /// Reads games from `input`.
     pub fn new(input: &str) -> Self {
         Self::from_bytes(input.as_bytes())
     }
@@ -1327,10 +1388,50 @@ fn parse_result(s: &str) -> GameResult {
 ///
 /// Returns [`Error::PgnGame`] for the first game that fails to parse. To
 /// skip failed games and continue, iterate over a [`PgnParser`] instead.
+///
+/// # Examples
+///
+/// ```
+/// use scidtopgn::{parse_pgn, GameResult};
+///
+/// let games = parse_pgn(
+///     "[White \"Anand\"]\n[Result \"1-0\"]\n\n1. e4 e5 1-0\n\n\
+///      [White \"Kramnik\"]\n\n1. d4 *\n",
+/// )?;
+/// assert_eq!(games.len(), 2);
+/// assert_eq!(games[0].white, "Anand");
+/// assert_eq!(games[0].result, GameResult::White);
+/// assert_eq!(games[1].white, "Kramnik");
+/// # Ok::<(), scidtopgn::Error>(())
+/// ```
 pub fn parse_pgn(pgn: &str) -> Result<Vec<Game>> {
     PgnParser::new(pgn).collect()
 }
 
+/// Parses the first game in `pgn`, as [`PgnParser::parse_game`] does. Text
+/// before the game's tags, or a game without tags, is read as moves.
+///
+/// # Errors
+///
+/// The same as [`PgnParser::parse_game`]. The error isn't wrapped in
+/// [`Error::PgnGame`].
+///
+/// # Examples
+///
+/// ```
+/// use scidtopgn::parse_single_game;
+///
+/// let game = parse_single_game("1. e4 e5 2. Nf3 {The main line} Nc6 *")?;
+/// let moves: Vec<_> = game
+///     .moves
+///     .iter()
+///     .filter(|node| node.move_data.is_some())
+///     .map(|node| node.san.as_str())
+///     .collect();
+/// assert_eq!(moves, ["e4", "e5", "Nf3", "Nc6"]);
+/// assert!(game.warnings.is_empty());
+/// # Ok::<(), scidtopgn::Error>(())
+/// ```
 pub fn parse_single_game(pgn: &str) -> Result<Game> {
     let mut parser = PgnParser::new(pgn);
     parser.parse_game()

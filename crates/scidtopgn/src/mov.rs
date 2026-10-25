@@ -12,25 +12,46 @@ use crate::bytebuf::ByteBuffer;
 use crate::error::{CorruptGameKind, Error, InvalidMoveByte, Result};
 use crate::position::{fen, ScidPosition};
 
+/// Marks a NAG. The NAG's number is the next byte.
 pub const ENCODE_NAG: u8 = 11;
+/// Marks a comment on the previous move. The comments' text follows the
+/// moves, in the order of their markers.
 pub const ENCODE_COMMENT: u8 = 12;
+/// Starts a variation of the previous move.
 pub const ENCODE_START_MARKER: u8 = 13;
+/// Ends a variation.
 pub const ENCODE_END_MARKER: u8 = 14;
+/// Ends the moves of the game.
 pub const ENCODE_END_GAME: u8 = 15;
+/// The lowest marker byte. Bytes below it are moves of piece 0, the king.
 pub const ENCODE_FIRST: u8 = 11;
 
 /// A move in a SCID game: a chess move, or the null move that passes the
 /// turn, which SCID allows in analysis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GameMove {
+    /// A chess move.
     Move(Move),
+    /// A null move, written `--` in PGN.
     Null,
 }
 
+/// Packs a piece number and a move value into a move byte.
+///
+/// # Examples
+///
+/// ```
+/// use scidtopgn::{make_move_byte, parse_move_byte};
+///
+/// let byte = make_move_byte(12, 15);
+/// assert_eq!(byte, 0xCF);
+/// assert_eq!(parse_move_byte(byte), (12, 15));
+/// ```
 pub fn make_move_byte(piece_num: u8, move_value: u8) -> u8 {
     (piece_num << 4) | (move_value & 0x0F)
 }
 
+/// Splits a move byte into its piece number and move value.
 pub fn parse_move_byte(byte: u8) -> (u8, u8) {
     (byte >> 4, byte & 0x0F)
 }

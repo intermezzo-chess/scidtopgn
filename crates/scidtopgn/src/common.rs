@@ -1,12 +1,21 @@
+//! Values shared by the index, game, and PGN modules.
+
+/// The result of a game.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GameResult {
+    /// White won: `1-0`.
     White,
+    /// Black won: `0-1`.
     Black,
+    /// A draw: `1/2-1/2`.
     Draw,
+    /// No result, such as a game in progress: `*`.
     None,
 }
 
 impl GameResult {
+    /// Reads SCID's one-character result: `1`, `0`, `=` (or `2`) for a
+    /// draw, and anything else for no result.
     pub fn from_char(c: char) -> Self {
         match c {
             '1' => GameResult::White,
@@ -16,6 +25,7 @@ impl GameResult {
         }
     }
 
+    /// Returns SCID's one-character result: `1`, `0`, `=`, or `*`.
     pub fn to_char(self) -> char {
         match self {
             GameResult::White => '1',
@@ -25,6 +35,8 @@ impl GameResult {
         }
     }
 
+    /// Reads the result from the low two bits of `b`, as an index entry
+    /// stores it.
     pub fn from_byte(b: u8) -> Self {
         match b & 3 {
             1 => GameResult::White,
@@ -34,6 +46,8 @@ impl GameResult {
         }
     }
 
+    /// Returns the result as an index entry stores it: 0 for none, 1 for
+    /// White, 2 for Black, and 3 for a draw.
     pub fn to_byte(self) -> u8 {
         match self {
             GameResult::None => 0,
@@ -44,6 +58,7 @@ impl GameResult {
     }
 }
 
+/// Formats the result as PGN writes it, such as `1-0`.
 impl std::fmt::Display for GameResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {

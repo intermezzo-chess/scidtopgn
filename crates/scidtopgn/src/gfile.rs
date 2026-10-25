@@ -1,3 +1,5 @@
+//! The `.sg4` game file, which stores each game's encoded record.
+
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
@@ -5,7 +7,10 @@ use std::path::Path;
 use crate::bytebuf::ByteBuffer;
 use crate::error::{DatabaseFile, Error, Result};
 
+/// The extension of a game file.
 pub const GFILE_SUFFIX: &str = ".sg4";
+/// The size of a block of the game file, in bytes. A record is stored in
+/// the block it starts in unless that block is full.
 pub const GF_BLOCKSIZE: usize = 131_072;
 /// The longest game record a database can store. The index stores a
 /// record's length in 17 bits.
@@ -34,14 +39,27 @@ impl GfBlock {
     }
 }
 
+/// How a [`GFile`] has its file open.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileMode {
+    /// Open for reading.
     ReadOnly,
+    /// Open for writing.
     WriteOnly,
+    /// Open for reading and writing.
     Both,
+    /// Not open.
     None,
 }
 
+/// A `.sg4` game file, read and written a block at a time.
+///
+/// Records are found by the offset and length in their index entry. Most
+/// programs use [`Database`](crate::Database), which keeps the game file in
+/// step with the index.
+///
+/// Dropping a `GFile` writes its pending block and ignores any error;
+/// call [`close`](Self::close) or [`flush`](Self::flush) to see it.
 pub struct GFile {
     handle: Option<File>,
     file_mode: FileMode,
@@ -52,6 +70,7 @@ pub struct GFile {
 }
 
 impl GFile {
+    /// Makes a `GFile` with no file open.
     pub fn new() -> Self {
         Self {
             handle: None,
@@ -63,6 +82,14 @@ impl GFile {
         }
     }
 
+    /// Creates the game file of the database at `path`, given without an
+    /// extension, replacing any file already there, and opens it for
+    /// writing.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::File`] for [`DatabaseFile::Game`] if the file can't
+    /// be created.
     pub fn create<P: AsRef<Path>>(path: P) -> Result<Self> {
         let sg4_path = path.as_ref().with_extension("sg4");
 
@@ -83,6 +110,13 @@ impl GFile {
         })
     }
 
+    /// Opens the game file of the database at `path`, given without an
+    /// extension, for reading and writing.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::File`] for [`DatabaseFile::Game`] if the file can't
+    /// be opened.
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         let sg4_path = path.as_ref().with_extension("sg4");
         let open = || -> Result<(File, u64)> {
@@ -120,6 +154,8 @@ impl GFile {
         })
     }
 
+    /// Returns the length of the game data in bytes, including records not
+    /// yet written to the file.
     pub fn file_size(&self) -> u64 {
         if self.num_blocks == 0 {
             return 0;
@@ -127,6 +163,11 @@ impl GFile {
         ((self.num_blocks - 1) as u64) * (GF_BLOCKSIZE as u64) + (self.last_block_size as u64)
     }
 
+    /// Writes the pending block, if any, and closes the file.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Io`] if the block can't be written.
     pub fn close(&mut self) -> Result<()> {
         if self.current_block.dirty && self.file_mode != FileMode::ReadOnly {
             self.flush_block()?;
@@ -222,7 +263,8 @@ impl GFile {
     /// # Errors
     ///
     /// Returns [`Error::GameOutOfRange`] if the data extends past the end of
-    /// the file.
+    /// the file, [`Error::FileNotOpen`] if the file is closed, and
+    /// [`Error::Io`] if it can't be read.
     pub fn read_game(&mut self, buf: &mut ByteBuffer, offset: u32, length: u32) -> Result<()> {
         if u64::from(offset) + u64::from(length) > self.file_size() {
             return Err(Error::GameOutOfRange { offset, length });
@@ -247,6 +289,11 @@ impl GFile {
         Ok(())
     }
 
+    /// Returns the `length` bytes of game data at `offset`.
+    ///
+    /// # Errors
+    ///
+    /// The same as [`read_game`](Self::read_game).
     pub fn read_game_data(&mut self, offset: u32, length: u32) -> Result<Vec<u8>> {
         let mut buf = ByteBuffer::new();
         self.read_game(&mut buf, offset, length)?;
@@ -258,7 +305,10 @@ impl GFile {
     /// # Errors
     ///
     /// Returns [`Error::GameTooLarge`] if the record is longer than
-    /// 131,071 bytes, the most the index can record.
+    /// 131,071 bytes, the most the index can record,
+    /// [`Error::FileNotOpen`] if the file is closed, [`Error::ReadOnly`] if
+    /// it is open only for reading, and [`Error::Io`] if a full block can't
+    /// be written.
     pub fn add_game(&mut self, buf: &ByteBuffer) -> Result<u32> {
         if self.handle.is_none() {
             return Err(Error::FileNotOpen);
@@ -306,11 +356,22 @@ impl GFile {
         Ok(game_offset)
     }
 
+    /// Appends the game record `data` and returns its offset.
+    ///
+    /// # Errors
+    ///
+    /// The same as [`add_game`](Self::add_game).
     pub fn add_game_data(&mut self, data: &[u8]) -> Result<u32> {
         let buf = ByteBuffer::from_slice(data);
         self.add_game(&buf)
     }
 
+    /// Writes the pending block, if any, and flushes the file.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::ReadOnly`] if the file is open only for reading, and
+    /// [`Error::Io`] if it can't be written.
     pub fn flush(&mut self) -> Result<()> {
         if self.current_block.dirty {
             self.flush_block()?;

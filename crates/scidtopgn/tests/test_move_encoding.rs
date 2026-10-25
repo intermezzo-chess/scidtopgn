@@ -1,8 +1,8 @@
-use scidtopgn::private::{is_move_byte, is_special_byte, skip_tags};
 use scidtopgn::shakmaty::uci::UciMove;
 use scidtopgn::{
-    decode_move, encode_move, ByteBuffer, GameMove, ScidPosition, ENCODE_COMMENT, ENCODE_END_GAME,
-    ENCODE_END_MARKER, ENCODE_NAG, ENCODE_START_MARKER,
+    decode_move, encode_move, parse_move_byte, ByteBuffer, Game, GameMove, ScidPosition,
+    ENCODE_COMMENT, ENCODE_END_GAME, ENCODE_END_MARKER, ENCODE_NAG, ENCODE_START_MARKER,
+    GAME_DECODE_NONE,
 };
 
 /// Encodes the moves, given in UCI, from the standard starting position,
@@ -74,19 +74,31 @@ fn test_null_move_is_a_king_move_to_its_square() {
     assert_eq!(encode_game(&["e2e4", "--", "d2d4"]), [0xCF, 0x00, 0xBF]);
 }
 
+/// The bytes the decoder reads as markers rather than moves.
+const MARKERS: [u8; 5] = [
+    ENCODE_NAG,
+    ENCODE_COMMENT,
+    ENCODE_START_MARKER,
+    ENCODE_END_MARKER,
+    ENCODE_END_GAME,
+];
+
 #[test]
 fn test_special_byte_detection() {
-    assert!(is_special_byte(ENCODE_NAG));
-    assert!(is_special_byte(ENCODE_COMMENT));
-    assert!(is_special_byte(ENCODE_START_MARKER));
-    assert!(is_special_byte(ENCODE_END_MARKER));
-    assert!(is_special_byte(ENCODE_END_GAME));
+    // Each marker is piece 0, the king, with a value no king move uses.
+    for marker in MARKERS {
+        let (piece, value) = parse_move_byte(marker);
+        assert_eq!(piece, 0, "0x{marker:02X} should be piece 0");
+        assert!(value >= ENCODE_NAG, "0x{marker:02X} shouldn't be a move");
+    }
+    assert_eq!(MARKERS, [11, 12, 13, 14, 15]);
 
-    assert!(!is_special_byte(0));
-    assert!(!is_special_byte(1));
-    assert!(!is_special_byte(10));
-    assert!(!is_special_byte(0x10));
-    assert!(!is_special_byte(0xA0));
+    for byte in [0, 1, 10, 0x10, 0xA0] {
+        assert!(
+            !MARKERS.contains(&byte),
+            "0x{byte:02X} shouldn't be a marker"
+        );
+    }
 }
 
 #[test]
@@ -95,30 +107,34 @@ fn test_move_byte_detection() {
         0x00, 0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80, 0x90, 0xA0,
     ];
     for byte in move_bytes {
-        assert!(is_move_byte(byte), "0x{:02X} should be a move byte", byte);
+        let (_, value) = parse_move_byte(byte);
+        assert!(value < ENCODE_NAG, "0x{byte:02X} should be a move byte");
     }
 
-    let special_bytes = [0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F];
+    let special_bytes = [
+        0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0xAF,
+    ];
     for byte in special_bytes {
+        let (_, value) = parse_move_byte(byte);
         assert!(
-            !is_move_byte(byte),
-            "0x{:02X} should NOT be a move byte",
-            byte
+            value >= ENCODE_NAG,
+            "0x{byte:02X} should NOT be a move byte"
         );
     }
 }
 
 #[test]
 fn test_skip_tags() {
-    let tag_data = [
+    // A WhiteTitle tag, the end of the tags, the standard start, 1.e4, and
+    // the end of the game.
+    let mut record = vec![
         0x0a, b'W', b'h', b'i', b't', b'e', b'T', b'i', b't', b'l', b'e', 0x02, b'G', b'M', 0x00,
     ];
+    record.extend([0x00, 0xCF, ENCODE_END_GAME]);
 
-    let mut buf = ByteBuffer::from_slice(&tag_data);
-    skip_tags(&mut buf).unwrap();
-    assert_eq!(
-        buf.position(),
-        tag_data.len(),
-        "Should skip past all tags to null terminator"
-    );
+    let mut game = Game::new();
+    game.decode(&mut ByteBuffer::from_slice(&record), GAME_DECODE_NONE)
+        .unwrap();
+    assert!(game.tags.is_empty(), "tags should be skipped");
+    assert_eq!(game.moves[1].san, "e4", "the moves follow the tags");
 }

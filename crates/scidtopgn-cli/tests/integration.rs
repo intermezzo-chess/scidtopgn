@@ -422,6 +422,27 @@ fn test_cli_import_aborts_on_invalid_game() {
     );
 }
 
+/// Moves `buf` past the tags at the start of a game record: the compact
+/// event date (255), common tags stored by code (241 to 254), and tags
+/// stored by name, up to the 0 that ends them.
+fn skip_tags(buf: &mut scidtopgn::ByteBuffer) {
+    loop {
+        match buf.get_byte().unwrap() {
+            0 => break,
+            255 => buf.skip(3).unwrap(),
+            code if code > 240 => {
+                let len = buf.get_byte().unwrap();
+                buf.skip(usize::from(len)).unwrap();
+            }
+            name_len => {
+                buf.skip(usize::from(name_len)).unwrap();
+                let len = buf.get_byte().unwrap();
+                buf.skip(usize::from(len)).unwrap();
+            }
+        }
+    }
+}
+
 #[test]
 fn test_cli_export_names_corrupt_game() {
     let temp = TempDir::new().expect("Failed to create temp dir");
@@ -436,7 +457,7 @@ fn test_cli_export_names_corrupt_game() {
     let sg4 = db.with_extension("sg4");
     let mut bytes = std::fs::read(&sg4).expect("Failed to read .sg4");
     let mut record = scidtopgn::ByteBuffer::from_slice(&bytes[offset..]);
-    scidtopgn::private::skip_tags(&mut record).expect("Failed to skip tags");
+    skip_tags(&mut record);
     // The flags byte comes before the first move.
     let first_move = offset + record.position() + 1;
     assert_eq!(bytes[first_move], 0xCF, "one starts with 1.e4");
