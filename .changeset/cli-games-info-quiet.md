@@ -9,4 +9,4 @@ default: minor
 - `--quiet` (`-q`) on export, import, and `info` writes nothing to stderr, not even errors. The exit status still shows whether the command failed.
 - `--verbose` now reports progress at each 10% of the games, such as `Processed 50% (50/100 games)`, instead of every 100 games.
 - The help and README now say that `--count` includes logically deleted games, so it can be more than the number of games exported.
-- Options given before a subcommand, as in `scidtopgn --games 1-5 export mydb`, were accepted and ignored. They're now rejected with exit status 2, and the error shows the command with the options moved after the subcommand, or says why they can't be.
+- Options given before a subcommand, as in `scidtopgn --games 1-5 export mydb`, were accepted and ignored. They're now rejected with exit status 2, and the error shows the command with the options moved after the subcommand, or says how to fix it.

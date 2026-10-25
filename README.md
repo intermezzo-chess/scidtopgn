@@ -32,7 +32,7 @@ scidtopgn import games.pgn -o mydb
 > [!NOTE]
 > Specify database paths *without* extensions — use `mydb`, not `mydb.si4`.
 >
-> With a subcommand, put options after it: `scidtopgn export mydb --games 1-5`, not `scidtopgn --games 1-5 export mydb`. Options before a subcommand are rejected with the corrected command.
+> With a subcommand, put options after it: `scidtopgn export mydb --games 1-5`, not `scidtopgn --games 1-5 export mydb`. Options before a subcommand are rejected, and the error shows the corrected command when it can.
 
 ## CLI usage
 

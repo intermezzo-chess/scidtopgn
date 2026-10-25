@@ -129,57 +129,106 @@ fn check_option_placement(args: &[OsString], matches: &ArgMatches) -> Result<(),
         }
     }
 
+    // The command with the options moved after the subcommand and its
+    // arguments, but before any `--`, if clap accepts it.
+    let mut fixed = None;
+    if let (Some(start), true) = (start, problems.is_empty()) {
+        let tail = &args[start..];
+        let end = tail
+            .iter()
+            .position(|arg| arg == "--")
+            .unwrap_or(tail.len());
+        let candidate: Vec<OsString> = args[..1]
+            .iter()
+            .chain(&tail[..end])
+            .chain(&args[1..start])
+            .chain(&tail[end..])
+            .cloned()
+            .collect();
+        match Cli::command()
+            .try_get_matches_from(&candidate)
+            .and_then(|matches| Cli::from_arg_matches(&matches))
+        {
+            Ok(_) => fixed = Some(candidate),
+            Err(err) => {
+                let err = err.to_string();
+                let reason = err.lines().next().unwrap_or_default();
+                let reason = reason.strip_prefix("error: ").unwrap_or(reason);
+                problems.push(format!("with them after '{name}': {reason}"));
+            }
+        }
+    }
+
     let mut message = format!("options must come after the subcommand '{name}'");
     if let Some(start) = start {
-        let before = shell_words(&args[1..start]);
+        let before = describe_words(&args[1..start]);
         message.push_str(&format!(", but these come before it: {before}"));
     }
     message.push_str("\n\nOptions before the subcommand would be ignored, so nothing was run.");
-    match start {
-        Some(start) if problems.is_empty() => {
-            let moved: Vec<OsString> = args[start..]
-                .iter()
-                .chain(&args[1..start])
-                .cloned()
-                .collect();
-            message.push_str(&format!(
-                " Move them to the end of the command:\n\n    {program} {}",
-                shell_words(&moved)
-            ));
+    if !problems.is_empty() {
+        message.push_str(" They can't just be moved after it:\n");
+        for problem in &problems {
+            message.push_str(&format!("\n  - {problem}"));
         }
-        _ => {
-            if !problems.is_empty() {
-                message.push_str(" They can't just be moved to the end:\n");
-                for problem in &problems {
-                    message.push_str(&format!("\n  - {problem}"));
-                }
-            }
-            message.push_str(&format!(
-                "\n\nRun '{program} {name} --help' to see the options '{name}' takes."
-            ));
-        }
+        message.push_str(&format!(
+            "\n\nRun '{program} {name} --help' to see the options '{name}' takes."
+        ));
+    } else if let Some(command) = fixed
+        .as_deref()
+        .and_then(|fixed| literal_words(&fixed[1..]))
+    {
+        message.push_str(&format!(
+            " Move them after the subcommand:\n\n    {program} {command}"
+        ));
+    } else {
+        // Some argument can't be shown so that every shell reads it back
+        // unchanged, so describe the change instead.
+        message.push_str(&format!(" Move them after '{name}' and its arguments."));
     }
     Err(subcommand.error(ErrorKind::ArgumentConflict, message))
 }
 
-/// Joins `args` with spaces, quoting any that the shell would split or
-/// change. On Windows, paths keep their backslashes, and quotes are double,
-/// as both cmd.exe and PowerShell read them.
-fn shell_words(args: &[OsString]) -> String {
-    let plain = |c: char| {
-        c.is_ascii_alphanumeric()
-            || "-_./:=,+@%".contains(c)
-            || (cfg!(windows) && "\\~".contains(c))
+/// Whether `arg` reads back unchanged, unquoted, in sh, bash, zsh, fish,
+/// PowerShell, and cmd.exe. Windows paths may also have backslashes and
+/// short-name tildes.
+fn is_literal(arg: &str) -> bool {
+    let mut chars = arg.chars();
+    // zsh expands a leading `=`, and PowerShell a leading `~`.
+    let Some(first) = chars.next() else {
+        return false;
     };
+    let windows = |c: char| cfg!(windows) && c == '\\';
+    let rest = |c: char| {
+        c.is_ascii_alphanumeric()
+            || "-_./:=".contains(c)
+            // PowerShell reads a comma as an array.
+            || (!cfg!(windows) && c == ',')
+            || windows(c)
+            || (cfg!(windows) && c == '~')
+    };
+    (first.is_ascii_alphanumeric() || "-_./".contains(first) || windows(first)) && chars.all(rest)
+}
+
+/// Joins `args` with spaces if each reads back unchanged in every common
+/// shell, so the result can be run as shown.
+fn literal_words(args: &[OsString]) -> Option<String> {
+    let words: Option<Vec<&str>> = args
+        .iter()
+        .map(|arg| arg.to_str().filter(|arg| is_literal(arg)))
+        .collect();
+    words.map(|words| words.join(" "))
+}
+
+/// Joins `args` with spaces for a message, quoting any that aren't literal.
+/// The quoting is for reading, not for a shell.
+fn describe_words(args: &[OsString]) -> String {
     args.iter()
         .map(|arg| {
             let arg = arg.to_string_lossy();
-            if !arg.is_empty() && arg.chars().all(plain) {
+            if is_literal(&arg) {
                 arg.into_owned()
-            } else if cfg!(windows) {
-                format!("\"{arg}\"")
             } else {
-                format!("'{}'", arg.replace('\'', "'\\''"))
+                format!("\"{arg}\"")
             }
         })
         .collect::<Vec<_>>()
@@ -271,13 +320,15 @@ pub struct InfoArgs {
 mod tests {
     use super::*;
 
+    fn os_args(args: &[&str]) -> Vec<OsString> {
+        std::iter::once("scidtopgn")
+            .chain(args.iter().copied())
+            .map(OsString::from)
+            .collect()
+    }
+
     fn parse(args: &[&str]) -> Result<Cli, clap::Error> {
-        Cli::try_parse_args_from(
-            std::iter::once("scidtopgn")
-                .chain(args.iter().copied())
-                .map(OsString::from)
-                .collect(),
-        )
+        Cli::try_parse_args_from(os_args(args))
     }
 
     /// The message for `args`, which must be rejected for misplaced options.
@@ -285,6 +336,13 @@ mod tests {
         let err = parse(args).err().expect("should be rejected");
         assert_eq!(err.kind(), ErrorKind::ArgumentConflict, "{err}");
         err.to_string()
+    }
+
+    /// The command the message for `args` suggests, if any.
+    fn suggestion(args: &[&str]) -> Option<String> {
+        let message = misplaced(args);
+        let (_, rest) = message.split_once("Move them after the subcommand:\n\n    ")?;
+        Some(rest.lines().next().unwrap().to_owned())
     }
 
     #[test]
@@ -298,6 +356,7 @@ mod tests {
             &["mydb", "--games", "1-5", "-v"][..],
             &["-v", "--games", "1-5", "mydb"],
             &["export", "mydb", "--games", "1-5", "-q"],
+            &["export", "-q", "--", "mydb"],
             &["import", "in.pgn", "-o", "db", "--quiet"],
             &["info", "mydb", "-q"],
         ] {
@@ -307,55 +366,54 @@ mod tests {
 
     #[test]
     fn suggests_moving_options_after_the_subcommand() {
-        for (args, fixed) in [
+        let mut cases = vec![
             (
                 &["--games", "6", "export", "mydb"][..],
-                "scidtopgn export mydb --games 6",
+                "export mydb --games 6",
             ),
             (
                 &["-v", "export", "mydb", "-o", "out.pgn"],
-                "scidtopgn export mydb -o out.pgn -v",
+                "export mydb -o out.pgn -v",
             ),
             (
                 &["--quiet", "import", "in.pgn", "-o", "db"],
-                "scidtopgn import in.pgn -o db --quiet",
+                "import in.pgn -o db --quiet",
             ),
-            (&["-q", "info", "mydb"], "scidtopgn info mydb -q"),
+            (&["-q", "info", "mydb"], "info mydb -q"),
             // The option's value has the subcommand's name.
-            (
-                &["-o", "export", "export", "mydb"],
-                "scidtopgn export mydb -o export",
-            ),
+            (&["-o", "export", "export", "mydb"], "export mydb -o export"),
             (
                 &["--games=1-2", "-qo", "out", "export", "mydb"],
-                "scidtopgn export mydb --games=1-2 -qo out",
+                "export mydb --games=1-2 -qo out",
             ),
-            (
-                &["-o", "my file's.pgn", "export", "mydb"],
-                if cfg!(windows) {
-                    r#"scidtopgn export mydb -o "my file's.pgn""#
-                } else {
-                    r"scidtopgn export mydb -o 'my file'\''s.pgn'"
-                },
-            ),
-            (
+            // Options go before the end of options.
+            (&["-q", "export", "--", "mydb"], "export -q -- mydb"),
+        ];
+        if cfg!(windows) {
+            cases.push((
                 &["-o", r"C:\Users\RUNNER~1\out.pgn", "export", "mydb"],
-                if cfg!(windows) {
-                    r"scidtopgn export mydb -o C:\Users\RUNNER~1\out.pgn"
-                } else {
-                    r"scidtopgn export mydb -o 'C:\Users\RUNNER~1\out.pgn'"
-                },
-            ),
-        ] {
-            let message = misplaced(args);
-            assert!(
-                message.contains(&format!("\n    {fixed}\n")),
-                "{args:?}: {message}"
-            );
-            assert!(
-                message.contains("would be ignored, so nothing was run"),
-                "{message}"
-            );
+                r"export mydb -o C:\Users\RUNNER~1\out.pgn",
+            ));
+        } else {
+            cases.push((
+                &["--games", "1-5,8", "export", "mydb"],
+                "export mydb --games 1-5,8",
+            ));
+        }
+
+        for (args, fixed) in cases {
+            let command = suggestion(args).unwrap_or_else(|| panic!("{args:?}: no command"));
+            assert_eq!(command, format!("scidtopgn {fixed}"), "{args:?}");
+
+            // Each word reads back unchanged, so the command runs as shown,
+            // with the same arguments in a different order.
+            let words: Vec<&str> = command.split(' ').skip(1).collect();
+            assert!(parse(&words).is_ok(), "{args:?}: {command}");
+            let mut original = args.to_vec();
+            let mut moved = words.clone();
+            original.sort_unstable();
+            moved.sort_unstable();
+            assert_eq!(moved, original, "{args:?}");
         }
 
         let message = misplaced(&["--games", "6", "-v", "export", "mydb"]);
@@ -367,29 +425,76 @@ mod tests {
             "{message}"
         );
         assert!(
+            message.contains("would be ignored, so nothing was run"),
+            "{message}"
+        );
+        assert!(
             message.contains("Usage: scidtopgn export [OPTIONS] <DATABASE>"),
             "{message}"
         );
     }
 
     #[test]
-    fn explains_options_that_cannot_be_moved() {
-        let message = misplaced(&["--count", "-v", "info", "mydb"]);
-        assert!(
-            message.contains("\n  - 'info' has no --count option\n"),
-            "{message}"
-        );
-        assert!(
-            message.contains("\n  - 'info' has no --verbose option\n"),
-            "{message}"
-        );
-        assert!(message.contains("Run 'scidtopgn info --help'"), "{message}");
-        assert!(!message.contains("Move them"), "{message}");
+    fn shows_no_command_when_a_shell_could_change_an_argument() {
+        let mut values = vec![
+            "my file.pgn",
+            "it's.pgn",
+            "=ls",
+            "$HOME.pgn",
+            r"D:\Chess\$(Get-Date).pgn",
+            "%TEMP%.pgn",
+            "~/out.pgn",
+            "@out.pgn",
+            "out*.pgn",
+            "",
+        ];
+        if cfg!(windows) {
+            values.push("1-5,8");
+        } else {
+            values.push(r"C:\out.pgn");
+        }
+        for value in values {
+            let args = ["-o", value, "export", "mydb"];
+            assert_eq!(suggestion(&args), None, "{value:?}");
+            let message = misplaced(&args);
+            assert!(
+                message.contains(&format!("before it: -o \"{value}\"\n")),
+                "{message}"
+            );
+            assert!(
+                message.contains("Move them after 'export' and its arguments."),
+                "{message}"
+            );
+        }
+    }
 
-        let message = misplaced(&["-o", "x", "import", "in.pgn", "-o", "db"]);
-        assert!(
-            message.contains("\n  - --output is also given after 'import'\n"),
-            "{message}"
-        );
+    #[test]
+    fn explains_options_that_cannot_be_moved() {
+        for (args, problems) in [
+            (
+                &["--count", "-v", "info", "mydb"][..],
+                &["'info' has no --count option", "'info' has no --verbose option"][..],
+            ),
+            (
+                &["-o", "x", "import", "in.pgn", "-o", "db"],
+                &["--output is also given after 'import'"],
+            ),
+            (
+                &["--quiet", "export", "mydb", "-v"],
+                &["with them after 'export': the argument '--verbose' cannot be used with '--quiet'"],
+            ),
+            (
+                &["--games", "1", "export", "mydb", "--count"],
+                &["with them after 'export': the argument '--count' cannot be used with '--games <LIST>'"],
+            ),
+        ] {
+            let message = misplaced(args);
+            for problem in problems {
+                assert!(message.contains(&format!("\n  - {problem}\n")), "{message}");
+            }
+            let name = args.iter().find(|arg| ["export", "import", "info"].contains(arg)).unwrap();
+            assert!(message.contains(&format!("Run 'scidtopgn {name} --help'")), "{message}");
+            assert_eq!(suggestion(args), None, "{message}");
+        }
     }
 }
