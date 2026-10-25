@@ -1,4 +1,4 @@
-use scidtopgn::{Database, Date, Game, GameResult};
+use scidtopgn::{Database, Date, Game, GameResult, Index};
 
 fn get_test_data_path(name: &str) -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -81,6 +81,74 @@ fn test_iterate_five_games() {
     }
 
     assert_eq!(count, 5);
+}
+
+/// Copies `five` into `dir` and sets the logical delete flag on the `deleted`
+/// games, leaving every record in place.
+fn five_with_deleted(dir: &std::path::Path, deleted: &[u32]) -> std::path::PathBuf {
+    let src = get_test_data_path("five");
+    let dst = dir.join("five");
+    for ext in ["si4", "sn4", "sg4"] {
+        std::fs::copy(src.with_extension(ext), dst.with_extension(ext)).unwrap();
+    }
+
+    let si4 = dst.with_extension("si4");
+    let mut index = Index::open(&si4).unwrap();
+    for &n in deleted {
+        index.get_entry_mut(n).unwrap().set_delete_flag(true);
+    }
+    index
+        .flush(&mut std::fs::File::create(&si4).unwrap())
+        .unwrap();
+    dst
+}
+
+fn all_pgn(db: &mut Database) -> Vec<String> {
+    db.games().map(|game| game.unwrap().to_pgn()).collect()
+}
+
+/// The PGN of the games that aren't logically deleted, in order.
+fn nondeleted_pgn(db: &mut Database) -> Vec<String> {
+    let numbers: Vec<u32> = (0..db.num_games())
+        .filter(|&n| db.get_entry(n).is_some_and(|e| !e.get_delete_flag()))
+        .collect();
+    numbers
+        .into_iter()
+        .map(|n| db.get_game(n).unwrap().to_pgn())
+        .collect()
+}
+
+#[test]
+fn test_all_record_api_includes_deleted_games() {
+    let stored = all_pgn(&mut Database::open(get_test_data_path("five")).unwrap());
+    let temp = tempfile::TempDir::new().unwrap();
+    let mut db = Database::open(five_with_deleted(temp.path(), &[1, 3])).unwrap();
+
+    let flags: Vec<_> = (0..5)
+        .map(|n| db.get_entry(n).unwrap().get_delete_flag())
+        .collect();
+    assert_eq!(flags, [false, true, false, true, false]);
+
+    assert_eq!(db.num_games(), 5, "num_games counts deleted games");
+    assert_eq!(all_pgn(&mut db), stored, "games() yields deleted games");
+    assert_eq!(db.get_game(3).unwrap().to_pgn(), stored[3]);
+
+    assert_eq!(
+        nondeleted_pgn(&mut db),
+        [stored[0].clone(), stored[2].clone(), stored[4].clone()],
+        "filtering keeps the other games in order"
+    );
+}
+
+#[test]
+fn test_all_deleted_database_reads_every_record() {
+    let stored = all_pgn(&mut Database::open(get_test_data_path("five")).unwrap());
+    let temp = tempfile::TempDir::new().unwrap();
+    let mut db = Database::open(five_with_deleted(temp.path(), &[0, 1, 2, 3, 4])).unwrap();
+
+    assert_eq!(db.num_games(), 5);
+    assert_eq!(all_pgn(&mut db), stored);
+    assert!(nondeleted_pgn(&mut db).is_empty());
 }
 
 #[test]
