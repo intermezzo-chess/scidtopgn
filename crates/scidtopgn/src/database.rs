@@ -13,10 +13,6 @@ use crate::nfile::NFile;
 use crate::position::{fen, ScidPosition};
 use crate::Date;
 
-/// The longest game record a database can store. The index stores a
-/// record's length in 17 bits.
-const MAX_GAME_LENGTH: usize = (1 << 17) - 1;
-
 pub struct Database {
     path: PathBuf,
     index: Index,
@@ -92,11 +88,11 @@ impl Database {
         };
 
         let offset = entry.get_offset();
-        let length = entry.get_length() as u16;
+        let length = entry.get_length();
 
         let mut buf = ByteBuffer::new();
         self.gfile
-            .read_game(&mut buf, offset, length as u32)
+            .read_game(&mut buf, offset, length)
             .map_err(in_game)?;
         buf.back_to_start();
 
@@ -169,13 +165,6 @@ impl Database {
     /// 131,071 bytes, the most the index can record.
     pub fn add_game(&mut self, game: &Game) -> Result<u32> {
         let encoded_data = self.encode_game(game)?;
-        if encoded_data.len() > MAX_GAME_LENGTH {
-            return Err(Error::GameTooLarge {
-                length: encoded_data.len(),
-                max: MAX_GAME_LENGTH,
-            });
-        }
-
         let buf = ByteBuffer::from_slice(&encoded_data);
         let offset = self.gfile.add_game(&buf)?;
 

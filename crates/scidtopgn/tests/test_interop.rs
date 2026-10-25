@@ -8,7 +8,9 @@
 //! converter from `tests/data/castling.pgn`, which castles after the king has
 //! moved and returned, as SCID allows. `tests/data/annotated` was written by
 //! the C++ reference converter from `tests/data/annotated.pgn`, which has
-//! NAGs and comments in the main line and in variations.
+//! NAGs and comments in the main line and in variations. `tests/data/long`
+//! was written by SCID vs. PC's `pgnscid` from `tests/data/long.pgn`, whose
+//! second game's record is 72,015 bytes long.
 
 use std::path::PathBuf;
 
@@ -177,7 +179,7 @@ fn test_writes_moves_like_scid() {
         .collect();
     assert_eq!(written, expected);
 
-    for name in ["five", "castling", "annotated"] {
+    for name in ["five", "castling", "annotated", "long"] {
         let expected: Vec<_> = records(&data_path(name))
             .iter()
             .map(|r| move_section(r))
@@ -213,8 +215,21 @@ fn test_reads_scid_written_annotations() {
 }
 
 #[test]
+fn test_reads_a_scid_written_record_longer_than_64_kib() {
+    let db = Database::open(data_path("long")).unwrap();
+    assert_eq!(db.get_entry(1).unwrap().get_length(), 72_015);
+
+    let exported: Vec<String> = read_database("long")
+        .iter()
+        .map(exported_movetext)
+        .collect();
+    let expected: Vec<String> = read_pgn("long.pgn").iter().map(exported_movetext).collect();
+    assert_eq!(exported, expected);
+}
+
+#[test]
 fn test_scid_to_pgn_to_scid() {
-    for name in ["five", "edge", "castling", "annotated"] {
+    for name in ["five", "edge", "castling", "annotated", "long"] {
         let original: Vec<_> = records(&data_path(name))
             .iter()
             .map(|r| move_section(r))
@@ -230,7 +245,13 @@ fn test_scid_to_pgn_to_scid() {
 
 #[test]
 fn test_pgn_to_scid_to_pgn() {
-    for name in ["five.pgn", "edge.pgn", "castling.pgn", "annotated.pgn"] {
+    for name in [
+        "five.pgn",
+        "edge.pgn",
+        "castling.pgn",
+        "annotated.pgn",
+        "long.pgn",
+    ] {
         let games = read_pgn(name);
         let temp = TempDir::new().unwrap();
         let path = temp.path().join("roundtrip");

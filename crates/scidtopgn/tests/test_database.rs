@@ -252,7 +252,6 @@ fn move_comments(game: &Game) -> Vec<(String, String)> {
 
 #[test]
 fn test_long_comment_round_trips() {
-    // One comment per game: two would make a record over 64 KiB (#52).
     let long = "x".repeat(60_000);
     for (movetext, san) in [
         (format!("1. e4 {{{long}}} e5 *"), "e4"),
@@ -277,6 +276,46 @@ fn test_long_comment_round_trips() {
         );
         assert_eq!(reimported.moves.len(), game.moves.len(), "{san}");
     }
+}
+
+/// A game whose SCID record is `length` bytes long.
+fn game_with_record_length(length: usize) -> Game {
+    let game = |comment: usize| {
+        let comment = "x".repeat(comment);
+        scidtopgn::parse_single_game(&format!("[Event \"x\"]\n\n1. e4 {{{comment}}} *\n")).unwrap()
+    };
+    let temp = tempfile::TempDir::new().unwrap();
+    let mut db = Database::create(temp.path().join("measure")).unwrap();
+    db.add_game(&game(1)).unwrap();
+    let rest = db.get_entry(0).unwrap().get_length() as usize - 1;
+    game(length - rest)
+}
+
+#[test]
+fn test_records_up_to_the_longest_the_index_can_record_round_trip() {
+    for length in [65_535, 65_536, 131_071] {
+        let game = game_with_record_length(length);
+        let temp = tempfile::TempDir::new().unwrap();
+        let path = temp.path().join("long");
+        let mut db = Database::create(&path).unwrap();
+        db.add_game(&game).unwrap();
+        db.close().unwrap();
+
+        let mut db = Database::open(&path).unwrap();
+        assert_eq!(db.get_entry(0).unwrap().get_length() as usize, length);
+        let reread = db.get_game(0).unwrap();
+        assert_eq!(reread.to_pgn(), game.to_pgn(), "{length}");
+    }
+
+    let temp = tempfile::TempDir::new().unwrap();
+    let mut db = Database::create(temp.path().join("too_long")).unwrap();
+    assert!(matches!(
+        db.add_game(&game_with_record_length(131_072)),
+        Err(scidtopgn::Error::GameTooLarge {
+            length: 131_072,
+            max: 131_071
+        })
+    ));
 }
 
 #[test]

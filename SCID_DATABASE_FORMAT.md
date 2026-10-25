@@ -504,6 +504,8 @@ The .sg4 file is organized in 131,072-byte (128KB) blocks:
 └─────────────────────────────────────────────────────┘
 ```
 
+A game record is at most 131,071 bytes, the most its 17-bit index length can hold. When a game doesn't fit in the rest of the current block, SCID starts it at the next block, so records SCID writes don't cross a block boundary. SCID reads a record at any offset and length, and so does `GFile::read_game`.
+
 #### Game Record Structure
 
 Each game record has variable length and contains:
