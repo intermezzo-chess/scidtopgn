@@ -856,9 +856,14 @@ fn test_cli_verbose_progress() {
 #[test]
 fn test_cli_round_trip_keeps_games_without_moves() {
     let temp = TempDir::new().expect("Failed to create temp dir");
-    let pgn = "[Event \"A\"]\n[Result \"*\"]\n\n*\n\n\
-               [Event \"B\"]\n[Result \"1-0\"]\n\n{only a comment} 1-0\n";
-    let (db_path, _) = import_pgn(temp.path(), pgn);
+    let fen = "[SetUp \"1\"]\n[FEN \"4k3/8/8/8/8/8/8/4K3 w - - 0 1\"]\n";
+    let pgn = format!(
+        "[Event \"A\"]\n[Result \"*\"]\n\n*\n\n\
+         [Event \"B\"]\n[Result \"1-0\"]\n\n{{only a comment}} 1-0\n\n\
+         [Event \"C\"]\n[Result \"1/2-1/2\"]\n{fen}\n1/2-1/2\n"
+    );
+    let (db_path, _) = import_pgn(temp.path(), &pgn);
+    assert_eq!(imported_events(&db_path), ["A", "B", "C"]);
 
     let exported = cli().arg(&db_path).output().expect("Failed to run CLI");
     assert!(exported.status.success());
@@ -866,6 +871,10 @@ fn test_cli_round_trip_keeps_games_without_moves() {
     assert!(stdout.contains("[Result \"*\"]\n\n*\n"), "{stdout}");
     assert!(
         stdout.contains("[Result \"1-0\"]\n\n{only a comment}\n1-0\n"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains(&format!("[Result \"1/2-1/2\"]\n{fen}\n1/2-1/2\n")),
         "{stdout}"
     );
 }
