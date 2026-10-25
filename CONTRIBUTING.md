@@ -63,11 +63,16 @@ reference the issue the PR addresses.
 
 ## Test data
 
-The fixtures in `tests/data/` (`one`, `five`, `edge`, `castling`, and `annotated`, each
+The fixtures in `tests/data/` (`one`, `five`, `edge`, `castling`, `annotated`, and `long`, each
 with `.si4`, `.sn4`, `.sg4`, and a matching `.pgn`) are shared by both crates'
 integration tests. `castling` and `annotated` were written by the C++ reference
 converter from `castling.pgn` and `annotated.pgn`, like `edge`. `annotated` has
-NAGs and comments in the main line and in variations. `notation.pgn` has one game per case in
+NAGs and comments in the main line and in variations. `long` was written from
+`long.pgn` by `pgnscid -f long.pgn long`, SCID vs. PC's PGN converter built from
+`scidvspc/`, because the C++ reference converter can't encode a record over
+4,096 bytes. Its second game's record is 72,015 bytes, more than a 16-bit length
+holds. SCID keeps at most 16,000 characters of each PGN comment, so its text is
+split over several comments. `notation.pgn` has one game per case in
 [docs/PGN_IMPORT.md](docs/PGN_IMPORT.md). `.gitignore` excludes `*.si4`, `*.sn4`, and `*.sg4` everywhere, so new
 fixtures must be added with `git add -f`.
 
