@@ -18,6 +18,7 @@ Run the same checks as CI. `--locked` fails if `Cargo.lock` would change.
 ```sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
+RUSTDOCFLAGS="-D warnings" cargo doc -p scidtopgn --no-deps --locked
 cargo test --workspace --locked
 ```
 
