@@ -1,4 +1,8 @@
-use clap::{Args, Parser, Subcommand};
+use std::ffi::OsString;
+
+use clap::error::ErrorKind;
+use clap::parser::ValueSource;
+use clap::{ArgMatches, Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 
 use crate::report::Verbosity;
 use crate::selection::GameSelection;
@@ -42,6 +46,21 @@ pub struct Cli {
 }
 
 impl Cli {
+    /// Parses the command line like [`Parser::parse`], and also rejects
+    /// options given before a subcommand, which would otherwise be ignored.
+    /// Exits with a usage error on failure.
+    pub fn parse_args() -> Self {
+        Self::try_parse_args_from(std::env::args_os().collect()).unwrap_or_else(|err| err.exit())
+    }
+
+    /// Parses `args`, starting with the program name, as
+    /// [`parse_args`](Self::parse_args) does.
+    pub fn try_parse_args_from(args: Vec<OsString>) -> Result<Self, clap::Error> {
+        let matches = Self::command().try_get_matches_from(&args)?;
+        check_option_placement(&args, &matches)?;
+        Self::from_arg_matches(&matches)
+    }
+
     /// Returns the command to run, treating a database without a
     /// subcommand as `export`, or `None` if the arguments name neither or
     /// both.
@@ -60,6 +79,104 @@ impl Cli {
             _ => None,
         }
     }
+}
+
+/// Rejects options given before the subcommand, as in
+/// `scidtopgn --games 1-5 export mydb`. clap reads them as the top-level
+/// options of the default export, so the subcommand would run without them.
+fn check_option_placement(args: &[OsString], matches: &ArgMatches) -> Result<(), clap::Error> {
+    let Some((name, sub_matches)) = matches.subcommand() else {
+        return Ok(());
+    };
+    // A database before the subcommand is reported when the command runs.
+    if matches.contains_id("database") {
+        return Ok(());
+    }
+    let given_here = |m: &ArgMatches, id: &str| {
+        m.try_contains_id(id).unwrap_or(false)
+            && m.value_source(id) == Some(ValueSource::CommandLine)
+    };
+    let mut cli = Cli::command();
+    cli.build();
+    let program = cli.get_name().to_owned();
+    // The options given before the subcommand.
+    let misplaced: Vec<clap::Arg> = cli
+        .get_arguments()
+        .filter(|arg| !arg.is_positional() && given_here(matches, arg.get_id().as_str()))
+        .cloned()
+        .collect();
+    if misplaced.is_empty() {
+        return Ok(());
+    }
+
+    let subcommand = cli
+        .find_subcommand_mut(name)
+        .expect("clap matched this subcommand");
+
+    // The subcommand is the first argument with its name that isn't the
+    // value of an option before it.
+    let start = (1..args.len())
+        .find(|&i| args[i] == name && Cli::command().try_get_matches_from(&args[..i]).is_ok());
+
+    let mut problems = Vec::new();
+    for arg in &misplaced {
+        let id = arg.get_id().as_str();
+        let option = format!("--{}", arg.get_long().unwrap_or(id));
+        if !subcommand.get_arguments().any(|arg| arg.get_id() == id) {
+            problems.push(format!("'{name}' has no {option} option"));
+        } else if given_here(sub_matches, id) {
+            problems.push(format!("{option} is also given after '{name}'"));
+        }
+    }
+
+    let mut message = format!("options must come after the subcommand '{name}'");
+    if let Some(start) = start {
+        let before = shell_words(&args[1..start]);
+        message.push_str(&format!(", but these come before it: {before}"));
+    }
+    message.push_str("\n\nOptions before the subcommand would be ignored, so nothing was run.");
+    match start {
+        Some(start) if problems.is_empty() => {
+            let moved: Vec<OsString> = args[start..]
+                .iter()
+                .chain(&args[1..start])
+                .cloned()
+                .collect();
+            message.push_str(&format!(
+                " Move them to the end of the command:\n\n    {program} {}",
+                shell_words(&moved)
+            ));
+        }
+        _ => {
+            if !problems.is_empty() {
+                message.push_str(" They can't just be moved to the end:\n");
+                for problem in &problems {
+                    message.push_str(&format!("\n  - {problem}"));
+                }
+            }
+            message.push_str(&format!(
+                "\n\nRun '{program} {name} --help' to see the options '{name}' takes."
+            ));
+        }
+    }
+    Err(subcommand.error(ErrorKind::ArgumentConflict, message))
+}
+
+/// Joins `args` with spaces, quoting any that the shell would split or
+/// change.
+fn shell_words(args: &[OsString]) -> String {
+    let plain = |c: char| c.is_ascii_alphanumeric() || "-_./:=,+@%".contains(c);
+    args.iter()
+        .map(|arg| {
+            let arg = arg.to_string_lossy();
+            if !arg.is_empty() && arg.chars().all(plain) {
+                arg.into_owned()
+            } else {
+                format!("'{}'", arg.replace('\'', "'\\''"))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[derive(Subcommand)]
@@ -141,4 +258,119 @@ pub struct InfoArgs {
 
     #[arg(short, long, help = QUIET_HELP)]
     pub quiet: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> Result<Cli, clap::Error> {
+        Cli::try_parse_args_from(
+            std::iter::once("scidtopgn")
+                .chain(args.iter().copied())
+                .map(OsString::from)
+                .collect(),
+        )
+    }
+
+    /// The message for `args`, which must be rejected for misplaced options.
+    fn misplaced(args: &[&str]) -> String {
+        let err = parse(args).err().expect("should be rejected");
+        assert_eq!(err.kind(), ErrorKind::ArgumentConflict, "{err}");
+        err.to_string()
+    }
+
+    #[test]
+    fn verify_cli() {
+        Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn accepts_options_after_the_subcommand_or_without_one() {
+        for args in [
+            &["mydb", "--games", "1-5", "-v"][..],
+            &["-v", "--games", "1-5", "mydb"],
+            &["export", "mydb", "--games", "1-5", "-q"],
+            &["import", "in.pgn", "-o", "db", "--quiet"],
+            &["info", "mydb", "-q"],
+        ] {
+            assert!(parse(args).is_ok(), "{args:?}");
+        }
+    }
+
+    #[test]
+    fn suggests_moving_options_after_the_subcommand() {
+        for (args, fixed) in [
+            (
+                &["--games", "6", "export", "mydb"][..],
+                "scidtopgn export mydb --games 6",
+            ),
+            (
+                &["-v", "export", "mydb", "-o", "out.pgn"],
+                "scidtopgn export mydb -o out.pgn -v",
+            ),
+            (
+                &["--quiet", "import", "in.pgn", "-o", "db"],
+                "scidtopgn import in.pgn -o db --quiet",
+            ),
+            (&["-q", "info", "mydb"], "scidtopgn info mydb -q"),
+            // The option's value has the subcommand's name.
+            (
+                &["-o", "export", "export", "mydb"],
+                "scidtopgn export mydb -o export",
+            ),
+            (
+                &["--games=1-2", "-qo", "out", "export", "mydb"],
+                "scidtopgn export mydb --games=1-2 -qo out",
+            ),
+            (
+                &["-o", "my file's.pgn", "export", "mydb"],
+                r"scidtopgn export mydb -o 'my file'\''s.pgn'",
+            ),
+        ] {
+            let message = misplaced(args);
+            assert!(
+                message.contains(&format!("\n    {fixed}\n")),
+                "{args:?}: {message}"
+            );
+            assert!(
+                message.contains("would be ignored, so nothing was run"),
+                "{message}"
+            );
+        }
+
+        let message = misplaced(&["--games", "6", "-v", "export", "mydb"]);
+        assert!(
+            message.starts_with(
+                "error: options must come after the subcommand 'export', but these come \
+                 before it: --games 6 -v\n"
+            ),
+            "{message}"
+        );
+        assert!(
+            message.contains("Usage: scidtopgn export [OPTIONS] <DATABASE>"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn explains_options_that_cannot_be_moved() {
+        let message = misplaced(&["--count", "-v", "info", "mydb"]);
+        assert!(
+            message.contains("\n  - 'info' has no --count option\n"),
+            "{message}"
+        );
+        assert!(
+            message.contains("\n  - 'info' has no --verbose option\n"),
+            "{message}"
+        );
+        assert!(message.contains("Run 'scidtopgn info --help'"), "{message}");
+        assert!(!message.contains("Move them"), "{message}");
+
+        let message = misplaced(&["-o", "x", "import", "in.pgn", "-o", "db"]);
+        assert!(
+            message.contains("\n  - --output is also given after 'import'\n"),
+            "{message}"
+        );
+    }
 }

@@ -1246,3 +1246,31 @@ fn test_cli_quiet_hides_errors() {
     }
     assert!(!Path::new(db).with_extension("si4").exists());
 }
+
+#[test]
+fn test_cli_rejects_options_before_a_subcommand() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let out = temp.path().join("out.pgn");
+    let out = out.to_str().expect("temp path should be UTF-8");
+    for (args, fixed) in [
+        (
+            &["--games", "6", "export", "tests/data/five", "-o", out][..],
+            format!("scidtopgn export tests/data/five -o {out} --games 6"),
+        ),
+        (
+            &["--games", "1", "export", "tests/data/five", "-o", out],
+            format!("scidtopgn export tests/data/five -o {out} --games 1"),
+        ),
+        (
+            &["--quiet", "export", "tests/data/missing"],
+            "scidtopgn export tests/data/missing --quiet".to_string(),
+        ),
+    ] {
+        let output = cli().args(args).output().expect("Failed to run CLI");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(2), "{args:?}: {stderr}");
+        assert!(stderr.contains(&fixed), "{args:?}: {stderr}");
+        assert!(output.stdout.is_empty(), "{args:?}");
+        assert!(!Path::new(out).exists(), "{args:?}: nothing is exported");
+    }
+}

@@ -7,14 +7,13 @@ use std::io::{BufWriter, Read, Write};
 use std::process::ExitCode;
 
 use anyhow::{Context, Result};
-use clap::Parser;
 
 use args::{Cli, Command, ExportArgs, ImportArgs, InfoArgs};
 use report::{Progress, Verbosity};
 use scidtopgn::{Database, Index, NFile, NameType, PgnParser};
 
 fn main() -> ExitCode {
-    let cli = Cli::parse();
+    let cli = Cli::parse_args();
     let quiet = cli.quiet;
     let Some(command) = cli.into_command() else {
         if !quiet {
