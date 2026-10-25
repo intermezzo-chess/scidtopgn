@@ -119,7 +119,7 @@ pub struct Game {
     /// The position the game starts from, or `None` for the standard
     /// starting position.
     pub start_position: Option<Chess>,
-    /// The number of half-moves in the main line.
+    /// The number of half-moves in the main line, up to 65,535.
     pub num_half_moves: u16,
     /// Problems found while reading the game from PGN that didn't stop it
     /// from being read. Empty for a game read from a SCID database.
@@ -423,7 +423,8 @@ impl Game {
         self.moves.push(node);
         self.current_move = Some(new_idx);
         if main_line {
-            self.num_half_moves += 1;
+            // A main line of null moves can be longer than the count holds.
+            self.num_half_moves = self.num_half_moves.saturating_add(1);
         }
     }
 

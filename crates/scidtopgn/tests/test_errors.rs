@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use scidtopgn::index::INDEX_HEADER_SIZE;
 use scidtopgn::{
     parse_single_game, ByteBuffer, CorruptGameKind, Database, DatabaseFile, Error, GFile, Game,
-    InvalidMoveByte, NameBase, NameType, ENCODE_END_GAME, ENCODE_END_MARKER, ENCODE_START_MARKER,
-    GAME_DECODE_ALL, GF_BLOCKSIZE,
+    InvalidMoveByte, NameBase, NameType, ENCODE_COMMENT, ENCODE_END_GAME, ENCODE_END_MARKER,
+    ENCODE_START_MARKER, GAME_DECODE_ALL, GF_BLOCKSIZE,
 };
 use tempfile::TempDir;
 
@@ -316,4 +316,64 @@ fn test_invalid_start_position_gives_its_offset() {
             other => panic!("expected an invalid start position, got {other:?}"),
         }
     }
+}
+
+#[test]
+fn test_unterminated_strings_end_early() {
+    let cases = [
+        // A comment with no text, then one with text but no terminator.
+        (vec![0, 0, E4, ENCODE_COMMENT, ENCODE_END_GAME], 5),
+        (vec![0, 0, E4, ENCODE_COMMENT, ENCODE_END_GAME, b'x'], 6),
+        // A starting FEN with no terminator.
+        (b"\0\x018/8".to_vec(), 5),
+    ];
+    for (record, offset) in cases {
+        assert_eq!(
+            corrupt_kind(&record),
+            (offset, CorruptGameKind::UnexpectedEnd),
+            "{record:?}"
+        );
+    }
+}
+
+#[test]
+fn test_get_game_rejects_an_unterminated_comment() {
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().join("comment");
+    let mut db = Database::create(&path).unwrap();
+    db.add_game(&parse_single_game("[Event \"x\"]\n\n1. e4 {x} *\n").unwrap())
+        .unwrap();
+    db.flush().unwrap();
+    drop(db);
+
+    // The game is the whole game file and ends with its comment's
+    // terminator. Drop the terminator.
+    let length = std::fs::metadata(path.with_extension("sg4")).unwrap().len() as u16;
+    edit(&path, "sg4", |bytes| {
+        assert_eq!(bytes.pop(), Some(0));
+    });
+    set_first_entry(&path, 0, length - 1);
+
+    assert!(matches!(
+        first_game_error(&path),
+        Error::CorruptGame {
+            kind: CorruptGameKind::UnexpectedEnd,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn test_more_half_moves_than_the_count_holds() {
+    // 65,536 null moves, one more than `num_half_moves` holds.
+    let count = usize::from(u16::MAX) + 1;
+    let mut record = vec![0, 0];
+    record.extend(vec![0x00; count]);
+    record.push(ENCODE_END_GAME);
+    let game = decode(&record).unwrap();
+    assert_eq!(game.num_half_moves, u16::MAX);
+
+    let pgn = format!("[Event \"x\"]\n\n{}*\n", "-- ".repeat(count));
+    let game = parse_single_game(&pgn).unwrap();
+    assert_eq!(game.num_half_moves, u16::MAX);
 }

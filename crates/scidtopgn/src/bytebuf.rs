@@ -144,15 +144,20 @@ impl ByteBuffer {
         Ok(())
     }
 
+    /// Reads a string up to its terminating NUL, and the NUL.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::CorruptGame`] if the data ends before the NUL.
     pub fn get_terminated_string(&mut self) -> Result<String> {
         let start = self.read_pos;
-        while self.read_pos < self.write_pos && self.buffer[self.read_pos] != 0 {
-            self.read_pos += 1;
-        }
-        let s = String::from_utf8_lossy(&self.buffer[start..self.read_pos]).to_string();
-        if self.read_pos < self.write_pos {
-            self.read_pos += 1;
-        }
+        let data = &self.buffer[start..self.write_pos];
+        let Some(length) = data.iter().position(|&b| b == 0) else {
+            self.read_pos = self.write_pos;
+            return Err(self.unexpected_end());
+        };
+        let s = String::from_utf8_lossy(&data[..length]).to_string();
+        self.read_pos += length + 1;
         Ok(s)
     }
 
