@@ -262,5 +262,63 @@ mod tests {
         assert!(!date_valid_string("2022.13.01"));
         assert!(!date_valid_string("2022.12.32"));
         assert!(!date_valid_string("2022.12")); // Missing day part
+        assert!(!date_valid_string("2022.1?.01"));
+        assert!(!date_valid_string("2022.Jan.01"));
+        assert!(!date_valid_string("2048.01.01"));
+    }
+
+    #[test]
+    fn test_date_new_rejects_out_of_range_parts() {
+        for (year, month, day, message) in [
+            (2048, 1, 1, "Year 2048 exceeds maximum 2047"),
+            (2022, 13, 1, "Invalid month 13"),
+            (2022, 1, 32, "Invalid day 32"),
+        ] {
+            match Date::new(year, month, day) {
+                Err(Error::Parse {
+                    line: 0,
+                    message: m,
+                }) => assert_eq!(m, message),
+                other => panic!("expected a parse error, got {other:?}"),
+            }
+        }
+        assert!(Date::new(YEAR_MAX, 12, 31).is_ok());
+    }
+
+    #[test]
+    fn test_date_parts() {
+        let date = Date::new(2022, 12, 19).unwrap();
+        assert_eq!(date.month_day(), (12 << 5) | 19);
+        assert!(date.is_valid());
+        assert!(!Date::ZERO.is_valid());
+        assert_eq!(date_get_year(date.raw()), 2022);
+        assert_eq!(date_get_month(date.raw()), 12);
+        assert_eq!(date_get_day(date.raw()), 19);
+        assert_eq!(date_make(2022, 12, 19), date.raw());
+    }
+
+    #[test]
+    fn test_date_strings_with_unknown_parts() {
+        for (text, year, month, day) in [
+            ("????.12.19", 0, 12, 19),
+            ("2022.12.??", 2022, 12, 0),
+            ("2022.??.??", 2022, 0, 0),
+            ("????.??.??", 0, 0, 0),
+        ] {
+            let raw = date_encode_from_string(text);
+            assert_eq!(raw, date_make(year, month, day), "{text}");
+            assert_eq!(date_decode_to_string(raw), text);
+        }
+        // Parts out of range read as unknown.
+        assert_eq!(Date::from_string("2048.13.32"), Date::ZERO);
+    }
+
+    #[test]
+    fn test_date_subtract_months() {
+        let date = Date::new(2022, 2, 15).unwrap();
+        assert_eq!(date.add_months(-1), Date::new(2022, 1, 15).unwrap());
+        assert_eq!(date.add_months(-2), Date::new(2021, 12, 15).unwrap());
+        assert_eq!(date.add_months(-14), Date::new(2020, 12, 15).unwrap());
+        assert_eq!(date.add_months(0), date);
     }
 }

@@ -6,9 +6,9 @@ use std::path::{Path, PathBuf};
 
 use scidtopgn::index::INDEX_HEADER_SIZE;
 use scidtopgn::{
-    parse_single_game, ByteBuffer, CorruptGameKind, Database, DatabaseFile, Error, GFile, Game,
-    InvalidMoveByte, NameBase, NameType, ENCODE_COMMENT, ENCODE_END_GAME, ENCODE_END_MARKER,
-    ENCODE_START_MARKER, GAME_DECODE_ALL, GF_BLOCKSIZE,
+    decode_move, parse_single_game, ByteBuffer, CorruptGameKind, Database, DatabaseFile, Error,
+    GFile, Game, InvalidMoveByte, NameBase, NameType, ScidPosition, ENCODE_COMMENT,
+    ENCODE_END_GAME, ENCODE_END_MARKER, ENCODE_START_MARKER, GAME_DECODE_ALL, GF_BLOCKSIZE,
 };
 use tempfile::TempDir;
 
@@ -126,6 +126,9 @@ fn test_file_error_message_names_the_file() {
         error.source().unwrap().to_string(),
         "Not a SCID file: wrong magic number"
     );
+
+    assert_eq!(DatabaseFile::Name.to_string(), "name file (.sn4)");
+    assert_eq!(DatabaseFile::Game.to_string(), "game file (.sg4)");
 }
 
 #[test]
@@ -283,6 +286,94 @@ fn from_fen(fen: &str, moves: &[u8]) -> Vec<u8> {
     record.extend(moves);
     record.push(ENCODE_END_GAME);
     record
+}
+
+/// The offset, byte, and reason of the invalid move in `record`.
+fn invalid_move(record: &[u8]) -> (usize, u8, InvalidMoveByte) {
+    match corrupt_kind(record) {
+        (offset, CorruptGameKind::InvalidMove { byte, reason, .. }) => (offset, byte, reason),
+        other => panic!("expected an invalid move, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_invalid_move_byte_reasons() {
+    // Each FEN gives White the king, number 0, and at most one other
+    // piece, number 1. Each move byte is the piece number, then a value.
+    let first_move = |fen: &str| 2 + fen.len() + 1;
+    let cases = [
+        // No piece 1.
+        (
+            "4k3/8/8/8/8/8/8/4K3 w - - 0 1",
+            vec![0x11],
+            InvalidMoveByte::NoSuchPiece,
+        ),
+        // Value 1 moves the king down and left, off the board from a1.
+        (
+            "4k3/8/8/8/8/8/8/K7 w - - 0 1",
+            vec![0x01],
+            InvalidMoveByte::OffBoard,
+        ),
+        // Value 0 isn't a knight move.
+        (
+            "4k3/8/8/8/8/8/8/1N2K3 w - - 0 1",
+            vec![0x10],
+            InvalidMoveByte::NotKnightMove,
+        ),
+        // A queen value equal to its file starts a diagonal move, whose
+        // second byte must be 64 to 127.
+        (
+            "4k3/8/8/8/8/8/8/3QK3 w - - 0 1",
+            vec![0x13, 0x05],
+            InvalidMoveByte::BadQueenMove,
+        ),
+    ];
+    for (fen, moves, reason) in cases {
+        let (offset, byte, read) = invalid_move(&from_fen(fen, &moves));
+        assert_eq!(
+            (offset, byte, read),
+            (first_move(fen), moves[0], reason),
+            "{fen}"
+        );
+    }
+
+    // King values 11 to 15 are the special bytes in a game record, so only
+    // decode_move can see them as moves.
+    let pos = ScidPosition::standard();
+    for byte in 0x0B..=0x0F {
+        match decode_move(&mut ByteBuffer::new(), &pos, byte) {
+            Err(Error::CorruptGame {
+                offset: 0,
+                kind:
+                    CorruptGameKind::InvalidMove {
+                        reason: InvalidMoveByte::NotKingMove,
+                        ..
+                    },
+            }) => {}
+            other => panic!("{byte:#04x}: expected not a king move, got {other:?}"),
+        }
+    }
+
+    for (reason, text) in [
+        (InvalidMoveByte::NoSuchPiece, "no such piece"),
+        (InvalidMoveByte::EmptySquare, "no piece on its square"),
+        (InvalidMoveByte::OffBoard, "off the board"),
+        (InvalidMoveByte::NotKingMove, "not a king move"),
+        (InvalidMoveByte::NotKnightMove, "not a knight move"),
+        (InvalidMoveByte::BadQueenMove, "bad diagonal queen move"),
+    ] {
+        assert_eq!(reason.to_string(), text);
+    }
+}
+
+#[test]
+fn test_add_variation_needs_a_current_move() {
+    let mut game = Game::new();
+    match game.add_variation() {
+        Err(error @ Error::NoCurrentMove) => assert_eq!(error.to_string(), "No current move"),
+        other => panic!("expected no current move, got {other:?}"),
+    }
+    assert!(game.moves.is_empty());
 }
 
 #[test]

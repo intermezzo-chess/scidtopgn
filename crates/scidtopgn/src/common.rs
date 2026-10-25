@@ -67,4 +67,23 @@ mod tests {
         assert_eq!(GameResult::Draw.to_string(), "1/2-1/2");
         assert_eq!(GameResult::None.to_string(), "*");
     }
+
+    #[test]
+    fn test_game_result_chars_and_bytes() {
+        for (result, ch, byte) in [
+            (GameResult::None, '*', 0),
+            (GameResult::White, '1', 1),
+            (GameResult::Black, '0', 2),
+            (GameResult::Draw, '=', 3),
+        ] {
+            assert_eq!(result.to_char(), ch);
+            assert_eq!(GameResult::from_char(ch), result);
+            assert_eq!(result.to_byte(), byte);
+            assert_eq!(GameResult::from_byte(byte), result);
+            // Only the low two bits hold the result.
+            assert_eq!(GameResult::from_byte(byte | 0xFC), result);
+        }
+        assert_eq!(GameResult::from_char('2'), GameResult::Draw);
+        assert_eq!(GameResult::from_char('x'), GameResult::None);
+    }
 }

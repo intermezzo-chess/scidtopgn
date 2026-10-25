@@ -450,6 +450,14 @@ mod tests {
         nb.increment_frequency(NameType::Player, id);
         assert_eq!(nb.get_frequency(NameType::Player, id), 2);
         assert_eq!(nb.max_frequency(NameType::Player), 2);
+
+        // A less frequent name, or an ID with no name, leaves the maximum.
+        let other = nb.add_name(NameType::Player, "Caruana, Fabiano").unwrap();
+        nb.increment_frequency(NameType::Player, other);
+        nb.increment_frequency(NameType::Player, 99);
+        assert_eq!(nb.get_frequency(NameType::Player, other), 1);
+        assert_eq!(nb.get_frequency(NameType::Player, 99), 0);
+        assert_eq!(nb.max_frequency(NameType::Player), 2);
     }
 
     #[test]

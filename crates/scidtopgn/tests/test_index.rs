@@ -1,4 +1,6 @@
-use scidtopgn::{Index, IndexEntry, INDEX_HEADER_SIZE, INDEX_MAGIC, SCID_VERSION};
+use scidtopgn::{
+    Index, IndexEntry, INDEX_ENTRY_SIZE, INDEX_HEADER_SIZE, INDEX_MAGIC, SCID_VERSION,
+};
 use std::path::PathBuf;
 
 fn get_test_data_path(filename: &str) -> PathBuf {
@@ -169,4 +171,252 @@ fn test_entry_roundtrip() {
     assert_eq!(entry2.get_white_elo(), 2850);
     assert_eq!(entry2.get_black_elo(), 2700);
     assert_eq!(entry2.get_eco_code(), 0x1234);
+}
+
+#[test]
+fn test_index_full() {
+    use scidtopgn::{Error, MAX_GAMES};
+
+    // Sets the count instead of adding millions of entries.
+    let mut index = Index::new();
+    index.header_mut().num_games = MAX_GAMES - 1;
+    index.add_entry(IndexEntry::new()).unwrap();
+    assert_eq!(index.num_games(), MAX_GAMES);
+
+    match index.add_entry(IndexEntry::new()) {
+        Err(error @ Error::IndexFull) => assert_eq!(
+            error.to_string(),
+            "The index is full: a SCID database holds at most 16777214 games"
+        ),
+        other => panic!("expected a full index, got {other:?}"),
+    }
+    assert_eq!(index.num_games(), MAX_GAMES);
+    assert_eq!(MAX_GAMES, 16_777_214, "SCID's limit");
+}
+
+#[test]
+fn test_index_description() {
+    use scidtopgn::index::SCID_DESC_LENGTH;
+
+    let mut index = Index::default();
+    assert!(!index.is_dirty());
+    assert_eq!(index.description(), "");
+
+    index.set_description("My games");
+    assert!(index.is_dirty());
+    assert_eq!(index.description(), "My games");
+    assert_eq!(index.header().description_str(), "My games");
+
+    // A description is cut to SCID_DESC_LENGTH bytes, and a shorter one
+    // replaces all of it.
+    index.set_description(&"x".repeat(200));
+    assert_eq!(index.description(), "x".repeat(SCID_DESC_LENGTH));
+    index.set_description("Short");
+    assert_eq!(index.description(), "Short");
+}
+
+#[test]
+fn test_write_entry_rewrites_one_entry() {
+    use scidtopgn::Error;
+    use std::io::Cursor;
+
+    let mut index = Index::new();
+    for offset in [10, 20] {
+        let mut entry = IndexEntry::new();
+        entry.set_offset(offset);
+        index.add_entry(entry).unwrap();
+    }
+    let mut file = Cursor::new(Vec::new());
+    index.flush(&mut file).unwrap();
+    assert!(!index.is_dirty());
+
+    index.get_entry_mut(1).unwrap().set_delete_flag(true);
+    index.write_entry(&mut file, 1).unwrap();
+    assert!(matches!(
+        index.write_entry(&mut file, 2),
+        Err(Error::GameNotFound { number: 3 })
+    ));
+
+    let temp = tempfile::TempDir::new().unwrap();
+    let path = temp.path().join("index.si4");
+    std::fs::write(&path, file.into_inner()).unwrap();
+    let reread = Index::open(&path).unwrap();
+    let flags: Vec<_> = reread
+        .entries()
+        .iter()
+        .map(|e| e.get_delete_flag())
+        .collect();
+    assert_eq!(flags, [false, true]);
+    assert_eq!(reread.get_entry(1).unwrap().get_offset(), 20);
+}
+
+/// `entry` written and read back.
+fn reread(entry: &IndexEntry) -> IndexEntry {
+    let mut bytes = Vec::new();
+    entry.write(&mut bytes).unwrap();
+    assert_eq!(bytes.len(), INDEX_ENTRY_SIZE);
+    IndexEntry::read(&mut bytes.as_slice()).unwrap()
+}
+
+#[test]
+fn test_entry_flags() {
+    use scidtopgn::index::{IDX_MASK_DELETE, IDX_MASK_PROMO, IDX_MASK_USER};
+
+    let mut entry = IndexEntry::new();
+    entry.set_delete_flag(true);
+    entry.set_flag(IDX_MASK_PROMO | IDX_MASK_USER, true);
+    let read = reread(&entry);
+    assert!(read.get_delete_flag());
+    assert!(read.get_promotions_flag());
+    assert!(read.get_flag(IDX_MASK_USER));
+    assert!(!read.get_start_flag());
+
+    entry.set_flag(IDX_MASK_DELETE | IDX_MASK_USER, false);
+    let read = reread(&entry);
+    assert!(!read.get_delete_flag());
+    assert!(!read.get_flag(IDX_MASK_USER));
+    assert!(read.get_promotions_flag());
+}
+
+#[test]
+fn test_entry_ratings() {
+    let mut entry = IndexEntry::new();
+    entry.set_white_elo(2850);
+    entry.set_black_elo(5000);
+    entry.set_white_rating_type(3);
+    entry.set_black_rating_type(15);
+    let read = reread(&entry);
+    assert_eq!(read.get_white_elo(), 2850);
+    // Ratings above MAX_ELO (4000) are stored as 4000.
+    assert_eq!(read.get_black_elo(), 4000);
+    assert_eq!(read.get_white_rating_type(), 3);
+    assert_eq!(read.get_black_rating_type(), 15);
+}
+
+#[test]
+fn test_read_entry_limits_ratings() {
+    // Ratings stored above 4000, as 4095, read as 4000.
+    let mut bytes = Vec::new();
+    IndexEntry::new().write(&mut bytes).unwrap();
+    bytes[29..33].copy_from_slice(&[0x0F, 0xFF, 0x0F, 0xFF]);
+    let entry = IndexEntry::read(&mut bytes.as_slice()).unwrap();
+    assert_eq!(entry.get_white_elo(), 4000);
+    assert_eq!(entry.get_black_elo(), 4000);
+}
+
+#[test]
+fn test_entry_counts() {
+    // SCID stores each count in 4 bits, exactly up to 10, and then as 15,
+    // 20, 30, 40, or 50 for "50 or more".
+    for (count, stored) in [
+        (0, 0),
+        (10, 10),
+        (12, 10),
+        (13, 15),
+        (17, 15),
+        (18, 20),
+        (24, 20),
+        (25, 30),
+        (34, 30),
+        (35, 40),
+        (44, 40),
+        (45, 50),
+        (1000, 50),
+    ] {
+        let mut entry = IndexEntry::new();
+        entry.set_variation_count(count);
+        entry.set_comment_count(count);
+        entry.set_nag_count(count);
+        let read = reread(&entry);
+        assert_eq!(read.get_variation_count(), stored, "{count}");
+        assert_eq!(read.get_comment_count(), stored, "{count}");
+        assert_eq!(read.get_nag_count(), stored, "{count}");
+    }
+}
+
+#[test]
+fn test_entry_material_and_pawn_signatures() {
+    let mut entry = IndexEntry::new();
+    entry.set_final_mat_sig(0x00AB_CDEF);
+    entry.set_stored_line_code(0x12);
+    // The top two bits of the first byte hold other data.
+    let pawns = [0x3F, 1, 2, 3, 4, 5, 6, 7, 8];
+    entry.set_home_pawn_data(&pawns);
+    let read = reread(&entry);
+    assert_eq!(read.get_final_mat_sig(), 0x00AB_CDEF);
+    assert_eq!(read.get_stored_line_code(), 0x12);
+    assert_eq!(read.get_home_pawn_data(), &pawns);
+
+    // The two fields share four bytes without overlapping.
+    entry.set_final_mat_sig(0xFFFF_FFFF);
+    assert_eq!(entry.get_final_mat_sig(), 0x00FF_FFFF);
+    assert_eq!(entry.get_stored_line_code(), 0x12);
+}
+
+#[test]
+fn test_event_date_must_be_near_the_game_date() {
+    use scidtopgn::date_make;
+
+    // SCID stores the event year as an offset of -3 to +3 from the game's
+    // year. Other event dates aren't stored.
+    for (year, stored) in [(2019, true), (2025, true), (2018, false), (2026, false)] {
+        let mut entry = IndexEntry::new();
+        entry.set_date(date_make(2022, 6, 1));
+        entry.set_event_date(date_make(year, 5, 20));
+        let expected = if stored { date_make(year, 5, 20) } else { 0 };
+        assert_eq!(reread(&entry).get_event_date(), expected, "{year}");
+    }
+}
+
+#[test]
+fn test_eco_codes() {
+    use scidtopgn::index::{eco_from_string, eco_to_string};
+
+    for (text, written) in [
+        ("A00", "A00"),
+        ("E99", "E99"),
+        ("b91", "B91"),
+        ("B91a", "B91a"),
+        ("B91a3", "B91a3"),
+        ("B91z4", "B91z4"),
+        // Partial codes are filled with zeros.
+        ("C", "C00"),
+        ("C1", "C10"),
+        // A fourth character that isn't a lowercase letter, or a fifth
+        // that isn't 1 to 4, is ignored.
+        ("C12X", "C12"),
+        ("C12a9", "C12a"),
+    ] {
+        let code = eco_from_string(text);
+        assert_eq!(eco_to_string(code).as_deref(), Some(written), "{text}");
+    }
+    for text in ["", "F00", "Cx", "C1x"] {
+        assert_eq!(eco_from_string(text), 0, "{text}");
+    }
+    assert_eq!(eco_to_string(0), None);
+}
+
+#[test]
+fn test_entry_init_clears_every_field() {
+    use scidtopgn::{date_make, GameResult};
+
+    let mut entry = IndexEntry::new();
+    entry.set_offset(1);
+    entry.set_length(2);
+    entry.set_white(3);
+    entry.set_event(4);
+    entry.set_date(date_make(2022, 1, 2));
+    entry.set_result(GameResult::Draw);
+    entry.set_white_elo(2000);
+    entry.set_eco_code(5);
+    entry.set_delete_flag(true);
+    entry.set_final_mat_sig(6);
+    entry.set_home_pawn_data(&[1; 9]);
+    entry.init();
+
+    let mut cleared = Vec::new();
+    entry.write(&mut cleared).unwrap();
+    let mut new = Vec::new();
+    IndexEntry::new().write(&mut new).unwrap();
+    assert_eq!(cleared, new);
 }

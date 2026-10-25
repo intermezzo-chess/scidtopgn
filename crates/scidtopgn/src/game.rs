@@ -809,6 +809,144 @@ mod tests {
         game.add_tag("Annotator", "Test");
         assert_eq!(game.tags.len(), 1);
         assert_eq!(game.find_tag("Annotator"), Some(&"Test".to_string()));
+
+        // A tag added again replaces the value.
+        game.add_tag("Annotator", "Other");
+        assert_eq!(game.tags.len(), 1);
+        assert_eq!(game.find_tag("Annotator"), Some(&"Other".to_string()));
+    }
+
+    #[test]
+    fn test_defaults() {
+        let game = Game::default();
+        assert_eq!(game.event, "?");
+        assert!(game.moves.is_empty());
+
+        let mut node = MoveNode::default();
+        assert_eq!(node.marker, Marker::NoMarker);
+        assert!(!node.is_null_move());
+        node.move_data = Some(GameMove::Null);
+        assert!(node.is_null_move());
+    }
+
+    #[test]
+    fn test_annotations_without_a_current_move_are_dropped() {
+        let mut game = Game::new();
+        game.add_nag(1);
+        game.append_comment("x");
+        assert!(game.moves.is_empty());
+    }
+
+    /// 1.e4 from the standard starting position.
+    const E4: u8 = 0xCF;
+
+    /// A record with `tags`, the end of the tags, the standard start, 1.e4
+    /// with a comment, the end of the game, and the comment's text.
+    fn record_with_tags(tags: &[u8]) -> Vec<u8> {
+        let mut record = tags.to_vec();
+        record.extend([0, 0, E4, ENCODE_COMMENT, ENCODE_END_GAME]);
+        record.extend(b"c\0");
+        record
+    }
+
+    fn decode_record(record: &[u8], flags: u8) -> Game {
+        let mut game = Game::new();
+        game.decode(&mut ByteBuffer::from_slice(record), flags)
+            .unwrap();
+        game
+    }
+
+    #[test]
+    fn test_decode_common_tags() {
+        // A common tag is one byte above MAX_TAG_LEN: 243 is Annotator and
+        // 245 is EventDate. Other tags are stored by name.
+        let mut tags = vec![243, 2];
+        tags.extend(b"Me");
+        tags.extend([245, 10]);
+        tags.extend(b"2022.01.02");
+        tags.extend([3]);
+        tags.extend(b"Foo");
+        tags.extend([2]);
+        tags.extend(b"ba");
+        let record = record_with_tags(&tags);
+
+        let game = decode_record(&record, GAME_DECODE_ALL);
+        let tags: Vec<_> = game
+            .tags
+            .iter()
+            .map(|tag| (tag.name.as_str(), tag.value.as_str()))
+            .collect();
+        assert_eq!(
+            tags,
+            [
+                ("Annotator", "Me"),
+                ("EventDate", "2022.01.02"),
+                ("Foo", "ba")
+            ]
+        );
+        assert_eq!(game.event_date, Some(Date::from_string("2022.01.02")));
+        assert_eq!(game.moves[1].san, "e4");
+        assert_eq!(game.moves[1].comment.as_deref(), Some("c"));
+
+        // Without GAME_DECODE_TAGS the tags are skipped, and the moves and
+        // comments are the same.
+        let game = decode_record(&record, GAME_DECODE_COMMENTS);
+        assert!(game.tags.is_empty());
+        assert_eq!(game.event_date, None);
+        assert_eq!(game.moves[1].san, "e4");
+        assert_eq!(game.moves[1].comment.as_deref(), Some("c"));
+    }
+
+    #[test]
+    fn test_skip_tags_skips_the_compact_event_date() {
+        // 255 is followed by the event date in three bytes.
+        let raw = Date::new(2022, 1, 2).unwrap().raw();
+        let [_, high, mid, low] = raw.to_be_bytes();
+        let record = record_with_tags(&[255, high, mid, low]);
+
+        let game = decode_record(&record, GAME_DECODE_ALL);
+        assert_eq!(game.event_date, Some(Date::from_raw(raw)));
+        assert!(game.tags.is_empty());
+
+        let game = decode_record(&record, GAME_DECODE_COMMENTS);
+        assert_eq!(game.event_date, None);
+        assert_eq!(game.moves[1].san, "e4");
+    }
+
+    #[test]
+    fn test_decode_without_comments() {
+        let record = record_with_tags(&[]);
+        let game = decode_record(&record, GAME_DECODE_TAGS);
+        assert_eq!(game.moves[1].san, "e4");
+        assert_eq!(game.moves[1].comment, None);
+    }
+
+    #[test]
+    fn test_decode_start_reads_the_start_position() {
+        let mut tags = vec![245, 10];
+        tags.extend(b"2022.01.02");
+        let mut record = tags.clone();
+        record.extend([0, 0]);
+        let mut game = Game::new();
+        game.decode_start(&mut ByteBuffer::from_slice(&record))
+            .unwrap();
+        assert_eq!(game.start_position, None);
+        // The tags aren't stored, but the event date is read.
+        assert!(game.tags.is_empty());
+        assert_eq!(game.event_date, Some(Date::from_string("2022.01.02")));
+
+        let fen = "4k3/8/8/8/8/8/8/4K3 w - - 0 1";
+        let mut record = tags;
+        record.extend([0, 1]);
+        record.extend(fen.as_bytes());
+        record.push(0);
+        let mut game = Game::new();
+        game.decode_start(&mut ByteBuffer::from_slice(&record))
+            .unwrap();
+        assert_eq!(
+            game.start_position.as_ref().map(super::fen),
+            Some(fen.into())
+        );
     }
 
     #[test]
