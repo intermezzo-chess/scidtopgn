@@ -590,6 +590,17 @@ impl IndexEntry {
         self.set_flag(IDX_MASK_DELETE, value);
     }
 
+    /// Replaces this entry's user-settable flags with those of `other`, as
+    /// SCID does when it replaces a game: the delete flag, the flags from
+    /// [`IDX_MASK_WHITE_OP`] to [`IDX_MASK_USER`], and the six custom flags.
+    pub(crate) fn copy_user_flags(&mut self, other: &IndexEntry) {
+        const USER_FLAGS: u16 = !(IDX_MASK_START | IDX_MASK_PROMO | IDX_MASK_UPROMO);
+        // The custom flags are the low six bits of `length_high`.
+        const CUSTOM_FLAGS: u8 = 0x3F;
+        self.flags = (self.flags & !USER_FLAGS) | (other.flags & USER_FLAGS);
+        self.length_high = (self.length_high & !CUSTOM_FLAGS) | (other.length_high & CUSTOM_FLAGS);
+    }
+
     fn decode_count(x: u16) -> u16 {
         const COUNT_CODES: [u16; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20, 30, 40, 50];
         COUNT_CODES[(x & 15) as usize]
@@ -1178,6 +1189,30 @@ mod tests {
 
         entry.set_length(131071);
         assert_eq!(entry.get_length(), 131071);
+    }
+
+    #[test]
+    fn test_copy_user_flags() {
+        let mut old = IndexEntry::new();
+        old.set_flag(IDX_MASK_DELETE | IDX_MASK_NOVELTY | IDX_MASK_USER, true);
+        old.set_flag(IDX_MASK_START | IDX_MASK_PROMO, true);
+        // Custom flags 1 and 6, and a long record.
+        old.length_high = 0x21;
+        old.set_length(70_000);
+
+        let mut new = IndexEntry::new();
+        new.set_flag(IDX_MASK_UPROMO | IDX_MASK_TACTICS, true);
+        new.length_high = 0x02;
+        new.set_length(1_000);
+        new.copy_user_flags(&old);
+
+        // The user flags come from the old entry, and the others stay.
+        assert_eq!(
+            new.flags,
+            IDX_MASK_DELETE | IDX_MASK_NOVELTY | IDX_MASK_USER | IDX_MASK_UPROMO
+        );
+        assert_eq!(new.length_high, 0x21);
+        assert_eq!(new.get_length(), 1_000);
     }
 
     #[test]
