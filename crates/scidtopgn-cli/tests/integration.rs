@@ -1559,3 +1559,120 @@ fn test_cli_fails_when_the_log_cant_be_written() {
         assert_eq!(pgn.matches("[Event \"").count(), 5);
     }
 }
+
+/// Runs the CLI in `dir` with `args`, and checks that it refuses the log as
+/// a file of the command, silently with `-q`.
+fn assert_log_refused(dir: &Path, args: &[&str]) {
+    let output = cli()
+        .current_dir(dir)
+        .args(args)
+        .output()
+        .expect("Failed to run CLI");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "{args:?}: {stderr}");
+    if args.contains(&"-q") {
+        assert!(stderr.is_empty(), "{args:?}: {stderr}");
+    } else {
+        assert!(stderr.contains("is the same file as"), "{args:?}: {stderr}");
+        assert!(
+            !stderr.contains("couldn't be removed"),
+            "{args:?}: {stderr}"
+        );
+    }
+    assert!(output.stdout.is_empty(), "{args:?}");
+}
+
+#[test]
+fn test_cli_rejects_a_log_hard_linked_to_a_file_of_the_command() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let db = copy_with_deleted(temp.path(), "five", &[]);
+    let pgn = temp.path().join("input.pgn");
+    std::fs::write(&pgn, VALID_GAME).expect("Failed to write PGN");
+    let out = temp.path().join("out.pgn");
+    std::fs::write(&out, "keep").expect("Failed to write file");
+    let before = database_bytes(&db);
+
+    for (target, args) in [
+        ("five.sn4", &["info", "five"][..]),
+        ("five.sg4", &["five", "--count"]),
+        (
+            "out.pgn",
+            &["export", "five", "-o", "out.pgn", "--overwrite"],
+        ),
+        ("input.pgn", &["import", "input.pgn", "-o", "new"]),
+        ("five.si4", &["import", "input.pgn", "-o", "five"]),
+    ] {
+        let log = temp.path().join("run.log");
+        std::fs::hard_link(temp.path().join(target), &log).expect("Failed to link");
+        assert_log_refused(temp.path(), &[args, &["--log", "run.log"]].concat());
+        std::fs::remove_file(&log).expect("Failed to remove link");
+    }
+    assert_eq!(database_bytes(&db), before);
+    assert_eq!(std::fs::read_to_string(&pgn).unwrap(), VALID_GAME);
+    assert_eq!(std::fs::read_to_string(&out).unwrap(), "keep");
+    assert!(!temp.path().join("new.si4").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn test_cli_rejects_a_log_that_links_to_a_file_not_yet_written() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let pgn = temp.path().join("input.pgn");
+    std::fs::write(&pgn, [ILLEGAL_GAME, VALID_GAME].join("\n")).expect("Failed to write PGN");
+    copy_with_deleted(temp.path(), "five", &[]);
+    let log = temp.path().join("run.log");
+
+    for (target, args) in [
+        ("db.sg4", &["import", "input.pgn", "-o", "db", "-q"][..]),
+        ("db.si4", &["import", "input.pgn", "-o", "db"]),
+        (
+            "out.pgn",
+            &["export", "five", "-o", "out.pgn", "--overwrite"],
+        ),
+    ] {
+        std::os::unix::fs::symlink(target, &log).expect("Failed to link");
+        assert_log_refused(temp.path(), &[args, &["--log", "run.log"]].concat());
+        assert_eq!(std::fs::read_link(&log).unwrap(), Path::new(target));
+        assert!(!temp.path().join(target).exists(), "{target}");
+        std::fs::remove_file(&log).expect("Failed to remove link");
+    }
+    for ext in ["si4", "sn4", "sg4"] {
+        assert!(!temp.path().join("db").with_extension(ext).exists());
+    }
+}
+
+#[test]
+fn test_cli_rejects_a_new_log_named_like_a_command_file_in_another_case() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    // Only a file system that ignores case makes the two names one file.
+    std::fs::write(temp.path().join("probe"), "").expect("Failed to write file");
+    if !temp.path().join("PROBE").exists() {
+        return;
+    }
+    let pgn = temp.path().join("input.pgn");
+    std::fs::write(&pgn, VALID_GAME).expect("Failed to write PGN");
+    copy_with_deleted(temp.path(), "five", &[]);
+
+    for (args, created) in [
+        (
+            &["import", "input.pgn", "-o", "db", "--log", "DB.SG4"][..],
+            "db.sg4",
+        ),
+        (
+            &[
+                "export",
+                "five",
+                "-o",
+                "out.pgn",
+                "--overwrite",
+                "--log",
+                "OUT.PGN",
+            ],
+            "out.pgn",
+        ),
+    ] {
+        assert_log_refused(temp.path(), args);
+        assert!(!temp.path().join(created).exists(), "{args:?}");
+    }
+    assert!(!temp.path().join("db.si4").exists());
+}

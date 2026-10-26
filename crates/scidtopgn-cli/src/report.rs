@@ -1,7 +1,7 @@
 use std::cell::Cell;
 use std::fmt;
 use std::fs::{File, OpenOptions};
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -115,66 +115,73 @@ pub struct Log {
 
 impl Log {
     /// Opens `path` for appending, creating it if missing. It is an error if
-    /// `path` is one of `files`, which the command reads or writes, and then
-    /// nothing is created.
+    /// `path` is the same file as one of `files`, which the command reads or
+    /// writes, and then nothing is written, and a file the log created is
+    /// removed.
     pub fn open(path: &Path, files: &[PathBuf]) -> Result<Self> {
-        if let Some(file) = files.iter().find(|file| same_file(path, file)) {
-            anyhow::bail!(
-                "The log '{}' is the same file as '{}', which the command reads or writes",
-                path.display(),
-                file.display()
-            );
+        let open_error = || format!("Failed to open log '{}'", path.display());
+        let existed = path.exists();
+        let mut options = OpenOptions::new();
+        options.append(true).create(true);
+        // Reading the file's identity from its handle needs read access.
+        #[cfg(windows)]
+        options.read(true);
+        let file = options.open(path).with_context(open_error)?;
+
+        // Compare once the log is open, so that a name that only becomes a
+        // command file once created is caught too, such as a symlink to a
+        // file that doesn't exist yet, or a name that differs only in case.
+        let mut same = None;
+        for other in files {
+            if is_same_file(&file, other).with_context(open_error)? {
+                same = Some(other);
+                break;
+            }
         }
-        let file = OpenOptions::new()
-            .append(true)
-            .create(true)
-            .open(path)
-            .with_context(|| format!("Failed to open log '{}'", path.display()))?;
-        Ok(Self {
-            path: path.to_owned(),
-            file,
-            failed: Cell::new(false),
-        })
+        let Some(same) = same else {
+            return Ok(Self {
+                path: path.to_owned(),
+                file,
+                failed: Cell::new(false),
+            });
+        };
+        let mut message = format!(
+            "The log '{}' is the same file as '{}', which the command reads or writes",
+            path.display(),
+            same.display()
+        );
+        drop(file);
+        if !existed {
+            // Remove the empty file opening the log created by its other
+            // name, which leaves a symlink at `path` as it was.
+            if let Err(err) = std::fs::remove_file(same) {
+                message.push_str(&format!(
+                    ". The empty file it created couldn't be removed: {err}"
+                ));
+            }
+        }
+        anyhow::bail!(message)
     }
 }
 
-/// Whether `a` and `b` name the same file, or would once it is created, such
-/// as `out.pgn` and `./out.pgn`.
-fn same_file(a: &Path, b: &Path) -> bool {
-    match (a.exists(), b.exists()) {
-        (true, true) => same_existing_file(a, b),
-        (false, false) => new_file_path(a).is_some_and(|a| new_file_path(b) == Some(a)),
-        // One exists and the other doesn't, so they differ.
-        _ => false,
-    }
-}
-
+/// Whether `other` names the open `file`. Fails only if `file`'s identity
+/// can't be read. On Unix, `other` isn't opened, so that a FIFO isn't read.
 #[cfg(unix)]
-fn same_existing_file(a: &Path, b: &Path) -> bool {
+fn is_same_file(file: &File, other: &Path) -> io::Result<bool> {
     use std::os::unix::fs::MetadataExt;
-    match (a.metadata(), b.metadata()) {
-        (Ok(a), Ok(b)) => a.dev() == b.dev() && a.ino() == b.ino(),
-        _ => false,
-    }
+    let file = file.metadata()?;
+    Ok(other
+        .metadata()
+        .is_ok_and(|other| other.dev() == file.dev() && other.ino() == file.ino()))
 }
 
+/// Whether `other` names the open `file`, by volume and file index. Fails
+/// only if `file`'s identity can't be read.
 #[cfg(not(unix))]
-fn same_existing_file(a: &Path, b: &Path) -> bool {
-    match (a.canonicalize(), b.canonicalize()) {
-        (Ok(a), Ok(b)) => a == b,
-        _ => false,
-    }
-}
-
-/// The absolute path of a file that doesn't exist yet, or `None` if its
-/// directory doesn't exist either.
-fn new_file_path(path: &Path) -> Option<PathBuf> {
-    let name = path.file_name()?;
-    let dir = match path.parent() {
-        Some(dir) if !dir.as_os_str().is_empty() => dir,
-        _ => Path::new("."),
-    };
-    Some(dir.canonicalize().ok()?.join(name))
+fn is_same_file(file: &File, other: &Path) -> io::Result<bool> {
+    // std reads neither without nightly features.
+    let file = same_file::Handle::from_file(file.try_clone()?)?;
+    Ok(same_file::Handle::from_path(other).is_ok_and(|other| other == file))
 }
 
 /// Reports, when verbose, each time another tenth of the games is done.

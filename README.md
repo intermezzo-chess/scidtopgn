@@ -131,7 +131,7 @@ warning: PGN game 1, line 5: "O-O" castles without the castling right
 warning: skipping PGN game 2, starting at line 7: Invalid move "Ke3" at line 10: illegal san
 ```
 
-The log is opened before any other file. If it can't be opened, or it is a file the command reads or writes, such as the `-o` output or the database, the command fails without touching anything else. `-` isn't accepted as a log. Mistakes in the arguments themselves aren't logged, and results, such as PGN written to stdout, the `--count` line, and `info`'s output, aren't either.
+The log is opened before any other file. If it can't be opened, or it is a file the command reads or writes, such as the `-o` output or the database, even through a link or a name in another case, the command fails without touching anything else. `-` isn't accepted as a log. Mistakes in the arguments themselves aren't logged, and results, such as PGN written to stdout, the `--count` line, and `info`'s output, aren't either.
 
 The exit status is the same with and without `--log`, unless writing the log fails part way. Then the command reports it on stderr, unless `--quiet`, and finishes, but exits with status 1, because the log is missing messages. After an import, that status doesn't mean the games weren't imported: running the import again would append them a second time.
 
