@@ -1641,6 +1641,67 @@ fn test_cli_rejects_a_log_that_links_to_a_file_not_yet_written() {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn test_cli_keeps_command_file_links_when_refusing_a_log() {
+    use std::os::unix::fs::symlink;
+
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    copy_with_deleted(temp.path(), "five", &[]);
+    let dir = temp.path();
+    std::fs::write(dir.join("valid.pgn"), VALID_GAME).expect("Failed to write PGN");
+
+    for (links, args, created) in [
+        // A command file links to the log, which doesn't exist yet.
+        (
+            &[("out.pgn", "run.log")][..],
+            &["export", "five", "-o", "out.pgn", "--log", "run.log"][..],
+            "run.log",
+        ),
+        (
+            &[("input.pgn", "run.log")],
+            &["import", "input.pgn", "-o", "db", "--log", "run.log"],
+            "run.log",
+        ),
+        (
+            &[("db.sg4", "run.log")],
+            &["import", "valid.pgn", "-o", "db", "--log", "run.log"],
+            "run.log",
+        ),
+        // Both link to a file that doesn't exist yet.
+        (
+            &[("out.pgn", "target"), ("run.log", "target")],
+            &[
+                "export",
+                "five",
+                "-o",
+                "out.pgn",
+                "--overwrite",
+                "--log",
+                "run.log",
+            ],
+            "target",
+        ),
+    ] {
+        for (link, target) in links {
+            symlink(target, dir.join(link)).expect("Failed to link");
+        }
+        assert_log_refused(dir, args);
+        for (link, target) in links {
+            assert_eq!(
+                std::fs::read_link(dir.join(link)).ok().as_deref(),
+                Some(Path::new(target)),
+                "{args:?}: {link}"
+            );
+        }
+        assert!(!dir.join(created).exists(), "{args:?}: {created}");
+        for (link, _) in links {
+            std::fs::remove_file(dir.join(link)).expect("Failed to remove link");
+        }
+    }
+    assert!(!dir.join("db.si4").exists());
+}
+
 #[test]
 fn test_cli_rejects_a_new_log_named_like_a_command_file_in_another_case() {
     let temp = TempDir::new().expect("Failed to create temp dir");

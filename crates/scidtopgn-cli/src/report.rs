@@ -152,9 +152,10 @@ impl Log {
         );
         drop(file);
         if !existed {
-            // Remove the empty file opening the log created by its other
-            // name, which leaves a symlink at `path` as it was.
-            if let Err(err) = std::fs::remove_file(same) {
+            // Remove the empty file opening the log created. Its path with
+            // symlinks resolved names the file itself, so symlinks to it,
+            // at `path` or at a command file, are left as they were.
+            if let Err(err) = path.canonicalize().and_then(std::fs::remove_file) {
                 message.push_str(&format!(
                     ". The empty file it created couldn't be removed: {err}"
                 ));
