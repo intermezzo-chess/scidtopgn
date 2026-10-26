@@ -2,10 +2,11 @@ Third-party notices for the scidtopgn executable
 
 The scidtopgn executable in each release archive is built from scidtopgn
 (see LICENSE), the Rust crates listed below, and the Rust standard library.
-Crates offered under a choice of MIT or Apache-2.0 are used under the MIT
-License. Each crate's notice follows the list, copied from the crate as
-published on crates.io. shakmaty is licensed under GPL-3.0-or-later, like
-scidtopgn, and its published crate has no notice to copy; its section says so.
+Crates offered under a choice of MIT or another license, such as Apache-2.0
+or the Unlicense, are used under the MIT License. Each crate's notice follows
+the list, copied from the crate as published on crates.io. shakmaty is
+licensed under GPL-3.0-or-later, like scidtopgn, and its published crate has
+no notice to copy; its section says so.
 
 The Rust standard library's notices, including the Unicode-3.0 license of the
 Unicode data in its `core` crate, are in the rust-std-licenses directory. They
@@ -28,10 +29,12 @@ colorchoice 1.0.4            all targets             MIT, chosen from MIT OR Apa
 is_terminal_polyfill 1.70.2  all targets             MIT, chosen from MIT OR Apache-2.0
 num-traits 0.2.19            all targets             MIT, chosen from MIT OR Apache-2.0
 once_cell_polyfill 1.70.2    x86_64-pc-windows-msvc  MIT, chosen from MIT OR Apache-2.0
+same-file 1.0.6              x86_64-pc-windows-msvc  MIT, chosen from Unlicense OR MIT
 shakmaty 0.30.2              all targets             GPL-3.0-or-later
 strsim 0.10.0                all targets             MIT
 thiserror 1.0.69             all targets             MIT, chosen from MIT OR Apache-2.0
 utf8parse 0.2.2              all targets             MIT, chosen from Apache-2.0 OR MIT
+winapi-util 0.1.11           x86_64-pc-windows-msvc  MIT, chosen from Unlicense OR MIT
 windows-sys 0.60.2           x86_64-pc-windows-msvc  MIT, chosen from MIT OR Apache-2.0
 windows-targets 0.53.2       x86_64-pc-windows-msvc  MIT, chosen from MIT OR Apache-2.0
 windows_x86_64_msvc 0.53.1   x86_64-pc-windows-msvc  MIT, chosen from MIT OR Apache-2.0
@@ -203,6 +206,32 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+
+==============================================================================
+
+same-file 1.0.6, winapi-util 0.1.11
+
+The MIT License (MIT)
+
+Copyright (c) 2017 Andrew Gallant
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
 
 ==============================================================================
 
