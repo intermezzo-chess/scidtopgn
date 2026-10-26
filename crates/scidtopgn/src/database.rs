@@ -6,7 +6,7 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use crate::bytebuf::ByteBuffer;
-use crate::error::{Error, Result};
+use crate::error::{DatabaseFile, Error, Result};
 use crate::game::{Game, Marker, GAME_DECODE_ALL};
 use crate::gfile::GFile;
 use crate::index::{Index, IndexEntry};
@@ -126,8 +126,8 @@ impl Database {
     /// Creates an empty database at `path`, given without an extension,
     /// replacing the files of any database already there.
     ///
-    /// The index and game files are created at once, and the name file when
-    /// the changes are first written.
+    /// All three files are written at once, so the new database can be
+    /// opened even if no game is ever added.
     ///
     /// # Errors
     ///
@@ -136,18 +136,17 @@ impl Database {
     /// # Examples
     ///
     /// ```
-    /// use scidtopgn::{parse_single_game, Database};
+    /// use scidtopgn::Database;
     ///
     /// let dir = tempfile::tempdir()?;
     /// let path = dir.path().join("games");
     ///
-    /// let mut db = Database::create(&path)?;
-    /// db.add_game(&parse_single_game("1. e4 e5 *")?)?;
-    /// db.close()?;
+    /// Database::create(&path)?;
     ///
     /// assert!(path.with_extension("si4").exists());
     /// assert!(path.with_extension("sn4").exists());
     /// assert!(path.with_extension("sg4").exists());
+    /// assert_eq!(Database::open(&path)?.num_games(), 0);
     /// # Ok::<(), scidtopgn::Error>(())
     /// ```
     pub fn create<P: AsRef<Path>>(path: P) -> Result<Self> {
@@ -158,7 +157,8 @@ impl Database {
 
         let gfile = GFile::create(&path)?;
 
-        let nfile = NFile::create(&path)?;
+        let mut nfile = NFile::create(&path)?;
+        nfile.close().map_err(|e| e.in_file(DatabaseFile::Name))?;
 
         Ok(Self {
             path,
