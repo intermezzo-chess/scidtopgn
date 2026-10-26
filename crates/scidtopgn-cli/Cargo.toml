@@ -21,3 +21,6 @@ clap = { version = "4", features = ["derive"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+
+[target."cfg(not(unix))".dependencies]
+same-file = "1"

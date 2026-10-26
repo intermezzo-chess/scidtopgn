@@ -1,4 +1,5 @@
 use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 
 use clap::error::ErrorKind;
 use clap::parser::ValueSource;
@@ -16,6 +17,10 @@ const GAMES_HELP: &str = "Export only these games, numbered from 1, such as 10-2
 /// Help for `--quiet`, shared by every command.
 const QUIET_HELP: &str = "Write nothing to stderr, not even errors. The exit status still \
                           shows whether the command failed";
+/// Help for `--log`, shared by every command.
+const LOG_HELP: &str = "Also append warnings and errors to this file, each line starting \
+                        with its level. With --verbose, progress and summaries too. \
+                        Combine with --quiet to write them only to the file";
 
 #[derive(Parser)]
 #[command(name = "scidtopgn", version)]
@@ -41,8 +46,18 @@ pub struct Cli {
     #[arg(short, long)]
     pub verbose: bool,
 
-    #[arg(short, long, conflicts_with = "verbose", help = QUIET_HELP)]
+    #[arg(short, long, help = QUIET_HELP)]
     pub quiet: bool,
+
+    // --quiet and --verbose together only make sense with a log.
+    #[arg(
+        long,
+        value_name = "PATH",
+        value_parser = log_path,
+        required_if_eq_all = [("quiet", "true"), ("verbose", "true")],
+        help = LOG_HELP
+    )]
+    pub log: Option<PathBuf>,
 }
 
 impl Cli {
@@ -74,6 +89,7 @@ impl Cli {
                 overwrite: false,
                 verbose: self.verbose,
                 quiet: self.quiet,
+                log: self.log,
             })),
             (None, Some(command)) => Some(command),
             _ => None,
@@ -152,8 +168,15 @@ fn check_option_placement(args: &[OsString], matches: &ArgMatches) -> Result<(),
             Ok(_) => fixed = Some(candidate),
             Err(err) => {
                 let err = err.to_string();
-                let reason = err.lines().next().unwrap_or_default();
-                let reason = reason.strip_prefix("error: ").unwrap_or(reason);
+                // The first paragraph, which can list arguments on the lines
+                // after the first.
+                let reason = err
+                    .lines()
+                    .take_while(|line| !line.is_empty())
+                    .map(str::trim)
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let reason = reason.strip_prefix("error: ").unwrap_or(&reason);
                 problems.push(format!("with them after '{name}': {reason}"));
             }
         }
@@ -221,7 +244,7 @@ fn literal_words(args: &[OsString]) -> Option<String> {
 
 /// Joins `args` with spaces for a message, quoting any that aren't literal.
 /// The quoting is for reading, not for a shell.
-fn describe_words(args: &[OsString]) -> String {
+pub fn describe_words(args: &[OsString]) -> String {
     args.iter()
         .map(|arg| {
             let arg = arg.to_string_lossy();
@@ -248,9 +271,27 @@ pub enum Command {
 impl Command {
     pub fn verbosity(&self) -> Verbosity {
         match self {
-            Command::Export(args) => Verbosity::new(args.quiet, args.verbose),
-            Command::Import(args) => Verbosity::new(args.quiet, args.verbose),
-            Command::Info(args) => Verbosity::new(args.quiet, false),
+            Command::Export(args) => Verbosity::new(args.verbose),
+            Command::Import(args) => Verbosity::new(args.verbose),
+            Command::Info(_) => Verbosity::Normal,
+        }
+    }
+
+    /// Whether to write nothing to stderr.
+    pub fn quiet(&self) -> bool {
+        match self {
+            Command::Export(args) => args.quiet,
+            Command::Import(args) => args.quiet,
+            Command::Info(args) => args.quiet,
+        }
+    }
+
+    /// The log to write messages to, if any.
+    pub fn log(&self) -> Option<&Path> {
+        match self {
+            Command::Export(args) => args.log.as_deref(),
+            Command::Import(args) => args.log.as_deref(),
+            Command::Info(args) => args.log.as_deref(),
         }
     }
 }
@@ -278,8 +319,18 @@ pub struct ExportArgs {
     #[arg(short, long)]
     pub verbose: bool,
 
-    #[arg(short, long, conflicts_with = "verbose", help = QUIET_HELP)]
+    #[arg(short, long, help = QUIET_HELP)]
     pub quiet: bool,
+
+    // --quiet and --verbose together only make sense with a log.
+    #[arg(
+        long,
+        value_name = "PATH",
+        value_parser = log_path,
+        required_if_eq_all = [("quiet", "true"), ("verbose", "true")],
+        help = LOG_HELP
+    )]
+    pub log: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -303,8 +354,18 @@ pub struct ImportArgs {
     #[arg(short, long)]
     pub verbose: bool,
 
-    #[arg(short, long, conflicts_with = "verbose", help = QUIET_HELP)]
+    #[arg(short, long, help = QUIET_HELP)]
     pub quiet: bool,
+
+    // --quiet and --verbose together only make sense with a log.
+    #[arg(
+        long,
+        value_name = "PATH",
+        value_parser = log_path,
+        required_if_eq_all = [("quiet", "true"), ("verbose", "true")],
+        help = LOG_HELP
+    )]
+    pub log: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -314,6 +375,19 @@ pub struct InfoArgs {
 
     #[arg(short, long, help = QUIET_HELP)]
     pub quiet: bool,
+
+    #[arg(long, value_name = "PATH", value_parser = log_path, help = LOG_HELP)]
+    pub log: Option<PathBuf>,
+}
+
+/// Parses `--log`, which must name a file. `-` would suggest stdout or
+/// stderr.
+fn log_path(value: &str) -> Result<PathBuf, String> {
+    if value == "-" {
+        Err("the log must be a file path; '-' isn't stdout or stderr here".to_owned())
+    } else {
+        Ok(PathBuf::from(value))
+    }
 }
 
 #[cfg(test)]
@@ -359,8 +433,35 @@ mod tests {
             &["export", "-q", "--", "mydb"],
             &["import", "in.pgn", "-o", "db", "--quiet"],
             &["info", "mydb", "-q"],
+            &["mydb", "-q", "-v", "--log", "run.log"],
+            &["export", "mydb", "-qv", "--log=run.log"],
+            &[
+                "import", "in.pgn", "-o", "db", "-q", "-v", "--log", "run.log",
+            ],
+            &["info", "mydb", "--log", "run.log"],
         ] {
             assert!(parse(args).is_ok(), "{args:?}");
+        }
+    }
+
+    #[test]
+    fn combines_quiet_and_verbose_only_with_a_log() {
+        for args in [
+            &["mydb", "-q", "-v"][..],
+            &["export", "mydb", "-qv"],
+            &["import", "in.pgn", "-o", "db", "--quiet", "--verbose"],
+        ] {
+            let err = parse(args).err().expect("should be rejected");
+            assert_eq!(err.kind(), ErrorKind::MissingRequiredArgument, "{err}");
+            assert!(err.to_string().contains("--log <PATH>"), "{err}");
+        }
+    }
+
+    #[test]
+    fn rejects_a_log_of_stdout() {
+        for args in [&["mydb", "--log", "-"][..], &["info", "mydb", "--log=-"]] {
+            let err = parse(args).err().expect("should be rejected");
+            assert_eq!(err.kind(), ErrorKind::ValueValidation, "{err}");
         }
     }
 
@@ -481,7 +582,7 @@ mod tests {
             ),
             (
                 &["--quiet", "export", "mydb", "-v"],
-                &["with them after 'export': the argument '--verbose' cannot be used with '--quiet'"],
+                &["with them after 'export': the following required arguments were not provided: --log <PATH>"],
             ),
             (
                 &["--games", "1", "export", "mydb", "--count"],
