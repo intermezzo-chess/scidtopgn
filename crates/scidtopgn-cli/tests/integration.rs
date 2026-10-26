@@ -322,6 +322,22 @@ fn test_cli_export_all_deleted() {
     );
 }
 
+#[test]
+fn test_cli_skips_games_the_library_deletes() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let db_path = copy_with_deleted(temp.path(), "five", &[]);
+    let mut db = scidtopgn::Database::open(&db_path).expect("Failed to open database");
+    let expected: String = [0, 2, 4]
+        .map(|n| format!("{}\n", db.get_game(n).unwrap().to_pgn()))
+        .concat();
+    db.delete_game(1).expect("Failed to delete game");
+    db.delete_game(3).expect("Failed to delete game");
+    db.close().expect("Failed to close database");
+
+    assert_eq!(export_both_ways(&db_path), expected);
+    assert!(info(&db_path).starts_with("Total games: 5\nDeleted games: 2\nActive games: 3\n"));
+}
+
 /// The main lines of the games in `pgn`, in SAN.
 fn main_lines(pgn: &str) -> Vec<Vec<String>> {
     scidtopgn::parse_pgn(pgn)

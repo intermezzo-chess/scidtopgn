@@ -11,7 +11,7 @@ use crate::game::{Game, Marker, GAME_DECODE_ALL};
 use crate::gfile::GFile;
 use crate::index::{Index, IndexEntry};
 use crate::mov::encode_move;
-use crate::namebase::NameType;
+use crate::namebase::{NameBase, NameType};
 use crate::nfile::NFile;
 use crate::position::{fen, ScidPosition};
 use crate::Date;
@@ -54,9 +54,11 @@ use crate::Date;
 ///
 /// # Logically deleted games
 ///
-/// SCID deletes a game by setting its delete flag. The game's record stays
-/// in the database, and its number doesn't change, until the database is
-/// compacted. [`num_games`](Self::num_games), [`games`](Self::games), and
+/// SCID deletes a game by setting its delete flag, as
+/// [`delete_game`](Self::delete_game) does. The game's record stays in the
+/// database, and its number doesn't change, until the database is
+/// compacted, so [`undelete_game`](Self::undelete_game) can restore it.
+/// [`num_games`](Self::num_games), [`games`](Self::games), and
 /// [`get_game`](Self::get_game) include deleted games, which is useful for
 /// inspecting or recovering them. The `scidtopgn` command skips them when
 /// it exports, as SCID does. To do the same, check each game's
@@ -72,7 +74,7 @@ pub struct Database {
 
 impl Database {
     /// Opens the database at `path`, given without an extension, for
-    /// reading and adding games.
+    /// reading and changing games.
     ///
     /// # Errors
     ///
@@ -197,7 +199,7 @@ impl Database {
     /// Read only the games that aren't logically deleted, in order:
     ///
     /// ```
-    /// use scidtopgn::{Database, Index};
+    /// use scidtopgn::Database;
     ///
     /// # let dir = tempfile::tempdir()?;
     /// # let path = dir.path().join("games");
@@ -205,11 +207,8 @@ impl Database {
     /// # for pgn in ["[White \"Anand\"]\n\n1. e4 e5 *", "[White \"Carlsen\"]\n\n1. d4 d5 *"] {
     /// #     db.add_game(&scidtopgn::parse_single_game(pgn)?)?;
     /// # }
+    /// # db.delete_game(0)?;
     /// # db.close()?;
-    /// # let si4 = path.with_extension("si4");
-    /// # let mut index = Index::open(&si4)?;
-    /// # index.get_entry_mut(0).unwrap().set_delete_flag(true);
-    /// # index.flush(&mut std::fs::File::create(&si4)?)?;
     /// let mut db = Database::open(&path)?;
     ///
     /// let mut white = Vec::new();
@@ -367,6 +366,156 @@ impl Database {
     /// # Ok::<(), scidtopgn::Error>(())
     /// ```
     pub fn add_game(&mut self, game: &Game) -> Result<u32> {
+        let entry = self.store_game(game)?;
+        let game_num = self.index.add_entry(entry)?;
+        let entry = self
+            .index
+            .get_entry(game_num)
+            .expect("the entry was just added");
+        count_names(
+            self.nfile.namebase_mut(),
+            entry,
+            NameBase::increment_frequency,
+        );
+
+        self.modified = true;
+
+        Ok(game_num)
+    }
+
+    /// Replaces game `game_num`, counting from 0, with `game`. The game
+    /// keeps its number, and the change is written to the files by
+    /// [`flush`](Self::flush) or [`close`](Self::close).
+    ///
+    /// As in SCID, the new record is added to the end of the game file, and
+    /// the old one stays there unused. The game keeps its user-settable
+    /// flags, including the logical delete flag. The names the game no
+    /// longer uses stay in the name file, even when no game uses them.
+    ///
+    /// The old record isn't read, so a game that can't be read can still be
+    /// replaced.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::GameNotFound`] if there is no such game, and
+    /// otherwise the same errors as [`add_game`](Self::add_game). After an
+    /// error, the game's index entry and the name frequencies are unchanged,
+    /// though a new name or the new record may stay in the files unused.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use scidtopgn::{parse_single_game, Database};
+    ///
+    /// # let dir = tempfile::tempdir()?;
+    /// # let path = dir.path().join("games");
+    /// # let mut db = Database::create(&path)?;
+    /// # for pgn in ["[White \"Anand\"]\n\n1. e4 e5 *", "[White \"Carlsen\"]\n\n1. d4 d5 *"] {
+    /// #     db.add_game(&parse_single_game(pgn)?)?;
+    /// # }
+    /// # db.close()?;
+    /// let mut db = Database::open(&path)?;
+    /// db.update_game(0, &parse_single_game("[White \"Kasparov\"]\n\n1. c4 *")?)?;
+    /// db.close()?;
+    ///
+    /// let mut db = Database::open(&path)?;
+    /// assert_eq!(db.get_game(0)?.white, "Kasparov");
+    /// assert_eq!(db.num_games(), 2);
+    /// # Ok::<(), scidtopgn::Error>(())
+    /// ```
+    pub fn update_game(&mut self, game_num: u32, game: &Game) -> Result<()> {
+        let old = self
+            .index
+            .get_entry(game_num)
+            .ok_or(Error::GameNotFound {
+                number: u64::from(game_num) + 1,
+            })?
+            .clone();
+
+        let mut entry = self.store_game(game)?;
+        entry.copy_user_flags(&old);
+
+        // The old names lose 1 first, so a name the game keeps ends at 1 or
+        // more, even if its count was wrongly 0.
+        let nb = self.nfile.namebase_mut();
+        count_names(nb, &old, NameBase::decrement_frequency);
+        count_names(nb, &entry, NameBase::increment_frequency);
+
+        *self
+            .index
+            .get_entry_mut(game_num)
+            .expect("the entry was found above") = entry;
+        self.modified = true;
+
+        Ok(())
+    }
+
+    /// Marks game `game_num`, counting from 0, as logically deleted. Its
+    /// record, its number, and the name frequencies don't change, and
+    /// [`undelete_game`](Self::undelete_game) reverses it. The change is
+    /// written to the files by [`flush`](Self::flush) or
+    /// [`close`](Self::close). See [Logically deleted
+    /// games](#logically-deleted-games).
+    ///
+    /// Deleting a game that is already deleted does nothing.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::GameNotFound`] if there is no such game.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use scidtopgn::Database;
+    ///
+    /// # let dir = tempfile::tempdir()?;
+    /// # let path = dir.path().join("games");
+    /// # let mut db = Database::create(&path)?;
+    /// # db.add_game(&scidtopgn::parse_single_game("1. e4 e5 *")?)?;
+    /// # db.close()?;
+    /// let mut db = Database::open(&path)?;
+    /// db.delete_game(0)?;
+    /// db.close()?;
+    ///
+    /// let db = Database::open(&path)?;
+    /// assert!(db.get_entry(0).unwrap().get_delete_flag());
+    /// assert_eq!(db.num_games(), 1);
+    /// # Ok::<(), scidtopgn::Error>(())
+    /// ```
+    pub fn delete_game(&mut self, game_num: u32) -> Result<()> {
+        self.set_delete_flag(game_num, true)
+    }
+
+    /// Clears the logical delete flag of game `game_num`, counting from 0,
+    /// reversing [`delete_game`](Self::delete_game). The change is written
+    /// to the files by [`flush`](Self::flush) or [`close`](Self::close).
+    ///
+    /// Undeleting a game that isn't deleted does nothing.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::GameNotFound`] if there is no such game.
+    pub fn undelete_game(&mut self, game_num: u32) -> Result<()> {
+        self.set_delete_flag(game_num, false)
+    }
+
+    fn set_delete_flag(&mut self, game_num: u32, deleted: bool) -> Result<()> {
+        let entry = self
+            .index
+            .get_entry_mut(game_num)
+            .ok_or(Error::GameNotFound {
+                number: u64::from(game_num) + 1,
+            })?;
+        if entry.get_delete_flag() != deleted {
+            entry.set_delete_flag(deleted);
+            self.modified = true;
+        }
+        Ok(())
+    }
+
+    /// Adds `game`'s record to the game file and its names to the name base,
+    /// and returns its index entry. The names' frequencies don't change.
+    fn store_game(&mut self, game: &Game) -> Result<IndexEntry> {
         let encoded_data = self.encode_game(game)?;
         let buf = ByteBuffer::from_slice(&encoded_data);
         let offset = self.gfile.add_game(&buf)?;
@@ -379,23 +528,15 @@ impl Database {
         let nb = self.nfile.namebase_mut();
 
         let white_id = nb.add_name(NameType::Player, &game.white)?;
-        nb.increment_frequency(NameType::Player, white_id);
-        entry.set_white(white_id);
-
         let black_id = nb.add_name(NameType::Player, &game.black)?;
-        nb.increment_frequency(NameType::Player, black_id);
-        entry.set_black(black_id);
-
         let event_id = nb.add_name(NameType::Event, &game.event)?;
-        nb.increment_frequency(NameType::Event, event_id);
-        entry.set_event(event_id);
-
         let site_id = nb.add_name(NameType::Site, &game.site)?;
-        nb.increment_frequency(NameType::Site, site_id);
-        entry.set_site(site_id);
-
         let round_id = nb.add_name(NameType::Round, &game.round)?;
-        nb.increment_frequency(NameType::Round, round_id);
+
+        entry.set_white(white_id);
+        entry.set_black(black_id);
+        entry.set_event(event_id);
+        entry.set_site(site_id);
         entry.set_round(round_id);
 
         entry.set_date(game.date.raw());
@@ -421,11 +562,7 @@ impl Database {
             }
         }
 
-        let game_num = self.index.add_entry(entry)?;
-
-        self.modified = true;
-
-        Ok(game_num)
+        Ok(entry)
     }
 
     fn encode_game(&self, game: &Game) -> Result<Vec<u8>> {
@@ -568,9 +705,10 @@ impl Database {
         Ok(())
     }
 
-    /// Writes the games added since the database was opened, created, or
-    /// last flushed: the game file's pending data, then the name file, then
-    /// the index file. Does nothing if no game was added.
+    /// Writes the games added, replaced, deleted, or undeleted since the
+    /// database was opened, created, or last flushed: the game file's
+    /// pending data, then the name file, then the index file. Does nothing
+    /// if no game changed.
     ///
     /// # Errors
     ///
@@ -678,6 +816,16 @@ impl Database {
     }
 }
 
+/// Calls `change` on the frequency of each of the five names `entry` refers
+/// to.
+fn count_names(nb: &mut NameBase, entry: &IndexEntry, change: fn(&mut NameBase, NameType, u32)) {
+    change(nb, NameType::Player, entry.get_white());
+    change(nb, NameType::Player, entry.get_black());
+    change(nb, NameType::Event, entry.get_event());
+    change(nb, NameType::Site, entry.get_site());
+    change(nb, NameType::Round, entry.get_round());
+}
+
 /// An iterator over the games of a [`Database`], made by
 /// [`Database::games`].
 pub struct GameIterator<'a> {
@@ -698,5 +846,72 @@ impl<'a> Iterator for GameIterator<'a> {
         self.current += 1;
 
         Some(self.db.get_game(game_num))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parse_single_game;
+
+    fn game(white: &str, round: &str) -> Game {
+        parse_single_game(&format!(
+            "[White \"{white}\"]\n[Round \"{round}\"]\n\n1. e4 *\n"
+        ))
+        .unwrap()
+    }
+
+    fn frequency(db: &Database, ntype: NameType, name: &str) -> u32 {
+        let nb = db.nfile.namebase();
+        nb.get_frequency(ntype, nb.find_name(ntype, name).unwrap())
+    }
+
+    #[test]
+    fn test_update_game_counts_a_kept_name_whose_count_is_0() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let mut db = Database::create(temp.path().join("db")).unwrap();
+        db.add_game(&game("A", "1")).unwrap();
+        let id = db.index.get_entry(0).unwrap().get_white();
+        db.nfile
+            .namebase_mut()
+            .decrement_frequency(NameType::Player, id);
+        assert_eq!(frequency(&db, NameType::Player, "A"), 0);
+
+        db.update_game(0, &game("A", "1")).unwrap();
+        assert_eq!(frequency(&db, NameType::Player, "A"), 1);
+    }
+
+    #[test]
+    fn test_full_name_base_leaves_the_entry_and_frequencies_unchanged() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let mut db = Database::create(temp.path().join("db")).unwrap();
+        db.add_game(&game("A", "1")).unwrap();
+        let nb = db.nfile.namebase_mut();
+        for n in nb.count(NameType::Round)..NameType::Round.max_id() {
+            nb.add_name(NameType::Round, &format!("r{n}")).unwrap();
+        }
+        let entry = db.index.get_entry(0).unwrap().clone();
+        let full = |result: Result<()>| {
+            matches!(
+                result,
+                Err(Error::NameBaseFull {
+                    name_type: NameType::Round
+                })
+            )
+        };
+
+        assert!(full(db.update_game(0, &game("B", "new"))));
+        assert!(full(db.add_game(&game("B", "new")).map(|_| ())));
+
+        let mut before = Vec::new();
+        entry.write(&mut before).unwrap();
+        let mut after = Vec::new();
+        db.index.get_entry(0).unwrap().write(&mut after).unwrap();
+        assert_eq!(after, before);
+        assert_eq!(db.num_games(), 1);
+        assert_eq!(frequency(&db, NameType::Player, "A"), 1);
+        assert_eq!(frequency(&db, NameType::Round, "1"), 1);
+        // The new White was added before the round failed, and is unused.
+        assert_eq!(frequency(&db, NameType::Player, "B"), 0);
     }
 }

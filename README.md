@@ -152,7 +152,7 @@ let game = db.get_game(0)?;
 println!("{} vs {}", game.white, game.black);
 ```
 
-`games()` and `get_game()` include games that SCID has logically deleted, unlike the CLI's export. The [API documentation](https://docs.rs/scidtopgn) shows how to skip them and covers the rest of the library. To build it locally, run `cargo doc -p scidtopgn --open`.
+`update_game()` replaces a game and keeps its number. `delete_game()` marks a game as logically deleted, as SCID does, and `undelete_game()` reverses it; the game's record and number stay until the database is compacted. `games()` and `get_game()` include games that SCID has logically deleted, unlike the CLI's export. The [API documentation](https://docs.rs/scidtopgn) shows how to skip them and covers the rest of the library. To build it locally, run `cargo doc -p scidtopgn --open`.
 
 ## Building & testing
 

@@ -1,4 +1,4 @@
-use scidtopgn::{Database, Date, Game, GameResult, Index};
+use scidtopgn::{Database, Date, Error, Game, GameResult, Index, NameType};
 
 fn get_test_data_path(name: &str) -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -435,4 +435,289 @@ fn test_many_nags_round_trip() {
         expected,
         "after PGN to SCID to PGN"
     );
+}
+
+/// The bytes of the files of the database at `path`.
+fn database_bytes(path: &std::path::Path) -> Vec<Vec<u8>> {
+    ["si4", "sn4", "sg4"]
+        .map(|ext| std::fs::read(path.with_extension(ext)).unwrap())
+        .into()
+}
+
+/// Every name of every kind, with its ID and frequency.
+fn all_names(db: &Database) -> Vec<Vec<(u32, String, u32)>> {
+    let nb = db.nfile().namebase();
+    [
+        NameType::Player,
+        NameType::Event,
+        NameType::Site,
+        NameType::Round,
+    ]
+    .map(|ntype| nb.get_all_names(ntype))
+    .into()
+}
+
+/// The frequency of `name`, which must be in the name file.
+fn frequency(db: &Database, ntype: NameType, name: &str) -> u32 {
+    let nb = db.nfile().namebase();
+    nb.get_frequency(ntype, nb.find_name(ntype, name).unwrap())
+}
+
+/// The name frequencies of `game`'s White, Black, event, site, and round.
+fn name_frequencies(db: &Database, game: &Game) -> [u32; 5] {
+    [
+        frequency(db, NameType::Player, &game.white),
+        frequency(db, NameType::Player, &game.black),
+        frequency(db, NameType::Event, &game.event),
+        frequency(db, NameType::Site, &game.site),
+        frequency(db, NameType::Round, &game.round),
+    ]
+}
+
+/// The bytes of game `n`'s index entry.
+fn entry_bytes(db: &Database, n: u32) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    db.get_entry(n).unwrap().write(&mut bytes).unwrap();
+    bytes
+}
+
+fn delete_flags(db: &Database) -> Vec<bool> {
+    (0..db.num_games())
+        .map(|n| db.get_entry(n).unwrap().get_delete_flag())
+        .collect()
+}
+
+const NEW_GAME: &str = "[Event \"Rapid\"]\n[Site \"Oslo\"]\n[Date \"2024.05.01\"]\n\
+    [Round \"7\"]\n[White \"Kasparov, Garry\"]\n[Black \"Karpov, Anatoly\"]\n\
+    [Result \"1-0\"]\n[WhiteElo \"2800\"]\n[ECO \"A10\"]\n\n1. c4 e5 1-0\n";
+
+#[test]
+fn test_delete_and_undelete_game() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let path = five_with_deleted(temp.path(), &[]);
+    let mut db = Database::open(&path).unwrap();
+    let stored = all_pgn(&mut db);
+    let names = all_names(&db);
+
+    db.delete_game(1).unwrap();
+    db.delete_game(3).unwrap();
+    assert_eq!(delete_flags(&db), [false, true, false, true, false]);
+    db.close().unwrap();
+
+    let mut db = Database::open(&path).unwrap();
+    assert_eq!(delete_flags(&db), [false, true, false, true, false]);
+    assert_eq!(db.num_games(), 5);
+    assert_eq!(all_pgn(&mut db), stored, "records and numbers are kept");
+    assert_eq!(all_names(&db), names, "name frequencies don't change");
+
+    db.undelete_game(1).unwrap();
+    db.close().unwrap();
+    let db = Database::open(&path).unwrap();
+    assert_eq!(delete_flags(&db), [false, false, false, true, false]);
+}
+
+#[test]
+fn test_deleting_a_deleted_game_changes_nothing() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let path = five_with_deleted(temp.path(), &[1]);
+    let before = database_bytes(&path);
+
+    let mut db = Database::open(&path).unwrap();
+    db.delete_game(1).unwrap();
+    db.undelete_game(0).unwrap();
+    assert_eq!(delete_flags(&db), [false, true, false, false, false]);
+    db.close().unwrap();
+
+    assert_eq!(database_bytes(&path), before);
+}
+
+#[test]
+fn test_changing_a_game_past_the_last() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let path = five_with_deleted(temp.path(), &[]);
+    let before = database_bytes(&path);
+    let game = scidtopgn::parse_single_game(NEW_GAME).unwrap();
+
+    let mut db = Database::open(&path).unwrap();
+    let not_found = |result| matches!(result, Err(Error::GameNotFound { number: 6 }));
+    assert!(not_found(db.delete_game(5)));
+    assert!(not_found(db.undelete_game(5)));
+    assert!(not_found(db.update_game(5, &game)));
+    assert!(matches!(
+        db.delete_game(u32::MAX),
+        Err(Error::GameNotFound {
+            number: 4_294_967_296
+        })
+    ));
+    db.close().unwrap();
+
+    assert_eq!(database_bytes(&path), before);
+}
+
+#[test]
+fn test_update_game() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let path = five_with_deleted(temp.path(), &[]);
+    let mut db = Database::open(&path).unwrap();
+    let stored = all_pgn(&mut db);
+    let old = db.get_game(2).unwrap();
+    let old_frequencies = name_frequencies(&db, &old);
+    let players = db.nfile().namebase().count(NameType::Player);
+    let size = db.gfile().file_size();
+
+    let game = scidtopgn::parse_single_game(NEW_GAME).unwrap();
+    let expected = scid_round_trip(&game).to_pgn();
+    db.update_game(2, &game).unwrap();
+
+    let check = |db: &mut Database| {
+        assert_eq!(db.num_games(), 5);
+        let mut games = all_pgn(db);
+        assert_eq!(games.remove(2), expected);
+        let mut others = stored.clone();
+        others.remove(2);
+        assert_eq!(games, others, "the other games don't change");
+
+        assert_eq!(name_frequencies(db, &game), [1; 5]);
+        assert_eq!(
+            name_frequencies(db, &old),
+            old_frequencies.map(|f| f - 1),
+            "the old names lose 1 and stay in the name file"
+        );
+        assert_eq!(db.nfile().namebase().count(NameType::Player), players + 2);
+    };
+    check(&mut db);
+    let length = db.get_entry(2).unwrap().get_length();
+    assert_eq!(
+        db.gfile().file_size(),
+        size + u64::from(length),
+        "the new record is added and the old one stays"
+    );
+    db.close().unwrap();
+
+    check(&mut Database::open(&path).unwrap());
+}
+
+#[test]
+fn test_update_game_with_the_same_names() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let path = five_with_deleted(temp.path(), &[]);
+    let mut db = Database::open(&path).unwrap();
+    let names = all_names(&db);
+
+    let mut game = db.get_game(0).unwrap();
+    game.result = GameResult::Black;
+    db.update_game(0, &game).unwrap();
+
+    assert_eq!(all_names(&db), names);
+    assert_eq!(db.get_game(0).unwrap().result, GameResult::Black);
+}
+
+#[test]
+fn test_update_game_keeps_user_flags_and_sets_the_start_flag() {
+    use scidtopgn::index::{IDX_MASK_DELETE, IDX_MASK_NOVELTY};
+
+    let temp = tempfile::TempDir::new().unwrap();
+    let path = five_with_deleted(temp.path(), &[1]);
+    let si4 = path.with_extension("si4");
+    let mut index = Index::open(&si4).unwrap();
+    index
+        .get_entry_mut(1)
+        .unwrap()
+        .set_flag(IDX_MASK_NOVELTY, true);
+    index
+        .flush(&mut std::fs::File::create(&si4).unwrap())
+        .unwrap();
+
+    let flags = |db: &Database| {
+        let entry = db.get_entry(1).unwrap();
+        (
+            entry.get_flag(IDX_MASK_DELETE),
+            entry.get_flag(IDX_MASK_NOVELTY),
+            entry.get_start_flag(),
+        )
+    };
+
+    let mut db = Database::open(&path).unwrap();
+    let setup = "[FEN \"4k3/8/8/8/8/8/4P3/4K3 w - - 0 1\"]\n[SetUp \"1\"]\n\n1. e4 *\n";
+    db.update_game(1, &scidtopgn::parse_single_game(setup).unwrap())
+        .unwrap();
+    assert_eq!(flags(&db), (true, true, true));
+
+    db.update_game(1, &scidtopgn::parse_single_game(NEW_GAME).unwrap())
+        .unwrap();
+    assert_eq!(flags(&db), (true, true, false));
+    db.close().unwrap();
+
+    assert_eq!(flags(&Database::open(&path).unwrap()), (true, true, false));
+}
+
+#[test]
+fn test_update_game_before_flush_in_new_database() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let path = temp.path().join("new");
+    let parse = |white: &str| {
+        scidtopgn::parse_single_game(&format!("[White \"{white}\"]\n\n1. e4 *\n")).unwrap()
+    };
+
+    let mut db = Database::create(&path).unwrap();
+    db.add_game(&parse("A")).unwrap();
+    db.add_game(&parse("B")).unwrap();
+    db.update_game(0, &parse("C")).unwrap();
+    assert_eq!(db.get_game(0).unwrap().white, "C");
+    db.close().unwrap();
+
+    let mut db = Database::open(&path).unwrap();
+    assert_eq!(db.num_games(), 2);
+    assert_eq!(db.get_game(0).unwrap().white, "C");
+    assert_eq!(db.get_game(1).unwrap().white, "B");
+    assert_eq!(frequency(&db, NameType::Player, "A"), 0);
+    assert_eq!(frequency(&db, NameType::Player, "C"), 1);
+    // Every game's Black is "?".
+    assert_eq!(frequency(&db, NameType::Player, "?"), 2);
+}
+
+#[test]
+fn test_update_damaged_game_with_missing_names() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let path = five_with_deleted(temp.path(), &[]);
+    let si4 = path.with_extension("si4");
+    let mut index = Index::open(&si4).unwrap();
+    let entry = index.get_entry_mut(0).unwrap();
+    entry.set_offset(u32::MAX - 10);
+    entry.set_white(999_999);
+    index
+        .flush(&mut std::fs::File::create(&si4).unwrap())
+        .unwrap();
+
+    let mut db = Database::open(&path).unwrap();
+    assert!(db.get_game(0).is_err());
+    let game = scidtopgn::parse_single_game(NEW_GAME).unwrap();
+    db.update_game(0, &game).unwrap();
+    db.close().unwrap();
+
+    let mut db = Database::open(&path).unwrap();
+    assert_eq!(
+        db.get_game(0).unwrap().to_pgn(),
+        scid_round_trip(&game).to_pgn()
+    );
+}
+
+#[test]
+fn test_update_game_too_large_changes_nothing() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let path = five_with_deleted(temp.path(), &[]);
+    let before = database_bytes(&path);
+
+    let mut db = Database::open(&path).unwrap();
+    let entry = entry_bytes(&db, 0);
+    let names = all_names(&db);
+    assert!(matches!(
+        db.update_game(0, &game_with_record_length(131_072)),
+        Err(Error::GameTooLarge { .. })
+    ));
+    assert_eq!(entry_bytes(&db, 0), entry);
+    assert_eq!(all_names(&db), names);
+    db.close().unwrap();
+
+    assert_eq!(database_bytes(&path), before);
 }

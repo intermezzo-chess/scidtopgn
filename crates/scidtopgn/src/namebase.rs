@@ -228,6 +228,15 @@ impl NameBase {
         }
     }
 
+    /// Subtracts 1 from the frequency of the name with ID `id`, if there is
+    /// one and its frequency isn't 0. The highest frequency stays as it was,
+    /// which only makes the name file store frequencies wider than needed.
+    pub(crate) fn decrement_frequency(&mut self, ntype: NameType, id: u32) {
+        if let Some(Some(entry)) = self.by_id[ntype.as_usize()].get_mut(id as usize) {
+            entry.frequency = entry.frequency.saturating_sub(1);
+        }
+    }
+
     /// Returns the ID, name, and frequency of every name of kind `ntype`, in
     /// ID order.
     pub fn get_all_names(&self, ntype: NameType) -> Vec<(u32, String, u32)> {
@@ -486,6 +495,24 @@ mod tests {
         assert_eq!(NameType::Event.max_id(), 524_287);
         assert_eq!(NameType::Site.max_id(), 524_287);
         assert_eq!(NameType::Round.max_id(), 262_143);
+    }
+
+    #[test]
+    fn test_decrement_frequency() {
+        let mut nb = NameBase::new();
+        let id = nb.add_name(NameType::Event, "Open").unwrap();
+        nb.increment_frequency(NameType::Event, id);
+        nb.increment_frequency(NameType::Event, id);
+
+        nb.decrement_frequency(NameType::Event, id);
+        assert_eq!(nb.get_frequency(NameType::Event, id), 1);
+        nb.decrement_frequency(NameType::Event, id);
+        nb.decrement_frequency(NameType::Event, id);
+        assert_eq!(nb.get_frequency(NameType::Event, id), 0);
+        assert_eq!(nb.max_frequency(NameType::Event), 2);
+        // A missing name is ignored.
+        nb.decrement_frequency(NameType::Event, id + 1);
+        nb.decrement_frequency(NameType::Player, id);
     }
 
     #[test]
