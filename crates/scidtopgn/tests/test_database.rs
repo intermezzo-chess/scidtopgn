@@ -234,6 +234,56 @@ fn test_open_and_close_without_changes() {
     assert_eq!(after, before);
 }
 
+/// Asserts that the database at `path` opens with no games and no names.
+fn assert_opens_empty(path: &std::path::Path) {
+    let db = Database::open(path).unwrap();
+    assert_eq!(db.num_games(), 0);
+    for ntype in [
+        NameType::Player,
+        NameType::Event,
+        NameType::Site,
+        NameType::Round,
+    ] {
+        assert_eq!(db.nfile().namebase().count(ntype), 0, "{ntype:?}");
+    }
+}
+
+#[test]
+fn test_create_without_games_opens_empty() {
+    let temp = tempfile::TempDir::new().unwrap();
+
+    let closed = temp.path().join("closed");
+    Database::create(&closed).unwrap().close().unwrap();
+    assert_opens_empty(&closed);
+
+    let flushed = temp.path().join("flushed");
+    let mut db = Database::create(&flushed).unwrap();
+    db.flush().unwrap();
+    assert_opens_empty(&flushed);
+    drop(db);
+
+    let dropped = temp.path().join("dropped");
+    drop(Database::create(&dropped).unwrap());
+    assert_opens_empty(&dropped);
+}
+
+#[test]
+fn test_create_replaces_every_file_of_an_existing_database() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let path = temp.path().join("five");
+    for ext in ["si4", "sn4", "sg4"] {
+        std::fs::copy(
+            get_test_data_path("five").with_extension(ext),
+            path.with_extension(ext),
+        )
+        .unwrap();
+    }
+
+    drop(Database::create(&path).unwrap());
+
+    assert_opens_empty(&path);
+}
+
 /// `game` written to a new database and read back.
 fn scid_round_trip(game: &Game) -> Game {
     let temp = tempfile::TempDir::new().unwrap();

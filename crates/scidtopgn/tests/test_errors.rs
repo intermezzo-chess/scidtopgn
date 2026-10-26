@@ -90,6 +90,25 @@ fn test_open_reports_which_file_is_missing() {
 }
 
 #[test]
+fn test_create_reports_a_name_file_it_cannot_write() {
+    let temp = TempDir::new().unwrap();
+    let db = temp.path().join("db");
+    std::fs::create_dir(db.with_extension("sn4")).unwrap();
+
+    let error = Database::create(&db).err().unwrap();
+    assert!(
+        matches!(
+            &error,
+            Error::File {
+                file: DatabaseFile::Name,
+                source,
+            } if matches!(**source, Error::Io(_))
+        ),
+        "{error:?}"
+    );
+}
+
+#[test]
 fn test_open_rejects_wrong_magic_numbers() {
     for (ext, file) in [("si4", DatabaseFile::Index), ("sn4", DatabaseFile::Name)] {
         let temp = TempDir::new().unwrap();

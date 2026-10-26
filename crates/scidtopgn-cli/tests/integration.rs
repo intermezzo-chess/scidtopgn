@@ -173,6 +173,67 @@ fn test_cli_import_overwrite() {
     assert_eq!(db.num_games(), 1, "Should have 1 game after overwrite");
 }
 
+const EMPTY_INFO: &str = "Total games: 0\nDeleted games: 0\nActive games: 0\n\
+    Player names: 0\nEvent names: 0\nSite names: 0\nRound names: 0\n\
+    Years of active games: unknown\n";
+
+#[test]
+fn test_cli_import_without_games() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    for (name, pgn) in [
+        ("text", "just text\n"),
+        ("open_comment", "[White \"Anand\"]\n\n1. e4 {never closed\n"),
+    ] {
+        let pgn_path = temp.path().join(name).with_extension("pgn");
+        std::fs::write(&pgn_path, pgn).expect("Failed to write PGN");
+        let db = temp.path().join(name);
+
+        let output = cli()
+            .arg("import")
+            .arg(&pgn_path)
+            .arg("-o")
+            .arg(&db)
+            .output()
+            .expect("Failed to run CLI");
+        assert!(output.status.success(), "{name}: {output:?}");
+
+        let output = cli()
+            .arg(&db)
+            .arg("--count")
+            .output()
+            .expect("Failed to run CLI");
+        assert!(output.status.success(), "{name}: {output:?}");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "0 games\n",
+            "{name}"
+        );
+        assert_eq!(info(&db), EMPTY_INFO, "{name}");
+    }
+}
+
+#[test]
+fn test_cli_import_overwrite_without_games() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let db = temp.path().join("db");
+    let pgn_path = temp.path().join("none.pgn");
+    std::fs::write(&pgn_path, "just text\n").expect("Failed to write PGN");
+
+    for pgn in [Path::new("tests/data/one.pgn"), &pgn_path] {
+        let output = cli()
+            .arg("import")
+            .arg(pgn)
+            .arg("--overwrite")
+            .arg("-o")
+            .arg(&db)
+            .output()
+            .expect("Failed to run CLI");
+        assert!(output.status.success(), "{output:?}");
+    }
+
+    assert_eq!(info(&db), EMPTY_INFO);
+}
+
 #[test]
 fn test_cli_pgn_roundtrip() {
     let temp = TempDir::new().expect("Failed to create temp dir");
