@@ -1233,7 +1233,7 @@ fn test_cli_quiet_hides_errors() {
     assert!(output.stderr.is_empty());
     assert!(String::from_utf8_lossy(&output.stdout).starts_with("Total games: 5\n"));
 
-    // --quiet and --verbose can't be combined.
+    // --quiet and --verbose can't be combined without --log.
     for args in [
         &["tests/data/five", "-q", "-v"][..],
         &["export", "tests/data/five", "--quiet", "--verbose"],
@@ -1242,7 +1242,7 @@ fn test_cli_quiet_hides_errors() {
         let output = cli().args(args).output().expect("Failed to run CLI");
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(!output.status.success(), "{args:?}");
-        assert!(stderr.contains("cannot be used with"), "{args:?}: {stderr}");
+        assert!(stderr.contains("--log <PATH>"), "{args:?}: {stderr}");
     }
     assert!(!Path::new(db).with_extension("si4").exists());
 }
@@ -1280,5 +1280,282 @@ fn test_cli_rejects_options_before_a_subcommand() {
             !temp.path().join("out.pgn").exists(),
             "{args:?}: nothing is exported"
         );
+    }
+}
+
+/// The lines of the log at `path`, after the line that starts the run.
+fn log_messages(path: &Path) -> Vec<String> {
+    let log = std::fs::read_to_string(path).expect("Failed to read log");
+    let mut lines = log.lines();
+    let start = lines.next().unwrap_or_default();
+    assert!(
+        start.starts_with(&format!(
+            "info: Running scidtopgn {}: ",
+            env!("CARGO_PKG_VERSION")
+        )),
+        "{log}"
+    );
+    lines.map(str::to_owned).collect()
+}
+
+/// The log lines for messages written to stderr as `stderr`.
+fn as_log_lines(stderr: &str) -> Vec<String> {
+    stderr
+        .lines()
+        .map(|line| match line.strip_prefix("Warning: ") {
+            Some(warning) => format!("warning: {warning}"),
+            None => format!("info: {line}"),
+        })
+        .collect()
+}
+
+#[test]
+fn test_cli_quiet_import_writes_warnings_to_the_log() {
+    let castled = "[Event \"Castled\"]\n[Result \"1-0\"]\n\n1. e4 e5 2. Nf3 Nf6 3. Bc4 Bc5\n4. Ke2 Ke7 5. Ke1 Ke8 6. O-O 1-0\n";
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let pgn = temp.path().join("input.pgn");
+    std::fs::write(&pgn, [castled, ILLEGAL_GAME, VALID_GAME].join("\n"))
+        .expect("Failed to write PGN");
+
+    for verbose in [&[][..], &["--verbose"]] {
+        // Import into a new database named the same each time, so that the
+        // messages are the same.
+        let import = |args: &[&str]| {
+            let dir = TempDir::new().expect("Failed to create temp dir");
+            let output = cli()
+                .current_dir(dir.path())
+                .arg("import")
+                .arg(&pgn)
+                .args(["-o", "db"])
+                .args(verbose)
+                .args(args)
+                .output()
+                .expect("Failed to run CLI");
+            (output, imported_events(&dir.path().join("db")))
+        };
+        let (shown, _) = import(&[]);
+        assert!(shown.status.success());
+        let stderr = String::from_utf8_lossy(&shown.stderr);
+
+        let log = temp.path().join(format!("import{}.log", verbose.len()));
+        let (quiet, events) = import(&["--quiet", "--log", log.to_str().unwrap()]);
+        assert!(quiet.status.success(), "{verbose:?}");
+        assert!(quiet.stdout.is_empty(), "{verbose:?}");
+        assert!(quiet.stderr.is_empty(), "{verbose:?}");
+
+        // The log has the messages stderr would have, at the same verbosity.
+        let messages = log_messages(&log);
+        assert_eq!(messages, as_log_lines(&stderr), "{verbose:?}");
+        assert!(
+            messages.contains(
+                &"warning: PGN game 1, line 5: \"O-O\" castles without the castling right"
+                    .to_owned()
+            ),
+            "{messages:?}"
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|line| line.starts_with("warning: skipping PGN game 2")),
+            "{messages:?}"
+        );
+        assert_eq!(
+            messages
+                .iter()
+                .any(|line| line.starts_with("info: Processed ")),
+            !verbose.is_empty(),
+            "{messages:?}"
+        );
+        assert_eq!(events, ["Castled", "Valid"]);
+    }
+}
+
+#[test]
+fn test_cli_logs_errors() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let missing = temp.path().join("missing");
+    let existing = temp.path().join("out.pgn");
+    std::fs::write(&existing, "keep").expect("Failed to write file");
+    let log = temp.path().join("run.log");
+    let log_arg = log.to_str().unwrap();
+
+    for (db, args, error) in [
+        (&missing, &[][..], "error: Failed to open database '"),
+        (
+            &PathBuf::from("tests/data/five"),
+            &["-o", existing.to_str().unwrap()],
+            "error: Output file '",
+        ),
+    ] {
+        for (without, with) in export_outputs(db, args)
+            .into_iter()
+            .zip(export_outputs(db, &[args, &["--log", log_arg]].concat()))
+        {
+            assert_eq!(with.status.code(), Some(1));
+            assert_eq!(with.status.code(), without.status.code());
+            assert_eq!(with.stderr, without.stderr);
+        }
+        let messages = log_messages(&log);
+        std::fs::remove_file(&log).expect("Failed to remove log");
+        // The runs without and with the subcommand each log the error, and
+        // the second starts with its own first line.
+        assert_eq!(messages.len(), 3, "{messages:?}");
+        assert!(messages[0].starts_with(error), "{messages:?}");
+        assert!(
+            messages[1].starts_with("info: Running scidtopgn"),
+            "{messages:?}"
+        );
+        assert_eq!(messages[0], messages[2]);
+    }
+    assert_eq!(std::fs::read_to_string(&existing).unwrap(), "keep");
+
+    let output = cli()
+        .arg("info")
+        .arg(&missing)
+        .args(["--quiet", "--log", log_arg])
+        .output()
+        .expect("Failed to run CLI");
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stderr.is_empty());
+    let messages = log_messages(&log);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(
+        messages[0].starts_with("error: Failed to open database '")
+            && messages[0].contains("(os error 2)"),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn test_cli_appends_to_the_log() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let log = temp.path().join("run.log");
+    std::fs::write(&log, "earlier\n").expect("Failed to write log");
+    for _ in 0..2 {
+        let output = cli()
+            .args(["tests/data/five", "--count", "--log"])
+            .arg(&log)
+            .output()
+            .expect("Failed to run CLI");
+        assert!(output.status.success());
+        // Results aren't logged.
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "5 games\n");
+    }
+    let log = std::fs::read_to_string(&log).expect("Failed to read log");
+    let lines: Vec<&str> = log.lines().collect();
+    assert_eq!(lines.len(), 3, "{log}");
+    assert_eq!(lines[0], "earlier");
+    assert!(lines[1].starts_with("info: Running scidtopgn"), "{log}");
+    assert!(lines[1].contains(" --count --log "), "{log}");
+    assert_eq!(lines[1], lines[2]);
+}
+
+#[test]
+fn test_cli_fails_before_touching_files_when_the_log_cant_be_opened() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let log = temp.path().join("missing").join("run.log");
+    let out = temp.path().join("out.pgn");
+    let db = temp.path().join("db");
+
+    let export = cli()
+        .args(["tests/data/five", "-o"])
+        .arg(&out)
+        .arg("--log")
+        .arg(&log)
+        .output()
+        .expect("Failed to run CLI");
+    let import = cli()
+        .args(["import", "tests/data/five.pgn", "-o"])
+        .arg(&db)
+        .arg("--log")
+        .arg(&log)
+        .output()
+        .expect("Failed to run CLI");
+    for output in [export, import] {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{stderr}");
+        assert!(
+            stderr.starts_with("Error: Failed to open log '"),
+            "{stderr}"
+        );
+    }
+    assert!(!out.exists());
+    assert!(!db.with_extension("si4").exists());
+    assert!(!log.exists());
+
+    let output = cli()
+        .args(["tests/data/five", "--quiet", "--log"])
+        .arg(&log)
+        .output()
+        .expect("Failed to run CLI");
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stderr.is_empty());
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
+fn test_cli_rejects_a_log_that_is_a_file_of_the_command() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let db = copy_with_deleted(temp.path(), "five", &[]);
+    let pgn = temp.path().join("input.pgn");
+    std::fs::write(&pgn, VALID_GAME).expect("Failed to write PGN");
+    let before = database_bytes(&db);
+
+    let dir = temp.path().to_str().unwrap();
+    for args in [
+        // A new output file, named differently.
+        &["five", "-o", "out.pgn", "--log", "./out.pgn"][..],
+        &["export", "five", "-o", "out.pgn", "--log", "out.pgn"],
+        &["five", "--count", "--log", "five.sg4"],
+        &["info", "five", "--log", "./five.sn4"],
+        &["import", "input.pgn", "-o", "five", "--log", "input.pgn"],
+        &["import", "input.pgn", "-o", "five", "--log", "five.si4"],
+        &["import", "input.pgn", "-o", "new", "--log", "new.sg4"],
+    ] {
+        let output = cli()
+            .current_dir(dir)
+            .args(args)
+            .output()
+            .expect("Failed to run CLI");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{args:?}: {stderr}");
+        assert!(stderr.contains("is the same file as"), "{args:?}: {stderr}");
+        assert!(output.stdout.is_empty(), "{args:?}");
+    }
+    assert!(!temp.path().join("out.pgn").exists());
+    assert!(!temp.path().join("new.sg4").exists());
+    assert!(!temp.path().join("new.si4").exists());
+    assert_eq!(database_bytes(&db), before);
+    assert_eq!(std::fs::read_to_string(&pgn).unwrap(), VALID_GAME);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn test_cli_fails_when_the_log_cant_be_written() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let out = temp.path().join("out.pgn");
+    for (quiet, stderr_lines) in [(false, 1), (true, 0)] {
+        let _ = std::fs::remove_file(&out);
+        let output = cli()
+            .args(["tests/data/five", "--verbose", "--log", "/dev/full", "-o"])
+            .arg(&out)
+            .args(quiet.then_some("--quiet"))
+            .output()
+            .expect("Failed to run CLI");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // The export finishes, but fails for the log.
+        assert_eq!(output.status.code(), Some(1), "{stderr}");
+        assert_eq!(
+            stderr
+                .matches("Error: Failed to write log '/dev/full'")
+                .count(),
+            stderr_lines,
+            "{stderr}"
+        );
+        if !quiet {
+            assert!(stderr.contains("Done. 5 games exported."), "{stderr}");
+        }
+        let pgn = std::fs::read_to_string(&out).expect("Failed to read output");
+        assert_eq!(pgn.matches("[Event \"").count(), 5);
     }
 }

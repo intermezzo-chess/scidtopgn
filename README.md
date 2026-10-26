@@ -60,7 +60,8 @@ Export skips games that SCID has logically deleted. `--count` counts every store
 | `--games` | - | No | all | Export only these games, such as `10-20` or `1-5,8`. Can't be combined with `--count` |
 | `--overwrite` | - | No | - | Overwrite the output file if it already exists |
 | `--verbose` | `-v` | No | - | Show progress at each 10% of the games, and a summary |
-| `--quiet` | `-q` | No | - | Write nothing to stderr, not even errors. Can't be combined with `--verbose` |
+| `--quiet` | `-q` | No | - | Write nothing to stderr, not even errors. Can be combined with `--verbose` only together with `--log` |
+| `--log` | - | No | - | Also append warnings and errors to this file, and with `--verbose` progress and a summary. See [Log file](#log-file) |
 
 ### Import (PGN → SCID)
 
@@ -84,9 +85,10 @@ Import reads the same PGN notation as SCID, such as `0-0`, `ed` for `exd5`, `e2-
 | `--overwrite` | - | No | - | Overwrite existing database instead of appending |
 | `--on-error` | - | No | `skip` | Error handling strategy: `skip` or `abort` |
 | `--verbose` | `-v` | No | - | Show progress at each 10% of the games, and a summary |
-| `--quiet` | `-q` | No | - | Write nothing to stderr, not even errors or skipped games. Can't be combined with `--verbose` |
+| `--quiet` | `-q` | No | - | Write nothing to stderr, not even errors or skipped games. Can be combined with `--verbose` only together with `--log` |
+| `--log` | - | No | - | Also append warnings and errors to this file, and with `--verbose` progress and a summary. See [Log file](#log-file) |
 
-With `--quiet` and the default `--on-error skip`, import doesn't report the games it skips, and it still exits with status 0. Use `--on-error abort` to make a bad game an error.
+With `--quiet` and the default `--on-error skip`, import doesn't report the games it skips, and it still exits with status 0. Add `--log` to keep a record of them, or use `--on-error abort` to make a bad game an error.
 
 ### Database info
 
@@ -105,11 +107,33 @@ Round names: 5
 Years of active games: 2022-2022
 ```
 
-Total games counts every stored game, and Active games those export writes. The name counts are the names stored in the database's name file, which can include names used only by deleted games. The years come from active games with a known date, or are `unknown`. `info` reads only the index and name files, so it works even when some games are damaged. It accepts `--quiet`.
+Total games counts every stored game, and Active games those export writes. The name counts are the names stored in the database's name file, which can include names used only by deleted games. The years come from active games with a known date, or are `unknown`. `info` reads only the index and name files, so it works even when some games are damaged. It accepts `--quiet` and `--log`.
 
 ### Quiet mode
 
 With `--quiet`, a command writes nothing to stderr: no warnings, progress, or error messages. Only the exit status shows whether it failed. Its results are still written, such as PGN, the `--count` line, and `info`'s output. Mistakes in the arguments themselves, such as an unknown option, are still reported.
+
+### Log file
+
+With `--log <path>`, a command also writes its messages to a file, so a run keeps a record even when the terminal shows nothing:
+
+```bash
+scidtopgn import games.pgn -o mydb --quiet --log import.log
+```
+
+The log gets the messages stderr gets without `--quiet`: warnings and errors, and with `--verbose` progress and a summary too. `--verbose` chooses the messages, and `--quiet` and `--log` choose where they go. `--quiet` and `--verbose` together need `--log`, which then gets the progress while the terminal stays silent.
+
+The file is created if missing, and each run appends to it. A run starts with a line giving the version and the arguments, so runs in one log can be told apart. Each message is one line starting with its level, without a timestamp:
+
+```text
+info: Running scidtopgn 0.1.0: import games.pgn -o mydb --quiet --log import.log
+warning: PGN game 1, line 5: "O-O" castles without the castling right
+warning: skipping PGN game 2, starting at line 7: Invalid move "Ke3" at line 10: illegal san
+```
+
+The log is opened before any other file. If it can't be opened, or it is a file the command reads or writes, such as the `-o` output or the database, the command fails without touching anything else. `-` isn't accepted as a log. Mistakes in the arguments themselves aren't logged, and results, such as PGN written to stdout, the `--count` line, and `info`'s output, aren't either.
+
+The exit status is the same with and without `--log`, unless writing the log fails part way. Then the command reports it on stderr, unless `--quiet`, and finishes, but exits with status 1, because the log is missing messages. After an import, that status doesn't mean the games weren't imported: running the import again would append them a second time.
 
 ## Use it as a library
 
