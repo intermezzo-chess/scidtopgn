@@ -9,12 +9,15 @@ use crate::bytebuf::ByteBuffer;
 use crate::error::{DatabaseFile, Error, Result};
 use crate::game::{Game, Marker, GAME_DECODE_ALL};
 use crate::gfile::GFile;
-use crate::index::{Index, IndexEntry};
-use crate::mov::encode_move;
+use crate::index::{
+    material_sig, HomePawnList, Index, IndexEntry, IDX_MASK_PROMO, IDX_MASK_UPROMO,
+};
+use crate::mov::{encode_move, GameMove};
 use crate::namebase::{NameBase, NameType};
 use crate::nfile::NFile;
 use crate::position::{fen, ScidPosition};
 use crate::Date;
+use shakmaty::{Board, Position, Role};
 
 /// A SCID database: an index file (`.si4`), a name file (`.sn4`), and a game
 /// file (`.sg4`) that share a path without the extension.
@@ -516,7 +519,7 @@ impl Database {
     /// Adds `game`'s record to the game file and its names to the name base,
     /// and returns its index entry. The names' frequencies don't change.
     fn store_game(&mut self, game: &Game) -> Result<IndexEntry> {
-        let encoded_data = self.encode_game(game)?;
+        let (encoded_data, summary) = self.encode_game(game)?;
         let buf = ByteBuffer::from_slice(&encoded_data);
         let offset = self.gfile.add_game(&buf)?;
 
@@ -524,6 +527,7 @@ impl Database {
         entry.set_offset(offset);
         entry.set_length(encoded_data.len() as u32);
         entry.set_start_flag(game.start_position.is_some());
+        summary.set_fields(&mut entry);
 
         let nb = self.nfile.namebase_mut();
 
@@ -565,30 +569,41 @@ impl Database {
         Ok(entry)
     }
 
-    fn encode_game(&self, game: &Game) -> Result<Vec<u8>> {
+    /// Encodes `game`'s record, and returns it with what the index entry
+    /// records about its moves.
+    fn encode_game(&self, game: &Game) -> Result<(Vec<u8>, MoveSummary)> {
         let mut buf = ByteBuffer::new();
 
         self.encode_tags(&mut buf, game)?;
 
         buf.put_byte(0)?;
 
-        match game.start_position {
-            Some(ref start) => {
-                buf.put_byte(1)?;
-                buf.put_terminated_string(&fen(start))?;
-            }
-            None => buf.put_byte(0)?,
+        // The game flags depend on the moves, so they are set below.
+        let flags_pos = buf.len();
+        buf.put_byte(0)?;
+        if let Some(ref start) = game.start_position {
+            buf.put_terminated_string(&fen(start))?;
         }
 
+        let mut summary = MoveSummary::new(game);
         if let Some(start_idx) = game.first_move {
-            Self::encode_moves(&mut buf, game, start_idx, game.initial_position()?)?;
+            Self::encode_moves(
+                &mut buf,
+                game,
+                start_idx,
+                game.initial_position()?,
+                &mut summary,
+                true,
+            )?;
         }
 
         buf.put_byte(crate::mov::ENCODE_END_GAME)?;
 
-        self.encode_comments(&mut buf, game)?;
+        self.encode_comments(&mut buf, game, &mut summary.comments)?;
 
-        Ok(buf.as_slice().to_vec())
+        let mut record = buf.as_slice().to_vec();
+        record[flags_pos] = summary.record_flags(game);
+        Ok((record, summary))
     }
 
     fn encode_tags(&self, buf: &mut ByteBuffer, game: &Game) -> Result<()> {
@@ -614,12 +629,15 @@ impl Database {
     }
 
     /// Encodes the line that starts at `start_idx`, played from `position`,
-    /// with its variations.
+    /// with its variations, and adds them to `summary`. `main_line` is set
+    /// for the game's main line.
     fn encode_moves(
         buf: &mut ByteBuffer,
         game: &Game,
         start_idx: usize,
         mut position: ScidPosition,
+        summary: &mut MoveSummary,
+        main_line: bool,
     ) -> Result<()> {
         let mut current_idx = Some(start_idx);
 
@@ -640,11 +658,15 @@ impl Database {
             if let Some(mv) = node.move_data {
                 encode_move(buf, &position, mv)?;
                 position.play(mv)?;
+                if main_line {
+                    summary.add_main_line_move(mv, position.chess().board());
+                }
             }
 
             for nag in &node.nags {
                 buf.put_byte(crate::mov::ENCODE_NAG)?;
                 buf.put_byte(*nag)?;
+                summary.nags += 1;
             }
 
             if node.comment.is_some() {
@@ -653,19 +675,25 @@ impl Database {
 
             for var_start in game.variations(idx) {
                 buf.put_byte(crate::mov::ENCODE_START_MARKER)?;
-                Self::encode_moves(buf, game, var_start, before.clone())?;
+                summary.variations += 1;
+                Self::encode_moves(buf, game, var_start, before.clone(), summary, false)?;
                 buf.put_byte(crate::mov::ENCODE_END_MARKER)?;
             }
 
             current_idx = node.next;
         }
 
+        if main_line {
+            summary.final_material = material_sig(position.chess().board());
+        }
+
         Ok(())
     }
 
-    fn encode_comments(&self, buf: &mut ByteBuffer, game: &Game) -> Result<()> {
+    /// Encodes the game's comments, adding the number encoded to `count`.
+    fn encode_comments(&self, buf: &mut ByteBuffer, game: &Game, count: &mut u32) -> Result<()> {
         if let Some(start_idx) = game.first_move {
-            Self::encode_comments_recursive(buf, game, start_idx)?;
+            Self::encode_comments_recursive(buf, game, start_idx, count)?;
         }
         Ok(())
     }
@@ -674,6 +702,7 @@ impl Database {
         buf: &mut ByteBuffer,
         game: &Game,
         start_idx: usize,
+        count: &mut u32,
     ) -> Result<()> {
         let mut current_idx = Some(start_idx);
 
@@ -693,10 +722,11 @@ impl Database {
 
             if let Some(ref comment) = node.comment {
                 buf.put_terminated_string(comment)?;
+                *count += 1;
             }
 
             for var_start in game.variations(idx) {
-                Self::encode_comments_recursive(buf, game, var_start)?;
+                Self::encode_comments_recursive(buf, game, var_start, count)?;
             }
 
             current_idx = node.next;
@@ -813,6 +843,88 @@ impl Database {
     /// Returns the database's path, without an extension.
     pub fn path(&self) -> &Path {
         &self.path
+    }
+}
+
+/// What an index entry records about a game's moves, collected while its
+/// record is encoded, as SCID's `Game::Encode` does. SCID uses these fields
+/// to skip games that can't match a position or material search.
+struct MoveSummary {
+    /// The number of half-moves in the main line, including null moves.
+    half_moves: u32,
+    /// The pawns that leave their starting squares in the main line, or
+    /// `None` for a game that starts from a FEN, whose list SCID leaves
+    /// empty.
+    home_pawns: Option<HomePawnList>,
+    /// Whether the main line has a promotion.
+    promotion: bool,
+    /// Whether the main line has a promotion to a piece other than a queen.
+    underpromotion: bool,
+    /// The signature of the material at the end of the main line.
+    final_material: u32,
+    /// The number of variations, at any depth.
+    variations: u32,
+    /// The number of comments, including those before a line's first move.
+    comments: u32,
+    /// The number of NAGs.
+    nags: u32,
+}
+
+impl MoveSummary {
+    /// The summary of `game` before any move.
+    fn new(game: &Game) -> Self {
+        let (home_pawns, final_material) = match &game.start_position {
+            Some(start) => (None, material_sig(start.board())),
+            None => (Some(HomePawnList::new()), material_sig(&Board::default())),
+        };
+        MoveSummary {
+            half_moves: 0,
+            home_pawns,
+            promotion: false,
+            underpromotion: false,
+            final_material,
+            variations: 0,
+            comments: 0,
+            nags: 0,
+        }
+    }
+
+    /// Adds the main line move `mv`, which led to `board`.
+    fn add_main_line_move(&mut self, mv: GameMove, board: &Board) {
+        self.half_moves += 1;
+        if let GameMove::Move(m) = mv {
+            if let Some(role) = m.promotion() {
+                self.promotion = true;
+                self.underpromotion |= role != Role::Queen;
+            }
+        }
+        if let Some(home_pawns) = &mut self.home_pawns {
+            home_pawns.update(board);
+        }
+    }
+
+    /// The game flags byte of `game`'s record: 1 if it starts from a FEN,
+    /// plus 2 if it has a promotion and 4 if it has an underpromotion.
+    fn record_flags(&self, game: &Game) -> u8 {
+        u8::from(game.start_position.is_some())
+            | (u8::from(self.promotion) << 1)
+            | (u8::from(self.underpromotion) << 2)
+    }
+
+    /// Sets the fields of `entry` that describe the moves.
+    fn set_fields(&self, entry: &mut IndexEntry) {
+        // SCID stores the count modulo 1,024.
+        entry.set_num_half_moves((self.half_moves % 1024) as u16);
+        if let Some(home_pawns) = &self.home_pawns {
+            entry.set_home_pawn_data(home_pawns.data());
+        }
+        entry.set_flag(IDX_MASK_PROMO, self.promotion);
+        entry.set_flag(IDX_MASK_UPROMO, self.underpromotion);
+        entry.set_final_mat_sig(self.final_material);
+        let count = |n: u32| u16::try_from(n).unwrap_or(u16::MAX);
+        entry.set_variation_count(count(self.variations));
+        entry.set_comment_count(count(self.comments));
+        entry.set_nag_count(count(self.nags));
     }
 }
 

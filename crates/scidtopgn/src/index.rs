@@ -7,6 +7,7 @@
 use crate::common::GameResult;
 use crate::error::{DatabaseFile, Error, Result};
 use crate::{date_get_day, date_get_month, date_get_year, date_make, Date};
+use shakmaty::{Bitboard, Board, Color, Rank, Role};
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::Path;
@@ -32,6 +33,9 @@ pub const CUSTOM_FLAG_MAX: usize = 6;
 pub const MAX_ELO: u16 = 4000;
 /// The size of an index entry's home pawn data, in bytes.
 pub const HPSIG_SIZE: usize = 9;
+/// The highest half-move count an index entry stores. Higher counts are
+/// stored modulo 1,024.
+pub const MAX_HALF_MOVES: u16 = 1023;
 
 /// The SCID format version this crate writes: 400, for SCID 4.
 pub const SCID_VERSION: u16 = 400;
@@ -244,7 +248,7 @@ pub struct IndexEntry {
     white_elo: u16,
     black_elo: u16,
     final_mat_sig: u32,
-    num_half_moves: u8,
+    num_half_moves: u16,
     home_pawn_data: [u8; HPSIG_SIZE],
 }
 
@@ -532,15 +536,15 @@ impl IndexEntry {
         eco_to_string(self.eco_code)
     }
 
-    /// Returns the number of half-moves in the main line.
+    /// Returns the number of half-moves in the main line, modulo 1,024.
     pub fn get_num_half_moves(&self) -> u16 {
-        self.num_half_moves as u16
+        self.num_half_moves
     }
 
-    /// Sets the number of half-moves in the main line. Only the low 8 bits
-    /// are stored at present.
+    /// Sets the number of half-moves in the main line. SCID stores 10 bits,
+    /// so a count above [`MAX_HALF_MOVES`] is stored modulo 1,024.
     pub fn set_num_half_moves(&mut self, moves: u16) {
-        self.num_half_moves = (moves & 0xFF) as u8;
+        self.num_half_moves = moves & MAX_HALF_MOVES;
     }
 
     /// Returns whether any flag in `mask` is set, such as
@@ -751,7 +755,7 @@ impl IndexEntry {
             white_elo,
             black_elo,
             final_mat_sig,
-            num_half_moves: num_half_moves as u8,
+            num_half_moves,
             home_pawn_data,
         };
 
@@ -793,9 +797,11 @@ impl IndexEntry {
         write_u16_be(writer, self.black_elo)?;
 
         write_u32_be(writer, self.final_mat_sig)?;
-        write_u8(writer, self.num_half_moves)?;
+        // The low 8 bits of the half-move count have their own byte, and the
+        // top 2 bits are the top of the first home pawn byte.
+        write_u8(writer, (self.num_half_moves & 0xFF) as u8)?;
 
-        let pb0 = (self.home_pawn_data[0] & 63) | (((self.num_half_moves as u16) >> 8) << 6) as u8;
+        let pb0 = (self.home_pawn_data[0] & 63) | ((self.num_half_moves >> 8) << 6) as u8;
         write_u8(writer, pb0)?;
         writer.write_all(&self.home_pawn_data[1..])?;
 
@@ -1159,6 +1165,100 @@ pub fn eco_from_string(s: &str) -> u16 {
     eco + 1
 }
 
+/// SCID's home pawn signature of `board`: a bit for each pawn on its
+/// starting square, from a2 in bit 15 to h2 in bit 8, then from a7 in bit 7
+/// to h7 in bit 0.
+fn home_pawn_sig(board: &Board) -> u16 {
+    let mut sig = 0;
+    for (color, rank, top_bit) in [
+        (Color::White, Rank::Second, 15),
+        (Color::Black, Rank::Seventh, 7),
+    ] {
+        let home = board.by_color(color) & board.pawns() & Bitboard::from_rank(rank);
+        for square in home {
+            sig |= 1 << (top_bit - u8::from(square.file()));
+        }
+    }
+    sig
+}
+
+/// SCID's list of the pawns that leave their starting squares in a game's
+/// main line, in the order they leave, as an index entry stores it.
+#[derive(Debug, Clone)]
+pub(crate) struct HomePawnList {
+    sig: u16,
+    data: [u8; HPSIG_SIZE],
+}
+
+impl HomePawnList {
+    /// An empty list for a game from the standard starting position.
+    pub(crate) fn new() -> Self {
+        HomePawnList {
+            sig: u16::MAX,
+            data: [0; HPSIG_SIZE],
+        }
+    }
+
+    /// Adds the pawns that left their starting squares since the last
+    /// position, as SCID does after each move.
+    pub(crate) fn update(&mut self, board: &Board) {
+        let sig = home_pawn_sig(board);
+        // A legal move takes at most one pawn off its starting square, and
+        // none returns, so `left` normally has one bit or none.
+        let mut left = self.sig & !sig;
+        while left != 0 {
+            let bit = 15 - left.leading_zeros() as u8;
+            self.push(bit);
+            left &= !(1 << bit);
+        }
+        self.sig = sig;
+    }
+
+    /// Adds the pawn with bit `bit` of the home pawn signature: byte 0 counts
+    /// the pawns, and each byte after it holds two, the first in its top
+    /// half.
+    fn push(&mut self, bit: u8) {
+        let count = self.data[0];
+        // 16 pawns can leave, which fill the list.
+        if usize::from(count) >= 2 * (HPSIG_SIZE - 1) {
+            return;
+        }
+        let byte = &mut self.data[1 + usize::from(count / 2)];
+        if count.is_multiple_of(2) {
+            *byte = bit << 4;
+        } else {
+            *byte |= bit;
+        }
+        self.data[0] = count + 1;
+    }
+
+    /// The list as an index entry stores it.
+    pub(crate) fn data(&self) -> &[u8; HPSIG_SIZE] {
+        &self.data
+    }
+}
+
+/// SCID's signature of the material on `board`: the number of each piece of
+/// each side, from 0 to 3, and of each side's pawns, as
+/// [`IndexEntry::set_final_mat_sig`] stores it.
+pub(crate) fn material_sig(board: &Board) -> u32 {
+    let material = board.material();
+    let mut sig = 0;
+    for (color, shift) in [(Color::White, 12), (Color::Black, 0)] {
+        let side = material.get(color);
+        sig |= u32::from(side.pawn) << shift;
+        for (role, offset) in [
+            (Role::Knight, 4),
+            (Role::Bishop, 6),
+            (Role::Rook, 8),
+            (Role::Queen, 10),
+        ] {
+            sig |= u32::from((*side.get(role)).min(3)) << (shift + offset);
+        }
+    }
+    sig
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1366,5 +1466,42 @@ mod tests {
         assert_eq!(entry2.get_eco_code(), 0x1234);
         assert!(entry2.get_start_flag());
         assert!(entry2.get_promotions_flag());
+    }
+
+    #[test]
+    fn test_material_sig_caps_pieces_at_3() {
+        assert_eq!(material_sig(&Board::default()), 0x6A86A8);
+
+        // White: 4 queens, 1 rook, 8 pawns. Black: 2 knights.
+        let board: Board = "QQQQK2R/PPPPPPPP/8/8/8/8/8/1n2k1n1".parse().unwrap();
+        assert_eq!(
+            material_sig(&board),
+            (3 << 22) | (1 << 20) | (8 << 12) | (2 << 4)
+        );
+    }
+
+    #[test]
+    fn test_home_pawn_list_holds_all_16_pawns() {
+        use shakmaty::{File, Square};
+
+        let mut board = Board::default();
+        let mut list = HomePawnList::new();
+        list.update(&board);
+        assert_eq!(list.data(), &[0; HPSIG_SIZE]);
+
+        // Black's h7 pawn, bit 0, then White's a2 pawn, bit 15, and so on.
+        for file in File::ALL {
+            for square in [
+                Square::from_coords(file.flip_horizontal(), Rank::Seventh),
+                Square::from_coords(file, Rank::Second),
+            ] {
+                board.discard_piece_at(square);
+                list.update(&board);
+            }
+        }
+        assert_eq!(
+            list.data(),
+            &[16, 0x0F, 0x1E, 0x2D, 0x3C, 0x4B, 0x5A, 0x69, 0x78]
+        );
     }
 }

@@ -64,7 +64,7 @@ reference the issue the PR addresses.
 
 ## Test data
 
-The fixtures in `tests/data/` (`one`, `five`, `edge`, `castling`, `annotated`, `long`, and `accents`, each
+The fixtures in `tests/data/` (`one`, `five`, `edge`, `castling`, `annotated`, `long`, `accents`, and `derived`, each
 with `.si4`, `.sn4`, `.sg4`, and a matching `.pgn`) are shared by both crates'
 integration tests. `castling` and `annotated` were written by the C++ reference
 converter from `castling.pgn` and `annotated.pgn`, like `edge`. `annotated` has
@@ -75,7 +75,11 @@ NAGs and comments in the main line and in variations. `long` was written from
 holds. SCID keeps at most 16,000 characters of each PGN comment, so its text is
 split over several comments. `accents` was written from `accents.pgn` by
 `pgnscid -f accents.pgn accents`. Its names sort differently as signed and as
-unsigned bytes, to check that the name file keeps SCID's order.
+unsigned bytes, to check that the name file keeps SCID's order. `derived` was
+written from `derived.pgn` by `pgnscid -f derived.pgn derived`. It covers the
+index fields SCID derives from the moves: games longer than 255 and 1,023
+half-moves, promotions in the main line and in a variation, and more than 10
+variations, comments, and NAGs.
 `notation.pgn` has one game per case in
 [docs/PGN_IMPORT.md](docs/PGN_IMPORT.md). `.gitignore` excludes `*.si4`, `*.sn4`, and `*.sg4` everywhere, so new
 fixtures must be added with `git add -f`.

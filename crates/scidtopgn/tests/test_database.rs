@@ -566,6 +566,63 @@ fn test_delete_and_undelete_game() {
     assert_eq!(delete_flags(&db), [false, false, false, true, false]);
 }
 
+/// The raw index entries of the database at `path`.
+fn raw_entries(path: &std::path::Path) -> Vec<Vec<u8>> {
+    let si4 = std::fs::read(path.with_extension("si4")).unwrap();
+    si4[scidtopgn::INDEX_HEADER_SIZE..]
+        .chunks(scidtopgn::INDEX_ENTRY_SIZE)
+        .map(<[u8]>::to_vec)
+        .collect()
+}
+
+/// Copies `derived`, which SCID wrote, into a new directory, opens it once
+/// for each of `changes`, closes it, and checks that every entry but those in
+/// `changed` keeps SCID's bytes.
+fn assert_keeps_scids_entries(changed: &[usize], changes: &[&dyn Fn(&mut Database)]) {
+    let src = get_test_data_path("derived");
+    let temp = tempfile::TempDir::new().unwrap();
+    let path = temp.path().join("derived");
+    for ext in ["si4", "sn4", "sg4"] {
+        std::fs::copy(src.with_extension(ext), path.with_extension(ext)).unwrap();
+    }
+    for change in changes {
+        let mut db = Database::open(&path).unwrap();
+        change(&mut db);
+        db.close().unwrap();
+    }
+
+    let entries = raw_entries(&path);
+    for (n, entry) in raw_entries(&src).iter().enumerate() {
+        if !changed.contains(&n) {
+            assert_eq!(&entries[n], entry, "entry {n}");
+        }
+    }
+}
+
+#[test]
+fn test_changes_keep_scids_other_entries() {
+    // Game 0 of `derived` is 302 half-moves long, which needs the top bits of
+    // the count.
+    let db = Database::open(get_test_data_path("derived")).unwrap();
+    assert_eq!(db.get_entry(0).unwrap().get_num_half_moves(), 302);
+
+    let new_game = scidtopgn::parse_single_game(NEW_GAME).unwrap();
+    assert_keeps_scids_entries(&[1], &[&|db| db.delete_game(1).unwrap()]);
+    assert_keeps_scids_entries(
+        &[],
+        &[&|db| db.delete_game(1).unwrap(), &|db| {
+            db.undelete_game(1).unwrap()
+        }],
+    );
+    assert_keeps_scids_entries(&[1], &[&|db| db.update_game(1, &new_game).unwrap()]);
+    assert_keeps_scids_entries(
+        &[],
+        &[&|db| {
+            db.add_game(&new_game).unwrap();
+        }],
+    );
+}
+
 #[test]
 fn test_delete_keeps_scids_name_order() {
     // `accents` was written by SCID with names that sort differently as
@@ -721,6 +778,68 @@ fn test_update_game_keeps_user_flags_and_sets_the_start_flag() {
     db.close().unwrap();
 
     assert_eq!(flags(&Database::open(&path).unwrap()), (true, true, false));
+}
+
+/// The fields of `entry` that SCID derives from the game's moves, except
+/// the stored line code.
+fn derived_fields(entry: &scidtopgn::IndexEntry) -> (u16, [u8; 9], u32, bool, bool, [u16; 3]) {
+    use scidtopgn::index::{IDX_MASK_PROMO, IDX_MASK_UPROMO};
+    (
+        entry.get_num_half_moves(),
+        *entry.get_home_pawn_data(),
+        entry.get_final_mat_sig(),
+        entry.get_flag(IDX_MASK_PROMO),
+        entry.get_flag(IDX_MASK_UPROMO),
+        [
+            entry.get_variation_count(),
+            entry.get_comment_count(),
+            entry.get_nag_count(),
+        ],
+    )
+}
+
+#[test]
+fn test_update_game_sets_the_derived_fields() {
+    // In `derived`, which SCID wrote, game 2 has a queen promotion, game 3 an
+    // underpromotion, and game 5 no promotion but more than 10 variations,
+    // comments, and NAGs.
+    let src = get_test_data_path("derived");
+    let scid = Database::open(&src).unwrap();
+    let temp = tempfile::TempDir::new().unwrap();
+    let path = temp.path().join("derived");
+    for ext in ["si4", "sn4", "sg4"] {
+        std::fs::copy(src.with_extension(ext), path.with_extension(ext)).unwrap();
+    }
+    let games =
+        scidtopgn::parse_pgn(&std::fs::read_to_string(src.with_extension("pgn")).unwrap()).unwrap();
+
+    let mut db = Database::open(&path).unwrap();
+    db.update_game(2, &games[5]).unwrap();
+    db.update_game(4, &games[3]).unwrap();
+    db.close().unwrap();
+
+    let db = Database::open(&path).unwrap();
+    let fields = |db: &Database, n| derived_fields(db.get_entry(n).unwrap());
+    assert_eq!(fields(&db, 2), fields(&scid, 5));
+    assert_eq!(fields(&db, 4), fields(&scid, 3));
+}
+
+#[test]
+fn test_games_without_moves_have_the_starting_material() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let mut db = Database::create(temp.path().join("games")).unwrap();
+    let standard = scidtopgn::parse_single_game("[Event \"x\"]\n\n*\n").unwrap();
+    let setup = "[FEN \"4k3/8/8/8/8/8/4P3/4K3 w - - 0 1\"]\n[SetUp \"1\"]\n\n*\n";
+    let setup = scidtopgn::parse_single_game(setup).unwrap();
+    db.add_game(&standard).unwrap();
+    db.add_game(&setup).unwrap();
+
+    // SCID's signature of the standard starting position, and of one White
+    // pawn.
+    let standard_fields = (0, [0; 9], 0x6A86A8, false, false, [0; 3]);
+    let setup_fields = (0, [0; 9], 1 << 12, false, false, [0; 3]);
+    assert_eq!(derived_fields(db.get_entry(0).unwrap()), standard_fields);
+    assert_eq!(derived_fields(db.get_entry(1).unwrap()), setup_fields);
 }
 
 #[test]

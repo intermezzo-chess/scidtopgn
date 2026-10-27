@@ -354,6 +354,44 @@ fn test_entry_material_and_pawn_signatures() {
 }
 
 #[test]
+fn test_entry_half_move_count_keeps_10_bits() {
+    let pawns = [0x3F, 1, 2, 3, 4, 5, 6, 7, 8];
+    for (count, stored) in [
+        (0, 0),
+        (255, 255),
+        (256, 256),
+        (300, 300),
+        (1023, 1023),
+        (1024, 0),
+        (1030, 6),
+    ] {
+        let mut entry = IndexEntry::new();
+        entry.set_home_pawn_data(&pawns);
+        entry.set_num_half_moves(count);
+        assert_eq!(entry.get_num_half_moves(), stored, "{count}");
+        let read = reread(&entry);
+        assert_eq!(read.get_num_half_moves(), stored, "{count}");
+        assert_eq!(read.get_home_pawn_data(), &pawns, "{count}");
+    }
+}
+
+#[test]
+fn test_entry_half_move_count_above_255_survives_a_rewrite() {
+    // A count of 300 as SCID stores it: 44 in byte 37, and 1 in the top two
+    // bits of byte 38, the first home pawn byte.
+    let mut bytes = vec![0; INDEX_ENTRY_SIZE];
+    bytes[37] = 44;
+    bytes[38] = (1 << 6) | 3;
+    let entry = IndexEntry::read(&mut bytes.as_slice()).unwrap();
+    assert_eq!(entry.get_num_half_moves(), 300);
+    assert_eq!(entry.get_home_pawn_data()[0], 3);
+
+    let mut written = Vec::new();
+    entry.write(&mut written).unwrap();
+    assert_eq!(written, bytes);
+}
+
+#[test]
 fn test_event_date_must_be_near_the_game_date() {
     use scidtopgn::date_make;
 

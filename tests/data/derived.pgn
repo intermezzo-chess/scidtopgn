@@ -1,0 +1,170 @@
+[Event "Longer than 255 half-moves"]
+[Site "?"]
+[Date "????.??.??"]
+[Round "?"]
+[White "?"]
+[Black "?"]
+[Result "*"]
+
+1. e4 e5 2. Bc4 Nc6 3. Bxf7+ Kxf7 4. Nf3 Nf6 5. Ng1 Ng8 6. Nf3 Nf6 7. Ng1 Ng8
+8. Nf3 Nf6 9. Ng1 Ng8 10. Nf3 Nf6 11. Ng1 Ng8 12. Nf3 Nf6 13. Ng1 Ng8 14. Nf3
+Nf6 15. Ng1 Ng8 16. Nf3 Nf6 17. Ng1 Ng8 18. Nf3 Nf6 19. Ng1 Ng8 20. Nf3 Nf6 21.
+Ng1 Ng8 22. Nf3 Nf6 23. Ng1 Ng8 24. Nf3 Nf6 25. Ng1 Ng8 26. Nf3 Nf6 27. Ng1 Ng8
+28. Nf3 Nf6 29. Ng1 Ng8 30. Nf3 Nf6 31. Ng1 Ng8 32. Nf3 Nf6 33. Ng1 Ng8 34. Nf3
+Nf6 35. Ng1 Ng8 36. Nf3 Nf6 37. Ng1 Ng8 38. Nf3 Nf6 39. Ng1 Ng8 40. Nf3 Nf6 41.
+Ng1 Ng8 42. Nf3 Nf6 43. Ng1 Ng8 44. Nf3 Nf6 45. Ng1 Ng8 46. Nf3 Nf6 47. Ng1 Ng8
+48. Nf3 Nf6 49. Ng1 Ng8 50. Nf3 Nf6 51. Ng1 Ng8 52. Nf3 Nf6 53. Ng1 Ng8 54. Nf3
+Nf6 55. Ng1 Ng8 56. Nf3 Nf6 57. Ng1 Ng8 58. Nf3 Nf6 59. Ng1 Ng8 60. Nf3 Nf6 61.
+Ng1 Ng8 62. Nf3 Nf6 63. Ng1 Ng8 64. Nf3 Nf6 65. Ng1 Ng8 66. Nf3 Nf6 67. Ng1 Ng8
+68. Nf3 Nf6 69. Ng1 Ng8 70. Nf3 Nf6 71. Ng1 Ng8 72. Nf3 Nf6 73. Ng1 Ng8 74. Nf3
+Nf6 75. Ng1 Ng8 76. Nf3 Nf6 77. Ng1 Ng8 78. Nf3 Nf6 79. Ng1 Ng8 80. Nf3 Nf6 81.
+Ng1 Ng8 82. Nf3 Nf6 83. Ng1 Ng8 84. Nf3 Nf6 85. Ng1 Ng8 86. Nf3 Nf6 87. Ng1 Ng8
+88. Nf3 Nf6 89. Ng1 Ng8 90. Nf3 Nf6 91. Ng1 Ng8 92. Nf3 Nf6 93. Ng1 Ng8 94. Nf3
+Nf6 95. Ng1 Ng8 96. Nf3 Nf6 97. Ng1 Ng8 98. Nf3 Nf6 99. Ng1 Ng8 100. Nf3 Nf6
+101. Ng1 Ng8 102. Nf3 Nf6 103. Ng1 Ng8 104. Nf3 Nf6 105. Ng1 Ng8 106. Nf3 Nf6
+107. Ng1 Ng8 108. Nf3 Nf6 109. Ng1 Ng8 110. Nf3 Nf6 111. Ng1 Ng8 112. Nf3 Nf6
+113. Ng1 Ng8 114. Nf3 Nf6 115. Ng1 Ng8 116. Nf3 Nf6 117. Ng1 Ng8 118. Nf3 Nf6
+119. Ng1 Ng8 120. Nf3 Nf6 121. Ng1 Ng8 122. Nf3 Nf6 123. Ng1 Ng8 124. Nf3 Nf6
+125. Ng1 Ng8 126. Nf3 Nf6 127. Ng1 Ng8 128. Nf3 Nf6 129. Ng1 Ng8 130. Nf3 Nf6
+131. Ng1 Ng8 132. Nf3 Nf6 133. Ng1 Ng8 134. Nf3 Nf6 135. Ng1 Ng8 136. Nf3 Nf6
+137. Ng1 Ng8 138. Nf3 Nf6 139. Ng1 Ng8 140. Nf3 Nf6 141. Ng1 Ng8 142. Nf3 Nf6
+143. Ng1 Ng8 144. Nf3 Nf6 145. Ng1 Ng8 146. Nf3 Nf6 147. Ng1 Ng8 148. Nf3 Nf6
+149. Ng1 Ng8 150. Nf3 Nf6 151. Ng1 Ng8 *
+
+[Event "Longer than 1,023 half-moves"]
+[Site "?"]
+[Date "????.??.??"]
+[Round "?"]
+[White "?"]
+[Black "?"]
+[Result "*"]
+
+1. d4 d5 2. Nf3 Nf6 3. Ng1 Ng8 4. Nf3 Nf6 5. Ng1 Ng8 6. Nf3 Nf6 7. Ng1 Ng8 8.
+Nf3 Nf6 9. Ng1 Ng8 10. Nf3 Nf6 11. Ng1 Ng8 12. Nf3 Nf6 13. Ng1 Ng8 14. Nf3 Nf6
+15. Ng1 Ng8 16. Nf3 Nf6 17. Ng1 Ng8 18. Nf3 Nf6 19. Ng1 Ng8 20. Nf3 Nf6 21. Ng1
+Ng8 22. Nf3 Nf6 23. Ng1 Ng8 24. Nf3 Nf6 25. Ng1 Ng8 26. Nf3 Nf6 27. Ng1 Ng8 28.
+Nf3 Nf6 29. Ng1 Ng8 30. Nf3 Nf6 31. Ng1 Ng8 32. Nf3 Nf6 33. Ng1 Ng8 34. Nf3 Nf6
+35. Ng1 Ng8 36. Nf3 Nf6 37. Ng1 Ng8 38. Nf3 Nf6 39. Ng1 Ng8 40. Nf3 Nf6 41. Ng1
+Ng8 42. Nf3 Nf6 43. Ng1 Ng8 44. Nf3 Nf6 45. Ng1 Ng8 46. Nf3 Nf6 47. Ng1 Ng8 48.
+Nf3 Nf6 49. Ng1 Ng8 50. Nf3 Nf6 51. Ng1 Ng8 52. Nf3 Nf6 53. Ng1 Ng8 54. Nf3 Nf6
+55. Ng1 Ng8 56. Nf3 Nf6 57. Ng1 Ng8 58. Nf3 Nf6 59. Ng1 Ng8 60. Nf3 Nf6 61. Ng1
+Ng8 62. Nf3 Nf6 63. Ng1 Ng8 64. Nf3 Nf6 65. Ng1 Ng8 66. Nf3 Nf6 67. Ng1 Ng8 68.
+Nf3 Nf6 69. Ng1 Ng8 70. Nf3 Nf6 71. Ng1 Ng8 72. Nf3 Nf6 73. Ng1 Ng8 74. Nf3 Nf6
+75. Ng1 Ng8 76. Nf3 Nf6 77. Ng1 Ng8 78. Nf3 Nf6 79. Ng1 Ng8 80. Nf3 Nf6 81. Ng1
+Ng8 82. Nf3 Nf6 83. Ng1 Ng8 84. Nf3 Nf6 85. Ng1 Ng8 86. Nf3 Nf6 87. Ng1 Ng8 88.
+Nf3 Nf6 89. Ng1 Ng8 90. Nf3 Nf6 91. Ng1 Ng8 92. Nf3 Nf6 93. Ng1 Ng8 94. Nf3 Nf6
+95. Ng1 Ng8 96. Nf3 Nf6 97. Ng1 Ng8 98. Nf3 Nf6 99. Ng1 Ng8 100. Nf3 Nf6 101.
+Ng1 Ng8 102. Nf3 Nf6 103. Ng1 Ng8 104. Nf3 Nf6 105. Ng1 Ng8 106. Nf3 Nf6 107.
+Ng1 Ng8 108. Nf3 Nf6 109. Ng1 Ng8 110. Nf3 Nf6 111. Ng1 Ng8 112. Nf3 Nf6 113.
+Ng1 Ng8 114. Nf3 Nf6 115. Ng1 Ng8 116. Nf3 Nf6 117. Ng1 Ng8 118. Nf3 Nf6 119.
+Ng1 Ng8 120. Nf3 Nf6 121. Ng1 Ng8 122. Nf3 Nf6 123. Ng1 Ng8 124. Nf3 Nf6 125.
+Ng1 Ng8 126. Nf3 Nf6 127. Ng1 Ng8 128. Nf3 Nf6 129. Ng1 Ng8 130. Nf3 Nf6 131.
+Ng1 Ng8 132. Nf3 Nf6 133. Ng1 Ng8 134. Nf3 Nf6 135. Ng1 Ng8 136. Nf3 Nf6 137.
+Ng1 Ng8 138. Nf3 Nf6 139. Ng1 Ng8 140. Nf3 Nf6 141. Ng1 Ng8 142. Nf3 Nf6 143.
+Ng1 Ng8 144. Nf3 Nf6 145. Ng1 Ng8 146. Nf3 Nf6 147. Ng1 Ng8 148. Nf3 Nf6 149.
+Ng1 Ng8 150. Nf3 Nf6 151. Ng1 Ng8 152. Nf3 Nf6 153. Ng1 Ng8 154. Nf3 Nf6 155.
+Ng1 Ng8 156. Nf3 Nf6 157. Ng1 Ng8 158. Nf3 Nf6 159. Ng1 Ng8 160. Nf3 Nf6 161.
+Ng1 Ng8 162. Nf3 Nf6 163. Ng1 Ng8 164. Nf3 Nf6 165. Ng1 Ng8 166. Nf3 Nf6 167.
+Ng1 Ng8 168. Nf3 Nf6 169. Ng1 Ng8 170. Nf3 Nf6 171. Ng1 Ng8 172. Nf3 Nf6 173.
+Ng1 Ng8 174. Nf3 Nf6 175. Ng1 Ng8 176. Nf3 Nf6 177. Ng1 Ng8 178. Nf3 Nf6 179.
+Ng1 Ng8 180. Nf3 Nf6 181. Ng1 Ng8 182. Nf3 Nf6 183. Ng1 Ng8 184. Nf3 Nf6 185.
+Ng1 Ng8 186. Nf3 Nf6 187. Ng1 Ng8 188. Nf3 Nf6 189. Ng1 Ng8 190. Nf3 Nf6 191.
+Ng1 Ng8 192. Nf3 Nf6 193. Ng1 Ng8 194. Nf3 Nf6 195. Ng1 Ng8 196. Nf3 Nf6 197.
+Ng1 Ng8 198. Nf3 Nf6 199. Ng1 Ng8 200. Nf3 Nf6 201. Ng1 Ng8 202. Nf3 Nf6 203.
+Ng1 Ng8 204. Nf3 Nf6 205. Ng1 Ng8 206. Nf3 Nf6 207. Ng1 Ng8 208. Nf3 Nf6 209.
+Ng1 Ng8 210. Nf3 Nf6 211. Ng1 Ng8 212. Nf3 Nf6 213. Ng1 Ng8 214. Nf3 Nf6 215.
+Ng1 Ng8 216. Nf3 Nf6 217. Ng1 Ng8 218. Nf3 Nf6 219. Ng1 Ng8 220. Nf3 Nf6 221.
+Ng1 Ng8 222. Nf3 Nf6 223. Ng1 Ng8 224. Nf3 Nf6 225. Ng1 Ng8 226. Nf3 Nf6 227.
+Ng1 Ng8 228. Nf3 Nf6 229. Ng1 Ng8 230. Nf3 Nf6 231. Ng1 Ng8 232. Nf3 Nf6 233.
+Ng1 Ng8 234. Nf3 Nf6 235. Ng1 Ng8 236. Nf3 Nf6 237. Ng1 Ng8 238. Nf3 Nf6 239.
+Ng1 Ng8 240. Nf3 Nf6 241. Ng1 Ng8 242. Nf3 Nf6 243. Ng1 Ng8 244. Nf3 Nf6 245.
+Ng1 Ng8 246. Nf3 Nf6 247. Ng1 Ng8 248. Nf3 Nf6 249. Ng1 Ng8 250. Nf3 Nf6 251.
+Ng1 Ng8 252. Nf3 Nf6 253. Ng1 Ng8 254. Nf3 Nf6 255. Ng1 Ng8 256. Nf3 Nf6 257.
+Ng1 Ng8 258. Nf3 Nf6 259. Ng1 Ng8 260. Nf3 Nf6 261. Ng1 Ng8 262. Nf3 Nf6 263.
+Ng1 Ng8 264. Nf3 Nf6 265. Ng1 Ng8 266. Nf3 Nf6 267. Ng1 Ng8 268. Nf3 Nf6 269.
+Ng1 Ng8 270. Nf3 Nf6 271. Ng1 Ng8 272. Nf3 Nf6 273. Ng1 Ng8 274. Nf3 Nf6 275.
+Ng1 Ng8 276. Nf3 Nf6 277. Ng1 Ng8 278. Nf3 Nf6 279. Ng1 Ng8 280. Nf3 Nf6 281.
+Ng1 Ng8 282. Nf3 Nf6 283. Ng1 Ng8 284. Nf3 Nf6 285. Ng1 Ng8 286. Nf3 Nf6 287.
+Ng1 Ng8 288. Nf3 Nf6 289. Ng1 Ng8 290. Nf3 Nf6 291. Ng1 Ng8 292. Nf3 Nf6 293.
+Ng1 Ng8 294. Nf3 Nf6 295. Ng1 Ng8 296. Nf3 Nf6 297. Ng1 Ng8 298. Nf3 Nf6 299.
+Ng1 Ng8 300. Nf3 Nf6 301. Ng1 Ng8 302. Nf3 Nf6 303. Ng1 Ng8 304. Nf3 Nf6 305.
+Ng1 Ng8 306. Nf3 Nf6 307. Ng1 Ng8 308. Nf3 Nf6 309. Ng1 Ng8 310. Nf3 Nf6 311.
+Ng1 Ng8 312. Nf3 Nf6 313. Ng1 Ng8 314. Nf3 Nf6 315. Ng1 Ng8 316. Nf3 Nf6 317.
+Ng1 Ng8 318. Nf3 Nf6 319. Ng1 Ng8 320. Nf3 Nf6 321. Ng1 Ng8 322. Nf3 Nf6 323.
+Ng1 Ng8 324. Nf3 Nf6 325. Ng1 Ng8 326. Nf3 Nf6 327. Ng1 Ng8 328. Nf3 Nf6 329.
+Ng1 Ng8 330. Nf3 Nf6 331. Ng1 Ng8 332. Nf3 Nf6 333. Ng1 Ng8 334. Nf3 Nf6 335.
+Ng1 Ng8 336. Nf3 Nf6 337. Ng1 Ng8 338. Nf3 Nf6 339. Ng1 Ng8 340. Nf3 Nf6 341.
+Ng1 Ng8 342. Nf3 Nf6 343. Ng1 Ng8 344. Nf3 Nf6 345. Ng1 Ng8 346. Nf3 Nf6 347.
+Ng1 Ng8 348. Nf3 Nf6 349. Ng1 Ng8 350. Nf3 Nf6 351. Ng1 Ng8 352. Nf3 Nf6 353.
+Ng1 Ng8 354. Nf3 Nf6 355. Ng1 Ng8 356. Nf3 Nf6 357. Ng1 Ng8 358. Nf3 Nf6 359.
+Ng1 Ng8 360. Nf3 Nf6 361. Ng1 Ng8 362. Nf3 Nf6 363. Ng1 Ng8 364. Nf3 Nf6 365.
+Ng1 Ng8 366. Nf3 Nf6 367. Ng1 Ng8 368. Nf3 Nf6 369. Ng1 Ng8 370. Nf3 Nf6 371.
+Ng1 Ng8 372. Nf3 Nf6 373. Ng1 Ng8 374. Nf3 Nf6 375. Ng1 Ng8 376. Nf3 Nf6 377.
+Ng1 Ng8 378. Nf3 Nf6 379. Ng1 Ng8 380. Nf3 Nf6 381. Ng1 Ng8 382. Nf3 Nf6 383.
+Ng1 Ng8 384. Nf3 Nf6 385. Ng1 Ng8 386. Nf3 Nf6 387. Ng1 Ng8 388. Nf3 Nf6 389.
+Ng1 Ng8 390. Nf3 Nf6 391. Ng1 Ng8 392. Nf3 Nf6 393. Ng1 Ng8 394. Nf3 Nf6 395.
+Ng1 Ng8 396. Nf3 Nf6 397. Ng1 Ng8 398. Nf3 Nf6 399. Ng1 Ng8 400. Nf3 Nf6 401.
+Ng1 Ng8 402. Nf3 Nf6 403. Ng1 Ng8 404. Nf3 Nf6 405. Ng1 Ng8 406. Nf3 Nf6 407.
+Ng1 Ng8 408. Nf3 Nf6 409. Ng1 Ng8 410. Nf3 Nf6 411. Ng1 Ng8 412. Nf3 Nf6 413.
+Ng1 Ng8 414. Nf3 Nf6 415. Ng1 Ng8 416. Nf3 Nf6 417. Ng1 Ng8 418. Nf3 Nf6 419.
+Ng1 Ng8 420. Nf3 Nf6 421. Ng1 Ng8 422. Nf3 Nf6 423. Ng1 Ng8 424. Nf3 Nf6 425.
+Ng1 Ng8 426. Nf3 Nf6 427. Ng1 Ng8 428. Nf3 Nf6 429. Ng1 Ng8 430. Nf3 Nf6 431.
+Ng1 Ng8 432. Nf3 Nf6 433. Ng1 Ng8 434. Nf3 Nf6 435. Ng1 Ng8 436. Nf3 Nf6 437.
+Ng1 Ng8 438. Nf3 Nf6 439. Ng1 Ng8 440. Nf3 Nf6 441. Ng1 Ng8 442. Nf3 Nf6 443.
+Ng1 Ng8 444. Nf3 Nf6 445. Ng1 Ng8 446. Nf3 Nf6 447. Ng1 Ng8 448. Nf3 Nf6 449.
+Ng1 Ng8 450. Nf3 Nf6 451. Ng1 Ng8 452. Nf3 Nf6 453. Ng1 Ng8 454. Nf3 Nf6 455.
+Ng1 Ng8 456. Nf3 Nf6 457. Ng1 Ng8 458. Nf3 Nf6 459. Ng1 Ng8 460. Nf3 Nf6 461.
+Ng1 Ng8 462. Nf3 Nf6 463. Ng1 Ng8 464. Nf3 Nf6 465. Ng1 Ng8 466. Nf3 Nf6 467.
+Ng1 Ng8 468. Nf3 Nf6 469. Ng1 Ng8 470. Nf3 Nf6 471. Ng1 Ng8 472. Nf3 Nf6 473.
+Ng1 Ng8 474. Nf3 Nf6 475. Ng1 Ng8 476. Nf3 Nf6 477. Ng1 Ng8 478. Nf3 Nf6 479.
+Ng1 Ng8 480. Nf3 Nf6 481. Ng1 Ng8 482. Nf3 Nf6 483. Ng1 Ng8 484. Nf3 Nf6 485.
+Ng1 Ng8 486. Nf3 Nf6 487. Ng1 Ng8 488. Nf3 Nf6 489. Ng1 Ng8 490. Nf3 Nf6 491.
+Ng1 Ng8 492. Nf3 Nf6 493. Ng1 Ng8 494. Nf3 Nf6 495. Ng1 Ng8 496. Nf3 Nf6 497.
+Ng1 Ng8 498. Nf3 Nf6 499. Ng1 Ng8 500. Nf3 Nf6 501. Ng1 Ng8 502. Nf3 Nf6 503.
+Ng1 Ng8 504. Nf3 Nf6 505. Ng1 Ng8 506. Nf3 Nf6 507. Ng1 Ng8 508. Nf3 Nf6 509.
+Ng1 Ng8 510. Nf3 Nf6 511. Ng1 Ng8 512. Nf3 Nf6 513. Ng1 Ng8 514. Nf3 Nf6 515.
+Ng1 Ng8 *
+
+[Event "Queen promotion"]
+[Site "?"]
+[Date "????.??.??"]
+[Round "?"]
+[White "?"]
+[Black "?"]
+[Result "*"]
+
+1. a4 b5 2. axb5 a6 3. bxa6 Bb7 4. axb7 Nc6 5. bxa8=Q Qxa8 *
+
+[Event "Underpromotion"]
+[Site "?"]
+[Date "????.??.??"]
+[Round "?"]
+[White "?"]
+[Black "?"]
+[Result "*"]
+
+1. a4 b5 2. axb5 a6 3. bxa6 Bb7 4. axb7 Nc6 5. bxa8=N Qc8 *
+
+[Event "Promotion in a variation"]
+[Site "?"]
+[Date "????.??.??"]
+[Round "?"]
+[White "?"]
+[Black "?"]
+[Result "*"]
+
+1. a4 b5 2. axb5 a6 3. bxa6 Bb7 4. axb7 Nc6 5. Nf3 (5. bxa8=Q Qxa8) 5... Rb8 *
+
+[Event "More than 10 variations, comments, and NAGs"]
+[Site "?"]
+[Date "????.??.??"]
+[Round "?"]
+[White "?"]
+[Black "?"]
+[Result "*"]
+
+{Before the game} 1. e4 $1 {c1} (1. d4) 1... e5 $2 {c2} (1... c5) 2. Nf3 $3
+{c3} (2. Nc3) 2... Nc6 $4 {c4} (2... d6) 3. Bb5 $5 {c5} (3. Bc4) 3... a6 $6
+{c6} (3... Nf6) 4. Ba4 $1 {c7} (4. Bxc6) 4... Nf6 $2 {c8} (4... d6) 5. O-O $3
+{c9} (5. Nc3) 5... Be7 $4 {c10} (5... Nxe4) 6. Re1 $5 {c11} (6. Qe2) 6... b5 $6
+{c12} (6... d6 {in a variation} 7. c3 $1) 7. Bb3 $1 $2 d6 *
