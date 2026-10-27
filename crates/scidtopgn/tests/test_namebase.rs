@@ -195,6 +195,27 @@ fn test_five_sn4_roundtrip() {
 }
 
 #[test]
+fn test_accents_sn4_roundtrip() {
+    // Written by SCID vs. PC's `pgnscid` from `accents.pgn`, with names that
+    // sort differently as signed and as unsigned bytes.
+    let original = std::fs::read(format!("{}/accents.sn4", TEST_DATA_PATH))
+        .expect("Failed to read accents.sn4");
+
+    let mut namebase = NameBase::new();
+    namebase
+        .read_sn4(&mut std::io::Cursor::new(&original))
+        .expect("Failed to read namebase");
+    assert_eq!(namebase.count(NameType::Player), 10);
+
+    let mut written = Vec::new();
+    namebase
+        .write_sn4(&mut written)
+        .expect("Failed to write namebase");
+
+    assert_eq!(original, written, "Binary content mismatch");
+}
+
+#[test]
 fn test_name_type_conversions() {
     use scidtopgn::Error;
 

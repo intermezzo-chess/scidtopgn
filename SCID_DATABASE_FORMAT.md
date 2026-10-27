@@ -356,9 +356,9 @@ The name file stores all text strings using sophisticated compression algorithms
 SCID uses **front-coding** compression where consecutive names share common prefixes. This is extremely effective for alphabetically sorted chess names.
 
 **Algorithm**:
-1. Names are stored in alphabetical order within each section
-2. Each name stores only the characters that differ from the previous name
-3. A prefix length indicates how many characters to reuse from the previous name
+1. Names are stored in sorted order within each section (see [Name Order](#name-order))
+2. Each name stores only the bytes that differ from the previous name
+3. A prefix length indicates how many bytes to reuse from the previous name
 
 **Example**:
 ```
@@ -368,6 +368,21 @@ Original names:         Stored format:
 "Caruana, Fabiano"   →  [prefix=3, suffix="uana, Fabiano"]  (reuse "Car")
 "Ding, Liren"        →  [prefix=0, suffix="Ding, Liren"]  (no shared prefix)
 ```
+
+#### Name Order
+
+SCID keeps the names of each kind in one tree per first byte, and requires the file to list them in this order:
+
+1. By first byte, compared as unsigned.
+2. Among names with the same first byte, by SCID's `strCompare`: bytes compared as C `char`s, which are signed on x86 and Apple arm64, with a shorter name compared as if followed by a 0 byte.
+
+So a byte of 0x80 or above sorts before every ASCII byte and before the end of a shorter name, but a name that starts with such a byte sorts after every name that starts with ASCII:
+
+```
+"Abc", "Blübaum, Matthias", "Bl", "Blagojević, Dragisa", "Zed", "Ärger, Hans", "Émile"
+```
+
+SCID refuses to open a file whose names break the order within a first byte ("Error opening name file"). A file that breaks the order of first bytes opens with the warning "namebase is denormalized", and SCID can't look its names up.
 
 #### Name Record Structure
 
@@ -415,10 +430,10 @@ fn read_variable_int(bytes: &[u8], max_value: u32) -> (u32, usize) {
 
 The file contains four sections in strict order:
 
-1. **Player Names** (sorted alphabetically)
-2. **Event Names** (sorted alphabetically)  
-3. **Site Names** (sorted alphabetically)
-4. **Round Names** (sorted alphabetically)
+1. **Player Names** (in [name order](#name-order))
+2. **Event Names** (in name order)
+3. **Site Names** (in name order)
+4. **Round Names** (in name order)
 
 #### Front-Coding Implementation
 

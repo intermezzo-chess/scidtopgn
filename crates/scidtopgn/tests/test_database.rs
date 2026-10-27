@@ -567,6 +567,28 @@ fn test_delete_and_undelete_game() {
 }
 
 #[test]
+fn test_delete_keeps_scids_name_order() {
+    // `accents` was written by SCID with names that sort differently as
+    // signed and as unsigned bytes. Deleting a game rewrites the name file,
+    // which must stay as SCID wrote it.
+    let temp = tempfile::TempDir::new().unwrap();
+    let src = get_test_data_path("accents");
+    let path = temp.path().join("accents");
+    for ext in ["si4", "sn4", "sg4"] {
+        std::fs::copy(src.with_extension(ext), path.with_extension(ext)).unwrap();
+    }
+
+    let mut db = Database::open(&path).unwrap();
+    db.delete_game(0).unwrap();
+    db.close().unwrap();
+
+    assert_eq!(
+        std::fs::read(path.with_extension("sn4")).unwrap(),
+        std::fs::read(src.with_extension("sn4")).unwrap()
+    );
+}
+
+#[test]
 fn test_deleting_a_deleted_game_changes_nothing() {
     let temp = tempfile::TempDir::new().unwrap();
     let path = five_with_deleted(temp.path(), &[1]);
