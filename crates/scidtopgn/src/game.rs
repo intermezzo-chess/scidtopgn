@@ -53,6 +53,15 @@ static COMMON_TAGS: [&str; 14] = [
     "",
 ];
 
+/// The code a game record stores in place of tag `name`, if it is one of
+/// SCID's common tags: 241 for `WhiteCountry`, up to 250 for `SetUp`.
+pub(crate) fn common_tag_code(name: &str) -> Option<u8> {
+    COMMON_TAGS
+        .iter()
+        .position(|common| !common.is_empty() && *common == name)
+        .map(|i| MAX_TAG_LEN + 1 + i as u8)
+}
+
 /// What kind of node a [`MoveNode`] is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Marker {
@@ -161,6 +170,13 @@ pub struct Game {
     /// The `Date` tag.
     pub date: Date,
     /// The `EventDate` tag, if any.
+    ///
+    /// A database stores it only in the game's index entry, which holds an
+    /// event date within 3 years of the game's year. As in SCID,
+    /// [`Database::add_game`](crate::Database::add_game) and
+    /// [`Database::update_game`](crate::Database::update_game) drop any
+    /// other: one with an unknown year, one more than 3 years from the
+    /// game's year, or any when the game's year is unknown.
     pub event_date: Option<Date>,
     /// The result.
     pub result: GameResult,

@@ -746,11 +746,19 @@ errorT Game::DecodeStart (ByteBuffer * buf)
 
 **Common tags** (240+ tag_id):
 ```
-[241][length][value]  // WhiteTitle
-[242][length][value]  // BlackTitle
+[241][length][value]  // WhiteCountry
+[242][length][value]  // BlackCountry
 [243][length][value]  // Annotator
-...
+[244][length][value]  // PlyCount
+[245][length][value]  // EventDate (as text)
+[246][length][value]  // Opening
+[247][length][value]  // Variation
+[248][length][value]  // Setup
+[249][length][value]  // Source
+[250][length][value]  // SetUp
 ```
+
+Codes 251-254 are unused.
 
 **Regular tags**:
 ```
@@ -761,6 +769,8 @@ errorT Game::DecodeStart (ByteBuffer * buf)
 ```
 [255][3-byte-date]
 ```
+
+SCID reads this encoding but never writes it. It stores the event date only in the index entry.
 
 **Tags end with**: `0` (null terminator)
 
