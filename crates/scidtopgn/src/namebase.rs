@@ -1,6 +1,7 @@
 //! [`NameBase`], the player, event, site, and round names stored in a
 //! `.sn4` file.
 
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::io::{Read, Write};
@@ -252,9 +253,32 @@ impl NameBase {
             .iter()
             .filter_map(|opt| opt.as_ref())
             .collect();
-        entries.sort_by(|a, b| a.name.cmp(&b.name));
+        entries.sort_by(|a, b| scid_order(stored_bytes(&a.name), stored_bytes(&b.name)));
         entries
     }
+}
+
+/// Returns the bytes of `name` that the name file stores: at most 255.
+fn stored_bytes(name: &str) -> &[u8] {
+    let bytes = name.as_bytes();
+    &bytes[..bytes.len().min(255)]
+}
+
+/// Compares two names in the order SCID requires in a name file.
+///
+/// SCID keeps the names of each kind in one tree per first byte, taken in
+/// unsigned order. Within a tree it compares names with `strCompare`, as
+/// signed `char`s followed by a 0 byte, so a byte of 0x80 or above sorts
+/// before every ASCII byte and before the end of a shorter name. SCID
+/// rejects a file that breaks the order within a tree, and can't look
+/// names up in one that breaks the order of first bytes.
+fn scid_order(a: &[u8], b: &[u8]) -> Ordering {
+    fn signed(s: &[u8]) -> impl Iterator<Item = i8> + '_ {
+        s.iter().map(|&byte| byte as i8).chain(std::iter::once(0))
+    }
+    a.first()
+        .cmp(&b.first())
+        .then_with(|| signed(a).cmp(signed(b)))
 }
 
 fn read_one_byte<R: Read>(reader: &mut R) -> Result<u8> {
@@ -304,16 +328,10 @@ fn write_four_bytes<W: Write>(writer: &mut W, value: u32) -> Result<()> {
     Ok(())
 }
 
-fn compute_prefix(s1: &str, s2: &str) -> u8 {
-    let mut count = 0usize;
-    for (c1, c2) in s1.chars().zip(s2.chars()) {
-        if c1 == c2 {
-            count += 1;
-        } else {
-            break;
-        }
-    }
-    count as u8
+/// Returns the number of leading bytes `s1` and `s2` share, at most 255.
+fn compute_prefix(s1: &[u8], s2: &[u8]) -> u8 {
+    let count = s1.iter().zip(s2).take_while(|(b1, b2)| b1 == b2).count();
+    count.min(255) as u8
 }
 
 impl NameBase {
@@ -422,8 +440,10 @@ impl NameBase {
         Ok(())
     }
 
-    /// Writes the names as a `.sn4` file, sorted by name within each kind.
-    /// A name longer than 255 bytes is cut to 255.
+    /// Writes the names as a `.sn4` file, sorted within each kind in the
+    /// order SCID requires: by first byte, then by bytes compared as signed,
+    /// as SCID's `strCompare` does on x86 and Apple arm64. A name longer
+    /// than 255 bytes is cut to 255.
     ///
     /// # Errors
     ///
@@ -446,7 +466,7 @@ impl NameBase {
             let count = self.num_names[nt_idx];
             let max_f = self.max_frequency[nt_idx];
 
-            let mut prev_name: Option<&str> = None;
+            let mut prev_name: Option<&[u8]> = None;
 
             for entry in &entries {
                 if count >= 65536 {
@@ -463,21 +483,20 @@ impl NameBase {
                     write_one_byte(writer, entry.frequency as u8)?;
                 }
 
-                let length = entry.name.len().min(255) as u8;
-                write_one_byte(writer, length)?;
+                let name_bytes = stored_bytes(&entry.name);
+                write_one_byte(writer, name_bytes.len() as u8)?;
 
                 let prefix = if let Some(prev) = prev_name {
-                    let p = compute_prefix(prev, &entry.name);
+                    let p = compute_prefix(prev, name_bytes);
                     write_one_byte(writer, p)?;
                     p
                 } else {
                     0
                 };
 
-                let name_bytes = entry.name.as_bytes();
-                writer.write_all(&name_bytes[prefix as usize..length as usize])?;
+                writer.write_all(&name_bytes[prefix as usize..])?;
 
-                prev_name = Some(&entry.name);
+                prev_name = Some(name_bytes);
             }
         }
 
@@ -559,9 +578,104 @@ mod tests {
 
     #[test]
     fn test_prefix() {
-        assert_eq!(compute_prefix("Carlsen, Magnus", "Caruana, Fabiano"), 3);
-        assert_eq!(compute_prefix("Carlsen, Magnus", "Carlsen, Henrik"), 9);
-        assert_eq!(compute_prefix("abc", "def"), 0);
-        assert_eq!(compute_prefix("", "anything"), 0);
+        assert_eq!(compute_prefix(b"Carlsen, Magnus", b"Caruana, Fabiano"), 3);
+        assert_eq!(compute_prefix(b"Carlsen, Magnus", b"Carlsen, Henrik"), 9);
+        assert_eq!(compute_prefix(b"abc", b"def"), 0);
+        assert_eq!(compute_prefix(b"", b"anything"), 0);
+        // Ä and É share their first byte, 0xC3.
+        assert_eq!(compute_prefix("Ärger".as_bytes(), "Émile".as_bytes()), 1);
+    }
+
+    /// Returns the names of kind `ntype` in the order `write_sn4` writes
+    /// them, with each name's prefix byte. Expects fewer than 65,536 names
+    /// and frequencies below 256.
+    fn written_names(nb: &NameBase, ntype: NameType) -> Vec<(String, u8)> {
+        let mut file = Vec::new();
+        nb.write_sn4(&mut file).unwrap();
+        let mut pos = 36;
+        let mut names = Vec::new();
+        for nt_idx in 0..NUM_NAME_TYPES {
+            let mut prev: Vec<u8> = Vec::new();
+            for i in 0..nb.num_names[nt_idx] {
+                // Skip the 2-byte ID and the 1-byte frequency.
+                pos += 3;
+                let length = usize::from(file[pos]);
+                pos += 1;
+                let prefix = if i > 0 { file[pos] } else { 0 };
+                if i > 0 {
+                    pos += 1;
+                }
+                let suffix = length - usize::from(prefix);
+                let mut name = prev[..usize::from(prefix)].to_vec();
+                name.extend_from_slice(&file[pos..pos + suffix]);
+                pos += suffix;
+                if nt_idx == ntype.as_usize() {
+                    names.push((String::from_utf8(name.clone()).unwrap(), prefix));
+                }
+                prev = name;
+            }
+        }
+        assert_eq!(pos, file.len());
+        names
+    }
+
+    #[test]
+    fn test_write_in_scid_order() {
+        let mut nb = NameBase::new();
+        for name in [
+            "Øst, Ole",
+            "Bl",
+            "Zed",
+            "Blagojević, Dragisa",
+            "",
+            "Émile",
+            "Blübaum, Matthias",
+            "Ärger, Hans",
+            "Abc",
+        ] {
+            nb.add_name(NameType::Player, name).unwrap();
+        }
+        nb.add_name(NameType::Site, "Zug").unwrap();
+        nb.add_name(NameType::Site, "Zürich").unwrap();
+
+        // Names group by first byte, in unsigned order. Within a group, a
+        // byte of 0x80 or above sorts before ASCII and before the end of a
+        // shorter name, and an ASCII prefix still sorts first.
+        assert_eq!(
+            written_names(&nb, NameType::Player),
+            [
+                ("", 0),
+                ("Abc", 0),
+                ("Blübaum, Matthias", 0),
+                ("Bl", 2),
+                ("Blagojević, Dragisa", 2),
+                ("Zed", 0),
+                ("Ärger, Hans", 0),
+                ("Émile", 1),
+                ("Øst, Ole", 1),
+            ]
+            .map(|(name, prefix)| (name.to_string(), prefix))
+        );
+        assert_eq!(
+            written_names(&nb, NameType::Site),
+            [("Zürich".to_string(), 0), ("Zug".to_string(), 1)]
+        );
+
+        // Lookups and IDs don't depend on the order.
+        assert_eq!(nb.find_name(NameType::Player, "Øst, Ole"), Some(0));
+        assert_eq!(nb.find_name(NameType::Player, "Abc"), Some(8));
+        assert_eq!(nb.add_name(NameType::Player, "Bl").unwrap(), 1);
+    }
+
+    #[test]
+    fn test_scid_order() {
+        assert_eq!(scid_order(b"Bl", b"Bla"), Ordering::Less);
+        assert_eq!(scid_order("Blü".as_bytes(), b"Bl"), Ordering::Less);
+        assert_eq!(scid_order(b"Zed", "Ärger".as_bytes()), Ordering::Less);
+        assert_eq!(scid_order(b"", b"A"), Ordering::Less);
+        assert_eq!(
+            scid_order("Émile".as_bytes(), "Émile".as_bytes()),
+            Ordering::Equal
+        );
     }
 }
