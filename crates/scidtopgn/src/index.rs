@@ -440,7 +440,8 @@ impl IndexEntry {
 
     /// Sets the event date, packed. The entry stores its year relative to the
     /// game's, so set the game's date first. An event date more than three
-    /// years from the game's date is stored as none.
+    /// years from the game's date is stored as none, and so is any event date
+    /// when the game's year is below 3, as SCID's unsigned arithmetic gives.
     pub fn set_event_date(&mut self, edate: u32) {
         let mut coded_date = (date_get_month(edate) as u32) << 5;
         coded_date |= date_get_day(edate) as u32;
@@ -449,7 +450,7 @@ impl IndexEntry {
         let dyear = date_get_year(self.get_date()) as i32;
         let mut eyear = eyear;
 
-        if eyear < (dyear - 3) || eyear > (dyear + 3) {
+        if dyear < 3 || eyear < (dyear - 3) || eyear > (dyear + 3) {
             eyear = 0;
         }
 
