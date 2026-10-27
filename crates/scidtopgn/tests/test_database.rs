@@ -780,6 +780,68 @@ fn test_update_game_keeps_user_flags_and_sets_the_start_flag() {
     assert_eq!(flags(&Database::open(&path).unwrap()), (true, true, false));
 }
 
+/// The fields of `entry` that SCID derives from the game's moves, except
+/// the stored line code.
+fn derived_fields(entry: &scidtopgn::IndexEntry) -> (u16, [u8; 9], u32, bool, bool, [u16; 3]) {
+    use scidtopgn::index::{IDX_MASK_PROMO, IDX_MASK_UPROMO};
+    (
+        entry.get_num_half_moves(),
+        *entry.get_home_pawn_data(),
+        entry.get_final_mat_sig(),
+        entry.get_flag(IDX_MASK_PROMO),
+        entry.get_flag(IDX_MASK_UPROMO),
+        [
+            entry.get_variation_count(),
+            entry.get_comment_count(),
+            entry.get_nag_count(),
+        ],
+    )
+}
+
+#[test]
+fn test_update_game_sets_the_derived_fields() {
+    // In `derived`, which SCID wrote, game 2 has a queen promotion, game 3 an
+    // underpromotion, and game 5 no promotion but more than 10 variations,
+    // comments, and NAGs.
+    let src = get_test_data_path("derived");
+    let scid = Database::open(&src).unwrap();
+    let temp = tempfile::TempDir::new().unwrap();
+    let path = temp.path().join("derived");
+    for ext in ["si4", "sn4", "sg4"] {
+        std::fs::copy(src.with_extension(ext), path.with_extension(ext)).unwrap();
+    }
+    let games =
+        scidtopgn::parse_pgn(&std::fs::read_to_string(src.with_extension("pgn")).unwrap()).unwrap();
+
+    let mut db = Database::open(&path).unwrap();
+    db.update_game(2, &games[5]).unwrap();
+    db.update_game(4, &games[3]).unwrap();
+    db.close().unwrap();
+
+    let db = Database::open(&path).unwrap();
+    let fields = |db: &Database, n| derived_fields(db.get_entry(n).unwrap());
+    assert_eq!(fields(&db, 2), fields(&scid, 5));
+    assert_eq!(fields(&db, 4), fields(&scid, 3));
+}
+
+#[test]
+fn test_games_without_moves_have_the_starting_material() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let mut db = Database::create(temp.path().join("games")).unwrap();
+    let standard = scidtopgn::parse_single_game("[Event \"x\"]\n\n*\n").unwrap();
+    let setup = "[FEN \"4k3/8/8/8/8/8/4P3/4K3 w - - 0 1\"]\n[SetUp \"1\"]\n\n*\n";
+    let setup = scidtopgn::parse_single_game(setup).unwrap();
+    db.add_game(&standard).unwrap();
+    db.add_game(&setup).unwrap();
+
+    // SCID's signature of the standard starting position, and of one White
+    // pawn.
+    let standard_fields = (0, [0; 9], 0x6A86A8, false, false, [0; 3]);
+    let setup_fields = (0, [0; 9], 1 << 12, false, false, [0; 3]);
+    assert_eq!(derived_fields(db.get_entry(0).unwrap()), standard_fields);
+    assert_eq!(derived_fields(db.get_entry(1).unwrap()), setup_fields);
+}
+
 #[test]
 fn test_update_game_before_flush_in_new_database() {
     let temp = tempfile::TempDir::new().unwrap();
