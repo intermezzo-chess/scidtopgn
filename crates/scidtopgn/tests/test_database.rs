@@ -566,6 +566,63 @@ fn test_delete_and_undelete_game() {
     assert_eq!(delete_flags(&db), [false, false, false, true, false]);
 }
 
+/// The raw index entries of the database at `path`.
+fn raw_entries(path: &std::path::Path) -> Vec<Vec<u8>> {
+    let si4 = std::fs::read(path.with_extension("si4")).unwrap();
+    si4[scidtopgn::INDEX_HEADER_SIZE..]
+        .chunks(scidtopgn::INDEX_ENTRY_SIZE)
+        .map(<[u8]>::to_vec)
+        .collect()
+}
+
+/// Copies `derived`, which SCID wrote, into a new directory, opens it once
+/// for each of `changes`, closes it, and checks that every entry but those in
+/// `changed` keeps SCID's bytes.
+fn assert_keeps_scids_entries(changed: &[usize], changes: &[&dyn Fn(&mut Database)]) {
+    let src = get_test_data_path("derived");
+    let temp = tempfile::TempDir::new().unwrap();
+    let path = temp.path().join("derived");
+    for ext in ["si4", "sn4", "sg4"] {
+        std::fs::copy(src.with_extension(ext), path.with_extension(ext)).unwrap();
+    }
+    for change in changes {
+        let mut db = Database::open(&path).unwrap();
+        change(&mut db);
+        db.close().unwrap();
+    }
+
+    let entries = raw_entries(&path);
+    for (n, entry) in raw_entries(&src).iter().enumerate() {
+        if !changed.contains(&n) {
+            assert_eq!(&entries[n], entry, "entry {n}");
+        }
+    }
+}
+
+#[test]
+fn test_changes_keep_scids_other_entries() {
+    // Game 0 of `derived` is 302 half-moves long, which needs the top bits of
+    // the count.
+    let db = Database::open(get_test_data_path("derived")).unwrap();
+    assert_eq!(db.get_entry(0).unwrap().get_num_half_moves(), 302);
+
+    let new_game = scidtopgn::parse_single_game(NEW_GAME).unwrap();
+    assert_keeps_scids_entries(&[1], &[&|db| db.delete_game(1).unwrap()]);
+    assert_keeps_scids_entries(
+        &[],
+        &[&|db| db.delete_game(1).unwrap(), &|db| {
+            db.undelete_game(1).unwrap()
+        }],
+    );
+    assert_keeps_scids_entries(&[1], &[&|db| db.update_game(1, &new_game).unwrap()]);
+    assert_keeps_scids_entries(
+        &[],
+        &[&|db| {
+            db.add_game(&new_game).unwrap();
+        }],
+    );
+}
+
 #[test]
 fn test_delete_keeps_scids_name_order() {
     // `accents` was written by SCID with names that sort differently as

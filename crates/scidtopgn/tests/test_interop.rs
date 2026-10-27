@@ -10,7 +10,10 @@
 //! the C++ reference converter from `tests/data/annotated.pgn`, which has
 //! NAGs and comments in the main line and in variations. `tests/data/long`
 //! was written by SCID vs. PC's `pgnscid` from `tests/data/long.pgn`, whose
-//! second game's record is 72,015 bytes long.
+//! second game's record is 72,015 bytes long. `tests/data/derived` was
+//! written by `pgnscid` from `tests/data/derived.pgn`, which covers the index
+//! fields SCID derives from the moves: games longer than 255 and 1,023
+//! half-moves, promotions, and more than 10 variations, comments, and NAGs.
 
 use std::path::PathBuf;
 
@@ -100,15 +103,15 @@ fn skip_tags(buf: &mut ByteBuffer) {
 }
 
 /// The parts of a game record that encode the game rather than its tags:
-/// whether it starts from a FEN, the FEN, the moves, and the comments. SCID
-/// also stores promotion flags, which this crate doesn't write.
-fn move_section(record: &[u8]) -> (bool, Vec<u8>) {
+/// the game flags (a FEN start, a promotion, and an underpromotion), the
+/// FEN, the moves, and the comments.
+fn move_section(record: &[u8]) -> (u8, Vec<u8>) {
     let mut buf = ByteBuffer::from_slice(record);
     skip_tags(&mut buf);
     let flags = buf.get_byte().unwrap();
     let rest = record[buf.position()..].to_vec();
     assert!(rest.contains(&ENCODE_END_GAME));
-    (flags & 1 != 0, rest)
+    (flags, rest)
 }
 
 /// The game's movetext with variations, formatted like python-chess.
@@ -199,7 +202,7 @@ fn test_writes_moves_like_scid() {
         .collect();
     assert_eq!(written, expected);
 
-    for name in ["five", "castling", "annotated", "long"] {
+    for name in ["five", "castling", "annotated", "long", "derived"] {
         let expected: Vec<_> = records(&data_path(name))
             .iter()
             .map(|r| move_section(r))
@@ -355,6 +358,59 @@ fn test_index_start_flags_match_scid() {
     }
     db.flush().unwrap();
     assert_eq!(start_flags(&path), expected);
+}
+
+/// The fields of each index entry in the database at `path` that SCID
+/// derives from the game's moves, except the stored line code.
+fn derived_fields(path: &std::path::Path) -> Vec<String> {
+    use scidtopgn::index::{IDX_MASK_PROMO, IDX_MASK_START, IDX_MASK_UPROMO};
+
+    let db = Database::open(path).unwrap();
+    (0..db.num_games())
+        .map(|i| {
+            let e = db.get_entry(i).unwrap();
+            format!(
+                "game {i}: {} half-moves, home pawns {:02x?}, material {:06x}, \
+                 start {} promo {} underpromo {}, {} variations {} comments {} NAGs",
+                e.get_num_half_moves(),
+                e.get_home_pawn_data(),
+                e.get_final_mat_sig(),
+                e.get_flag(IDX_MASK_START),
+                e.get_flag(IDX_MASK_PROMO),
+                e.get_flag(IDX_MASK_UPROMO),
+                e.get_variation_count(),
+                e.get_comment_count(),
+                e.get_nag_count(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn test_index_derived_fields_match_scid() {
+    for name in [
+        "one",
+        "five",
+        "edge",
+        "castling",
+        "annotated",
+        "long",
+        "accents",
+        "derived",
+    ] {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join(name);
+        let mut db = Database::create(&path).unwrap();
+        for game in read_pgn(&format!("{name}.pgn")) {
+            db.add_game(&game).unwrap();
+        }
+        db.close().unwrap();
+        assert_eq!(
+            derived_fields(&path),
+            derived_fields(&data_path(name)),
+            "{name}"
+        );
+    }
 }
 
 #[test]
