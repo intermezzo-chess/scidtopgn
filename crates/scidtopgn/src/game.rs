@@ -368,12 +368,15 @@ impl Game {
                     | (date_bytes[2] as u32);
                 self.event_date = Some(Date::from_raw(date_val));
             } else if b > MAX_TAG_LEN {
+                // Every code above MAX_TAG_LEN has a value, as in SCID. The
+                // spare codes after SetUp have no name, so their values are
+                // dropped.
+                let val_len = buf.get_byte()?;
+                let value = buf.get_fixed_string(val_len as usize)?;
                 let tag_idx = (b - MAX_TAG_LEN - 1) as usize;
                 if tag_idx < COMMON_TAGS.len() {
                     let tag_name = COMMON_TAGS[tag_idx];
                     if !tag_name.is_empty() {
-                        let val_len = buf.get_byte()?;
-                        let value = buf.get_fixed_string(val_len as usize)?;
                         if store_tags {
                             self.add_tag(tag_name, &value);
                         }
@@ -1060,6 +1063,67 @@ mod tests {
         let game = decode_record(&record, GAME_DECODE_COMMENTS);
         assert_eq!(game.event_date, None);
         assert_eq!(game.moves[1].san, "e4");
+    }
+
+    #[test]
+    fn test_decode_drops_spare_common_tags() {
+        // 251 to 254 are spare common-tag codes. Each has a value, which is
+        // read past and dropped, and the tags after them are kept.
+        let mut tags = vec![251, 2];
+        tags.extend(b"ab");
+        tags.extend([252, 0, 253, 1]);
+        tags.extend(b"x");
+        tags.extend([243, 2]);
+        tags.extend(b"Me");
+        tags.extend([254, 2]);
+        tags.extend(b"yz");
+        let record = record_with_tags(&tags);
+
+        let game = decode_record(&record, GAME_DECODE_ALL);
+        assert_eq!(game.tags.len(), 1);
+        assert_eq!(game.find_tag("Annotator"), Some(&"Me".to_string()));
+        assert_eq!(game.event_date, None);
+        assert_eq!(game.moves[1].san, "e4");
+        assert_eq!(game.moves[1].comment.as_deref(), Some("c"));
+
+        let game = decode_record(&record, GAME_DECODE_COMMENTS);
+        assert!(game.tags.is_empty());
+        assert_eq!(game.moves[1].san, "e4");
+        assert_eq!(game.moves[1].comment.as_deref(), Some("c"));
+
+        let mut game = Game::new();
+        game.decode_start(&mut ByteBuffer::from_slice(&record))
+            .unwrap();
+        assert!(game.tags.is_empty());
+        assert_eq!(game.start_position, None);
+
+        // The record from issue #58: 251 with the value "ab", then 1.e4.
+        let record = [251, 2, b'a', b'b', 0, 0, E4, ENCODE_END_GAME];
+        for flags in [GAME_DECODE_ALL, GAME_DECODE_COMMENTS] {
+            let game = decode_record(&record, flags);
+            assert!(game.tags.is_empty());
+            assert_eq!(game.moves[1].san, "e4");
+        }
+    }
+
+    #[test]
+    fn test_decode_reports_a_spare_common_tag_past_the_end() {
+        // 251 says its value is 5 bytes, but the record ends after 1.
+        let record = [251, 5, b'a'];
+        for store_tags in [true, false] {
+            let mut game = Game::new();
+            let result = game.decode_tags(&mut ByteBuffer::from_slice(&record), store_tags);
+            assert!(
+                matches!(
+                    result,
+                    Err(Error::CorruptGame {
+                        offset: 2,
+                        kind: CorruptGameKind::UnexpectedEnd,
+                    })
+                ),
+                "{result:?}"
+            );
+        }
     }
 
     #[test]
