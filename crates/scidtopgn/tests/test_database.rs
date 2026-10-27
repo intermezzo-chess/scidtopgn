@@ -487,6 +487,133 @@ fn test_many_nags_round_trip() {
     );
 }
 
+/// The record of game `game_num` in the database at `path`.
+fn record(path: &std::path::Path, game_num: u32) -> Vec<u8> {
+    let db = Database::open(path).unwrap();
+    let entry = db.get_entry(game_num).unwrap();
+    let start = entry.get_offset() as usize;
+    let sg4 = std::fs::read(path.with_extension("sg4")).unwrap();
+    sg4[start..start + entry.get_length() as usize].to_vec()
+}
+
+#[test]
+fn test_tags_are_encoded_like_scid() {
+    // SCID stores its ten common tags as 241 to 250, and other tags by
+    // name, matching case.
+    const COMMON: [&str; 10] = [
+        "WhiteCountry",
+        "BlackCountry",
+        "Annotator",
+        "PlyCount",
+        "EventDate",
+        "Opening",
+        "Variation",
+        "Setup",
+        "Source",
+        "SetUp",
+    ];
+    let mut game = Game::new();
+    let mut expected = Vec::new();
+    for (code, name) in (241..).zip(COMMON) {
+        game.add_tag(name, "v");
+        expected.extend([code, 1, b'v']);
+    }
+    game.add_tag("setup", "ab");
+    expected.push(5);
+    expected.extend(b"setup");
+    expected.push(2);
+    expected.extend(b"ab");
+    expected.push(0);
+
+    let temp = tempfile::TempDir::new().unwrap();
+    let path = temp.path().join("tags");
+    let mut db = Database::create(&path).unwrap();
+    db.add_game(&game).unwrap();
+    db.close().unwrap();
+
+    assert!(record(&path, 0).starts_with(&expected));
+    let read = Database::open(&path).unwrap().get_game(0).unwrap();
+    let tags = |game: &Game| -> Vec<(String, String)> {
+        game.tags
+            .iter()
+            .map(|tag| (tag.name.clone(), tag.value.clone()))
+            .collect()
+    };
+    assert_eq!(tags(&read), tags(&game));
+}
+
+#[test]
+fn test_event_date_is_stored_only_in_the_index() {
+    // The index holds an event date within 3 years of the game's year.
+    // SCID drops any other, and stores none in the record.
+    for (date, event_date, kept) in [
+        ("2022.06.01", "2022.05.20", true),
+        ("2022.06.01", "2019.05.20", true),
+        ("2022.06.01", "2025.05.20", true),
+        ("2022.06.01", "2022.??.??", true),
+        ("2022.06.01", "2018.12.31", false),
+        ("2022.06.01", "2026.01.01", false),
+        ("2022.06.01", "????.??.??", false),
+        ("????.??.??", "2022.05.20", false),
+    ] {
+        let pgn = format!("[Date \"{date}\"]\n[EventDate \"{event_date}\"]\n\n1. e4 *\n");
+        let game = scidtopgn::parse_single_game(&pgn).unwrap();
+        let expected = kept.then(|| Date::from_string(event_date));
+
+        let temp = tempfile::TempDir::new().unwrap();
+        let path = temp.path().join("event_date");
+        let mut db = Database::create(&path).unwrap();
+        db.add_game(&game).unwrap();
+        db.add_game(&Game::new()).unwrap();
+        db.update_game(1, &game).unwrap();
+        db.close().unwrap();
+
+        let mut db = Database::open(&path).unwrap();
+        for game_num in [0, 1] {
+            assert_eq!(record(&path, game_num)[0], 0, "{event_date}: no tags");
+            let read = db.get_game(game_num).unwrap();
+            assert_eq!(read.event_date, expected, "{date} {event_date}");
+            assert_eq!(
+                read.to_pgn().contains("[EventDate "),
+                kept,
+                "{date} {event_date}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_reads_the_event_date_from_earlier_records() {
+    // Earlier versions also stored the event date in the record, as 255
+    // and three bytes, where it is the only copy of one the index can't
+    // hold. Replace a 3-byte tag and a 3-byte value with one.
+    let game =
+        scidtopgn::parse_single_game("[Date \"2022.06.01\"]\n[Foo \"abc\"]\n\n1. e4 *\n").unwrap();
+    let temp = tempfile::TempDir::new().unwrap();
+    let path = temp.path().join("earlier");
+    let mut db = Database::create(&path).unwrap();
+    db.add_game(&game).unwrap();
+    db.close().unwrap();
+
+    let sg4_path = path.with_extension("sg4");
+    let mut sg4 = std::fs::read(&sg4_path).unwrap();
+    let start = Database::open(&path)
+        .unwrap()
+        .get_entry(0)
+        .unwrap()
+        .get_offset() as usize;
+    let event_date = Date::new(2030, 5, 20).unwrap();
+    let [_, high, mid, low] = event_date.raw().to_be_bytes();
+    assert_eq!(&sg4[start..start + 8], b"\x03Foo\x03abc");
+    sg4[start..start + 8].copy_from_slice(&[255, high, mid, low, 1, b'x', 1, b'y']);
+    std::fs::write(&sg4_path, sg4).unwrap();
+
+    let read = Database::open(&path).unwrap().get_game(0).unwrap();
+    assert_eq!(read.event_date, Some(event_date));
+    assert_eq!(read.find_tag("x").map(String::as_str), Some("y"));
+    assert!(read.to_pgn().contains("[EventDate \"2030.05.20\"]\n"));
+}
+
 /// The bytes of the files of the database at `path`.
 fn database_bytes(path: &std::path::Path) -> Vec<Vec<u8>> {
     ["si4", "sn4", "sg4"]

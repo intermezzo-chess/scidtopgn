@@ -345,6 +345,9 @@ impl Database {
     /// written to the files by [`flush`](Self::flush) or
     /// [`close`](Self::close).
     ///
+    /// As in SCID, the game's event date is kept only if the index can hold
+    /// it; see [`Game::event_date`].
+    ///
     /// # Errors
     ///
     /// Returns [`Error::GameTooLarge`] if the game's record is longer than
@@ -606,23 +609,22 @@ impl Database {
         Ok((record, summary))
     }
 
+    /// Encodes `game`'s tags as SCID's `encodeTags` does: a common tag by its
+    /// code, and others by name. Like SCID, it doesn't store the event date,
+    /// which only the index entry holds.
     fn encode_tags(&self, buf: &mut ByteBuffer, game: &Game) -> Result<()> {
-        if let Some(event_date) = game.event_date {
-            buf.put_byte(255)?;
-            let raw = event_date.raw();
-            buf.put_byte(((raw >> 16) & 0xFF) as u8)?;
-            buf.put_byte(((raw >> 8) & 0xFF) as u8)?;
-            buf.put_byte((raw & 0xFF) as u8)?;
-        }
-
         for tag in &game.tags {
             let name_bytes = tag.name.as_bytes();
-            if name_bytes.len() <= crate::game::MAX_TAG_LEN as usize {
+            if let Some(code) = crate::game::common_tag_code(&tag.name) {
+                buf.put_byte(code)?;
+            } else if name_bytes.len() <= crate::game::MAX_TAG_LEN as usize {
                 buf.put_byte(name_bytes.len() as u8)?;
                 buf.put_fixed_string(&tag.name, name_bytes.len())?;
-                buf.put_byte(tag.value.len() as u8)?;
-                buf.put_fixed_string(&tag.value, tag.value.len())?;
+            } else {
+                continue;
             }
+            buf.put_byte(tag.value.len() as u8)?;
+            buf.put_fixed_string(&tag.value, tag.value.len())?;
         }
 
         Ok(())

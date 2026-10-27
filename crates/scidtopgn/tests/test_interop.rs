@@ -191,27 +191,19 @@ fn test_parses_pgn_variations_and_setups() {
 }
 
 #[test]
-fn test_writes_moves_like_scid() {
-    let expected: Vec<_> = records(&data_path("edge"))
-        .iter()
-        .map(|r| move_section(r))
-        .collect();
-    let written: Vec<_> = write_records(&read_pgn("edge.pgn"))
-        .iter()
-        .map(|r| move_section(r))
-        .collect();
-    assert_eq!(written, expected);
-
-    for name in ["five", "castling", "annotated", "long", "derived"] {
-        let expected: Vec<_> = records(&data_path(name))
-            .iter()
-            .map(|r| move_section(r))
-            .collect();
-        let written: Vec<_> = write_records(&read_pgn(&format!("{name}.pgn")))
-            .iter()
-            .map(|r| move_section(r))
-            .collect();
-        assert_eq!(written, expected, "{name}");
+fn test_writes_records_like_scid() {
+    for name in [
+        "one",
+        "five",
+        "edge",
+        "castling",
+        "annotated",
+        "long",
+        "accents",
+        "derived",
+    ] {
+        let written = write_records(&read_pgn(&format!("{name}.pgn")));
+        assert_eq!(written, records(&data_path(name)), "{name}");
     }
 }
 

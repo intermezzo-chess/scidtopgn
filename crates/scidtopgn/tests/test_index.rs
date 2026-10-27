@@ -407,6 +407,35 @@ fn test_event_date_must_be_near_the_game_date() {
 }
 
 #[test]
+fn test_event_date_needs_known_years() {
+    use scidtopgn::date_make;
+
+    // An event date without a year isn't stored. Nor is any event date when
+    // the game's year is below 3, as SCID's unsigned arithmetic gives.
+    for (game_year, event_year, stored) in [
+        (2022, 0, false),
+        (0, 1, false),
+        (0, 3, false),
+        (2, 1, false),
+        (3, 1, true),
+    ] {
+        let mut entry = IndexEntry::new();
+        entry.set_date(date_make(game_year, 6, 1));
+        entry.set_event_date(date_make(event_year, 5, 20));
+        let expected = if stored {
+            date_make(event_year, 5, 20)
+        } else {
+            0
+        };
+        assert_eq!(
+            reread(&entry).get_event_date(),
+            expected,
+            "{game_year} {event_year}"
+        );
+    }
+}
+
+#[test]
 fn test_eco_codes() {
     use scidtopgn::index::{eco_from_string, eco_to_string};
 
