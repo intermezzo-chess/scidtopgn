@@ -32,6 +32,9 @@ pub const CUSTOM_FLAG_MAX: usize = 6;
 pub const MAX_ELO: u16 = 4000;
 /// The size of an index entry's home pawn data, in bytes.
 pub const HPSIG_SIZE: usize = 9;
+/// The highest half-move count an index entry stores. Higher counts are
+/// stored modulo 1,024.
+pub const MAX_HALF_MOVES: u16 = 1023;
 
 /// The SCID format version this crate writes: 400, for SCID 4.
 pub const SCID_VERSION: u16 = 400;
@@ -244,7 +247,7 @@ pub struct IndexEntry {
     white_elo: u16,
     black_elo: u16,
     final_mat_sig: u32,
-    num_half_moves: u8,
+    num_half_moves: u16,
     home_pawn_data: [u8; HPSIG_SIZE],
 }
 
@@ -532,15 +535,15 @@ impl IndexEntry {
         eco_to_string(self.eco_code)
     }
 
-    /// Returns the number of half-moves in the main line.
+    /// Returns the number of half-moves in the main line, modulo 1,024.
     pub fn get_num_half_moves(&self) -> u16 {
-        self.num_half_moves as u16
+        self.num_half_moves
     }
 
-    /// Sets the number of half-moves in the main line. Only the low 8 bits
-    /// are stored at present.
+    /// Sets the number of half-moves in the main line. SCID stores 10 bits,
+    /// so a count above [`MAX_HALF_MOVES`] is stored modulo 1,024.
     pub fn set_num_half_moves(&mut self, moves: u16) {
-        self.num_half_moves = (moves & 0xFF) as u8;
+        self.num_half_moves = moves & MAX_HALF_MOVES;
     }
 
     /// Returns whether any flag in `mask` is set, such as
@@ -751,7 +754,7 @@ impl IndexEntry {
             white_elo,
             black_elo,
             final_mat_sig,
-            num_half_moves: num_half_moves as u8,
+            num_half_moves,
             home_pawn_data,
         };
 
@@ -793,9 +796,11 @@ impl IndexEntry {
         write_u16_be(writer, self.black_elo)?;
 
         write_u32_be(writer, self.final_mat_sig)?;
-        write_u8(writer, self.num_half_moves)?;
+        // The low 8 bits of the half-move count have their own byte, and the
+        // top 2 bits are the top of the first home pawn byte.
+        write_u8(writer, (self.num_half_moves & 0xFF) as u8)?;
 
-        let pb0 = (self.home_pawn_data[0] & 63) | (((self.num_half_moves as u16) >> 8) << 6) as u8;
+        let pb0 = (self.home_pawn_data[0] & 63) | ((self.num_half_moves >> 8) << 6) as u8;
         write_u8(writer, pb0)?;
         writer.write_all(&self.home_pawn_data[1..])?;
 
@@ -1367,4 +1372,5 @@ mod tests {
         assert!(entry2.get_start_flag());
         assert!(entry2.get_promotions_flag());
     }
+
 }
