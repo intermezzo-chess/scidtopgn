@@ -1104,6 +1104,10 @@ mod tests {
             assert!(game.tags.is_empty());
             assert_eq!(game.moves[1].san, "e4");
         }
+        let mut game = Game::new();
+        game.decode_start(&mut ByteBuffer::from_slice(&record))
+            .unwrap();
+        assert!(game.tags.is_empty());
     }
 
     #[test]
