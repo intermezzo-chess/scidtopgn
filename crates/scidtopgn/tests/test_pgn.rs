@@ -1001,6 +1001,29 @@ fn test_pre_game_text_keeps_game_numbers_and_lines() {
 }
 
 #[test]
+fn test_parser_gives_the_number_and_line_of_the_last_game() {
+    let pgn = format!("Notes\n\n{ILLEGAL_MOVE}\n{VALID}\n");
+    let mut parser = PgnParser::new(&pgn);
+    assert_eq!((parser.game_number(), parser.game_line()), (0, 0));
+    let Some(Err(Error::PgnGame { number, line, .. })) = parser.next() else {
+        panic!("the first game should fail");
+    };
+    assert_eq!((parser.game_number(), parser.game_line()), (number, line));
+    assert_eq!((number, line), (1, 3));
+    let valid = parser.next().unwrap().unwrap();
+    assert_eq!(valid.event, "Valid");
+    assert_eq!((parser.game_number(), parser.game_line()), (2, 7));
+    // Reaching the end changes neither.
+    assert!(parser.next().is_none());
+    assert_eq!((parser.game_number(), parser.game_line()), (2, 7));
+
+    // `parse_game` starts a game where it starts reading.
+    let mut parser = PgnParser::new("\n[Event \"A\"]\n\n1. e4 *\n");
+    parser.parse_game().unwrap();
+    assert_eq!((parser.game_number(), parser.game_line()), (1, 1));
+}
+
+#[test]
 fn test_a_bracket_line_before_a_game_is_a_bad_tag() {
     // SCID also reads the line as a tag and reports an error.
     let pgn = "[Note: see below]\n\n[Event \"x\"]\n\n1. e4 *\n";

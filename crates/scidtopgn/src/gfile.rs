@@ -207,6 +207,17 @@ impl GFile {
         Ok(())
     }
 
+    /// Drops the pending block, cuts the file to `len` bytes, and closes
+    /// it, for [`Database::discard`](crate::Database::discard).
+    pub(crate) fn discard_after(&mut self, len: u64) -> Result<()> {
+        self.current_block.dirty = false;
+        self.file_mode = FileMode::None;
+        if let Some(file) = self.handle.take() {
+            file.set_len(len)?;
+        }
+        Ok(())
+    }
+
     fn flush_block(&mut self) -> Result<()> {
         let handle = match &mut self.handle {
             Some(h) => h,

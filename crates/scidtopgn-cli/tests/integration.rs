@@ -504,6 +504,139 @@ fn test_cli_import_aborts_on_invalid_game() {
     );
 }
 
+/// A game whose record, 140,007 bytes long, is too large to store.
+fn too_large_game() -> String {
+    format!(
+        "[Event \"Big\"]\n\n1. d4 {{{}}} d5 *\n",
+        "x".repeat(140_000)
+    )
+}
+
+const TOO_LARGE: &str = "Game is 140007 bytes long; at most 131071 bytes fit";
+
+/// The names of the files in `dir`, sorted.
+fn file_names(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .expect("Failed to read directory")
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
+#[test]
+fn test_cli_import_warns_about_games_too_large_to_store() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let pgn = temp.path().join("input.pgn");
+    let too_large = too_large_game();
+    std::fs::write(
+        &pgn,
+        [ILLEGAL_GAME, VALID_GAME, &too_large, VALID_GAME].join("\n"),
+    )
+    .expect("Failed to write PGN");
+    let import = |db: &str, args: &[&str]| {
+        cli()
+            .arg("import")
+            .arg(&pgn)
+            .arg("-o")
+            .arg(temp.path().join(db))
+            .args(args)
+            .output()
+            .expect("Failed to run CLI")
+    };
+    // Numbered with the game before it that failed to parse.
+    let warning = format!("skipping PGN game 3, starting at line 11: {TOO_LARGE}");
+
+    let output = import("db", &[]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+    assert_eq!(
+        stderr.lines().collect::<Vec<_>>(),
+        [
+            "Warning: skipping PGN game 1, starting at line 1: Invalid move \"Ke3\" at line 4: illegal san",
+            &format!("Warning: {warning}"),
+        ]
+    );
+    assert_eq!(imported_events(&temp.path().join("db")), ["Valid", "Valid"]);
+
+    let output = import("verbose", &["--verbose"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("2 games imported, 2 skipped"), "{stderr}");
+
+    let log = temp.path().join("import.log");
+    let output = import("quiet", &["--quiet", "--log", log.to_str().unwrap()]);
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    assert!(
+        log_messages(&log).contains(&format!("warning: {warning}")),
+        "{:?}",
+        log_messages(&log)
+    );
+
+    // The new databases' files were moved into place, leaving nothing else.
+    let mut expected = vec!["import.log".to_owned(), "input.pgn".to_owned()];
+    for db in ["db", "quiet", "verbose"] {
+        expected.extend(["sg4", "si4", "sn4"].map(|ext| format!("{db}.{ext}")));
+    }
+    expected.sort();
+    assert_eq!(file_names(temp.path()), expected);
+}
+
+#[test]
+fn test_cli_import_abort_leaves_the_database_as_it_was() {
+    let too_large = too_large_game();
+    let pgn = [VALID_GAME, &too_large, VALID_GAME].join("\n");
+    for args in [
+        &["--on-error", "abort"][..],
+        &["--on-error", "abort", "--overwrite"],
+    ] {
+        for existing in [false, true] {
+            let temp = TempDir::new().expect("Failed to create temp dir");
+            let db_path = temp.path().join("db");
+            let pgn_path = temp.path().join("input.pgn");
+            if existing {
+                std::fs::write(&pgn_path, VALID_GAME).expect("Failed to write PGN");
+                let output = cli()
+                    .arg("import")
+                    .arg(&pgn_path)
+                    .arg("-o")
+                    .arg(&db_path)
+                    .output()
+                    .expect("Failed to run CLI");
+                assert!(output.status.success());
+            }
+            std::fs::write(&pgn_path, &pgn).expect("Failed to write PGN");
+            let names = file_names(temp.path());
+            let bytes = existing.then(|| database_bytes(&db_path));
+
+            let output = cli()
+                .arg("import")
+                .arg(&pgn_path)
+                .arg("-o")
+                .arg(&db_path)
+                .args(args)
+                .output()
+                .expect("Failed to run CLI");
+
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert_eq!(
+                output.status.code(),
+                Some(1),
+                "{args:?} {existing}: {stderr}"
+            );
+            assert_eq!(
+                stderr,
+                format!("Error: PGN game 2, starting at line 6\n\nCaused by:\n    {TOO_LARGE}\n"),
+                "{args:?} {existing}"
+            );
+            assert_eq!(file_names(temp.path()), names, "{args:?} {existing}");
+            if let Some(bytes) = bytes {
+                assert_eq!(database_bytes(&db_path), bytes, "{args:?}");
+            }
+        }
+    }
+}
+
 /// Moves `buf` past the tags at the start of a game record: the compact
 /// event date (255), common tags stored by code (241 to 254), and tags
 /// stored by name, up to the 0 that ends them.

@@ -242,6 +242,8 @@ pub struct PgnParser {
     pos: usize,
     line: u32,
     games: usize,
+    /// The line the game last read starts on, or 0 before the first.
+    game_line: u32,
     in_movetext: bool,
     /// Where bytes that weren't valid UTF-8 were read as Windows-1252: the
     /// index in `input` and the line of each run of them, in input order.
@@ -280,9 +282,42 @@ impl PgnParser {
             pos: 0,
             line: 1,
             games: 0,
+            game_line: 0,
             in_movetext: false,
             not_utf8,
         }
+    }
+
+    /// The number of the game last read, counting from 1, or 0 before the
+    /// first. Games that failed count, so it is the number an
+    /// [`Error::PgnGame`] or a [`PgnWarning`] for the game gives.
+    ///
+    /// With [`game_line`](Self::game_line), it names a game that parsed but
+    /// fails later, such as one too large to store in a database.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use scidtopgn::PgnParser;
+    ///
+    /// let pgn = "[Event \"A\"]\n\n1. e4 Ke7 Ke2 *\n\n[Event \"B\"]\n\n1. d4 *\n";
+    /// let mut parser = PgnParser::new(pgn);
+    /// assert!(parser.next().unwrap().is_err());
+    /// let game = parser.next().unwrap()?;
+    /// assert_eq!(game.event, "B");
+    /// assert_eq!((parser.game_number(), parser.game_line()), (2, 5));
+    /// # Ok::<(), scidtopgn::Error>(())
+    /// ```
+    pub fn game_number(&self) -> usize {
+        self.games
+    }
+
+    /// The line the game last read starts on, counting from 1, or 0 before
+    /// the first. As an iterator, a game starts at its first tag line, the
+    /// line an [`Error::PgnGame`] gives. [`parse_game`](Self::parse_game)
+    /// starts a game where it starts reading.
+    pub fn game_line(&self) -> u32 {
+        self.game_line
     }
 
     fn peek(&self) -> Option<char> {
@@ -498,6 +533,7 @@ impl PgnParser {
     /// than 255 of them.
     pub fn parse_game(&mut self) -> Result<Game> {
         let start = self.pos;
+        self.game_line = self.line;
         let mut game = self.read_game("")?;
         self.warn_not_utf8(&mut game, start);
         Ok(game)
@@ -887,6 +923,7 @@ impl Iterator for PgnParser {
         let text = self.read_pre_game_text()?;
 
         let line = self.line;
+        self.game_line = line;
         match self.read_game(&text) {
             Ok(mut game) => {
                 self.warn_not_utf8(&mut game, start);

@@ -72,7 +72,7 @@ scidtopgn import - -o mydb                        # read from stdin
 scidtopgn import games.pgn -o mydb --on-error=abort  # strict mode
 ```
 
-By default, import appends to an existing database. Bad games get skipped with a warning unless you pass `--on-error=abort`.
+By default, import appends to an existing database. Games that can't be read or stored, such as one whose record is longer than 131,071 bytes, get skipped with a warning unless you pass `--on-error=abort`. Then import stops at the first such game, and the database is left as it was, or isn't created.
 
 Import reads the same PGN notation as SCID, such as `0-0`, `ed` for `exd5`, `e2-e4`, or `N` for a novelty. Problems that don't stop a game from being imported, such as castling after the king has moved and returned, are printed as warnings. [docs/PGN_IMPORT.md](docs/PGN_IMPORT.md) lists each notation and where `scidtopgn` differs from SCID.
 
