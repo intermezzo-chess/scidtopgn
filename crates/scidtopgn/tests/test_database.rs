@@ -284,6 +284,54 @@ fn test_create_replaces_every_file_of_an_existing_database() {
     assert_opens_empty(&path);
 }
 
+/// The PGN of the first `count` games of `db`.
+fn first_pgn(db: &mut Database, count: u32) -> Vec<String> {
+    (0..count)
+        .map(|n| db.get_game(n).unwrap().to_pgn())
+        .collect()
+}
+
+#[test]
+fn test_create_reads_back_games_from_written_blocks() {
+    // Each record is about 60,000 bytes, so a block holds two.
+    let games: Vec<Game> = (0..7)
+        .map(|n| {
+            let comment = format!("{n} {}", "x".repeat(60_000));
+            scidtopgn::parse_single_game(&format!("[Event \"x\"]\n\n1. e4 {{{comment}}} *\n"))
+                .unwrap()
+        })
+        .collect();
+    let expected: Vec<String> = games.iter().map(Game::to_pgn).collect();
+    let temp = tempfile::TempDir::new().unwrap();
+
+    let path = temp.path().join("read");
+    let mut db = Database::create(&path).unwrap();
+    for game in &games[..5] {
+        db.add_game(game).unwrap();
+    }
+    let last_block = 2 * scidtopgn::GF_BLOCKSIZE as u32;
+    assert_eq!(db.get_entry(4).unwrap().get_offset(), last_block);
+    assert_eq!(first_pgn(&mut db, 5), expected[..5]);
+    // Adds to the last block after reading the first.
+    db.get_game(0).unwrap();
+    db.add_game(&games[5]).unwrap();
+    assert_eq!(first_pgn(&mut db, 6), expected[..6]);
+    db.flush().unwrap();
+    db.add_game(&games[6]).unwrap();
+    assert_eq!(first_pgn(&mut db, 7), expected);
+    db.close().unwrap();
+    assert_eq!(first_pgn(&mut Database::open(&path).unwrap(), 7), expected);
+
+    // Reading changes none of the bytes written.
+    let unread = temp.path().join("unread");
+    let mut db = Database::create(&unread).unwrap();
+    for game in &games {
+        db.add_game(game).unwrap();
+    }
+    db.close().unwrap();
+    assert_eq!(database_bytes(&path), database_bytes(&unread));
+}
+
 /// `game` written to a new database and read back.
 fn scid_round_trip(game: &Game) -> Game {
     let temp = tempfile::TempDir::new().unwrap();

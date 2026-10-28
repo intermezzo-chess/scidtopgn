@@ -84,7 +84,7 @@ impl GFile {
 
     /// Creates the game file of the database at `path`, given without an
     /// extension, replacing any file already there, and opens it for
-    /// writing.
+    /// reading and writing, so games read back before it's closed.
     ///
     /// # Errors
     ///
@@ -94,6 +94,7 @@ impl GFile {
         let sg4_path = path.as_ref().with_extension("sg4");
 
         let file = OpenOptions::new()
+            .read(true)
             .write(true)
             .create(true)
             .truncate(true)
@@ -102,7 +103,7 @@ impl GFile {
 
         Ok(Self {
             handle: Some(file),
-            file_mode: FileMode::WriteOnly,
+            file_mode: FileMode::Both,
             offset: 0,
             num_blocks: 0,
             last_block_size: 0,
@@ -639,5 +640,55 @@ mod tests {
         expected.extend([8, 8]);
         let offset = (GF_BLOCKSIZE - 101) as u32;
         assert_eq!(gf.read_game_data(offset, 103).unwrap(), expected);
+    }
+
+    #[test]
+    fn test_gfile_create_reads_back_written_blocks() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("created");
+        let block = GF_BLOCKSIZE as u32;
+        let file_len = || std::fs::metadata(path.with_extension("sg4")).unwrap().len();
+
+        let mut gf = GFile::create(&path).unwrap();
+        // The first two fill block 0 exactly, and each of the others starts
+        // a new block.
+        let records = [
+            vec![1; MAX_GAME_LENGTH],
+            vec![2; 1],
+            vec![3; 100],
+            vec![4; MAX_GAME_LENGTH],
+            vec![5; 10],
+        ];
+        let offsets: Vec<u32> = records
+            .iter()
+            .map(|record| gf.add_game_data(record).unwrap())
+            .collect();
+        assert_eq!(offsets, [0, block - 1, block, 2 * block, 3 * block]);
+
+        // Block 3 hasn't been written, and reads from memory.
+        assert!(file_len() < u64::from(offsets[4]));
+        assert_eq!(gf.read_game_data(offsets[4], 10).unwrap(), records[4]);
+        for (record, &offset) in records.iter().zip(&offsets) {
+            let read = gf.read_game_data(offset, record.len() as u32).unwrap();
+            assert_eq!(&read, record, "{offset}");
+        }
+
+        // Adding after reading block 0 reloads the last block.
+        assert_eq!(gf.read_game_data(0, 1).unwrap(), [1]);
+        assert_eq!(gf.add_game_data(&[6; 5]).unwrap(), 3 * block + 10);
+        assert_eq!(gf.read_game_data(0, 1).unwrap(), [1]);
+        assert_eq!(
+            gf.read_game_data(3 * block, 15).unwrap(),
+            [[5; 10].as_slice(), &[6; 5]].concat()
+        );
+        gf.close().unwrap();
+
+        assert_eq!(file_len(), 3 * u64::from(block) + 15);
+        let mut gf = GFile::open(&path).unwrap();
+        for (record, &offset) in records.iter().zip(&offsets) {
+            let read = gf.read_game_data(offset, record.len() as u32).unwrap();
+            assert_eq!(&read, record, "{offset}");
+        }
+        assert_eq!(gf.read_game_data(3 * block + 10, 5).unwrap(), [6; 5]);
     }
 }
