@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use crate::bytebuf::ByteBuffer;
 use crate::error::{DatabaseFile, Error, Result};
-use crate::game::{Game, Marker, GAME_DECODE_ALL};
+use crate::game::{Game, Marker, GAME_DECODE_ALL, MAX_TAG_VALUE_LEN};
 use crate::gfile::GFile;
 use crate::index::{
     material_sig, HomePawnList, Index, IndexEntry, IDX_MASK_PROMO, IDX_MASK_UPROMO,
@@ -346,12 +346,16 @@ impl Database {
     /// [`close`](Self::close).
     ///
     /// As in SCID, the game's event date is kept only if the index can hold
-    /// it; see [`Game::event_date`].
+    /// it; see [`Game::event_date`]. As in SCID, a tag name longer than 240
+    /// bytes is cut to 240, and a player, event, site, or round name longer
+    /// than 255 bytes is cut to 255. Unlike SCID, a cut that would split a
+    /// character ends before it.
     ///
     /// # Errors
     ///
     /// Returns [`Error::GameTooLarge`] if the game's record is longer than
     /// 131,071 bytes, the most the index can record,
+    /// [`Error::TagTooLong`] if a tag's value is longer than 255 bytes,
     /// [`Error::IndexFull`] or [`Error::NameBaseFull`] if the database can't
     /// hold another game or name, [`Error::InvalidMove`] or
     /// [`Error::InvalidFen`] if the game's moves or starting position can't
@@ -612,16 +616,27 @@ impl Database {
     /// Encodes `game`'s tags as SCID's `encodeTags` does: a common tag by its
     /// code, and others by name. Like SCID, it doesn't store the event date,
     /// which only the index entry holds.
+    ///
+    /// A name longer than [`MAX_TAG_LEN`](crate::game::MAX_TAG_LEN) bytes is
+    /// cut to it, as SCID's `AddPgnTag` does, but before a character the cut
+    /// would split.
     fn encode_tags(&self, buf: &mut ByteBuffer, game: &Game) -> Result<()> {
         for tag in &game.tags {
-            let name_bytes = tag.name.as_bytes();
+            if tag.value.len() > MAX_TAG_VALUE_LEN {
+                return Err(Error::TagTooLong {
+                    name: tag.name.clone(),
+                    length: tag.value.len(),
+                    max: MAX_TAG_VALUE_LEN,
+                });
+            }
             if let Some(code) = crate::game::common_tag_code(&tag.name) {
                 buf.put_byte(code)?;
-            } else if name_bytes.len() <= crate::game::MAX_TAG_LEN as usize {
-                buf.put_byte(name_bytes.len() as u8)?;
-                buf.put_fixed_string(&tag.name, name_bytes.len())?;
             } else {
-                continue;
+                let len = tag
+                    .name
+                    .floor_char_boundary(crate::game::MAX_TAG_LEN as usize);
+                buf.put_byte(len as u8)?;
+                buf.put_fixed_string(&tag.name, len)?;
             }
             buf.put_byte(tag.value.len() as u8)?;
             buf.put_fixed_string(&tag.value, tag.value.len())?;

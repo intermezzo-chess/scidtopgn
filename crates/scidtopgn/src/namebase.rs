@@ -12,6 +12,8 @@ use crate::error::{Error, Result};
 pub const NAMEBASE_MAGIC: &[u8; 8] = b"Scid.sn\0";
 /// The number of kinds of name: [`NameType`] has one variant per kind.
 pub const NUM_NAME_TYPES: usize = 4;
+/// The longest name the name file stores, in bytes.
+const MAX_NAME_LEN: usize = 255;
 
 /// A kind of name in the name file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -164,12 +166,17 @@ impl NameBase {
     /// Returns the ID of `name`, adding it with a frequency of 0 if it isn't
     /// already present. IDs count from 0 in the order names are added.
     ///
+    /// As in SCID, a name longer than 255 bytes is cut to 255 before it is
+    /// looked up, so names that start with the same 255 bytes share an ID.
+    /// Unlike SCID, a cut that would split a character ends before it.
+    ///
     /// # Errors
     ///
     /// Returns [`Error::NameBaseFull`] if there are already
     /// [`ntype.max_id()`](NameType::max_id) names of kind `ntype`.
     pub fn add_name(&mut self, ntype: NameType, name: &str) -> Result<u32> {
         let idx = ntype.as_usize();
+        let name = stored_name(name);
 
         if self.num_names[idx] >= ntype.max_id() {
             return Err(Error::NameBaseFull { name_type: ntype });
@@ -197,9 +204,10 @@ impl NameBase {
         Ok(id)
     }
 
-    /// Returns the ID of `name`, or `None` if it isn't present.
+    /// Returns the ID of `name`, or `None` if it isn't present. A name
+    /// longer than 255 bytes is cut as [`add_name`](Self::add_name) cuts it.
     pub fn find_name(&self, ntype: NameType, name: &str) -> Option<u32> {
-        self.trees[ntype.as_usize()].get(name).copied()
+        self.trees[ntype.as_usize()].get(stored_name(name)).copied()
     }
 
     /// Returns the name with ID `id`, or `None` if there is none.
@@ -253,15 +261,15 @@ impl NameBase {
             .iter()
             .filter_map(|opt| opt.as_ref())
             .collect();
-        entries.sort_by(|a, b| scid_order(stored_bytes(&a.name), stored_bytes(&b.name)));
+        entries.sort_by(|a, b| scid_order(a.name.as_bytes(), b.name.as_bytes()));
         entries
     }
 }
 
-/// Returns the bytes of `name` that the name file stores: at most 255.
-fn stored_bytes(name: &str) -> &[u8] {
-    let bytes = name.as_bytes();
-    &bytes[..bytes.len().min(255)]
+/// Returns the part of `name` that the name file stores: at most
+/// [`MAX_NAME_LEN`] bytes, ending on a character boundary.
+fn stored_name(name: &str) -> &str {
+    &name[..name.floor_char_boundary(MAX_NAME_LEN)]
 }
 
 /// Compares two names in the order SCID requires in a name file.
@@ -442,8 +450,7 @@ impl NameBase {
 
     /// Writes the names as a `.sn4` file, sorted within each kind in the
     /// order SCID requires: by first byte, then by bytes compared as signed,
-    /// as SCID's `strCompare` does on x86 and Apple arm64. A name longer
-    /// than 255 bytes is cut to 255.
+    /// as SCID's `strCompare` does on x86 and Apple arm64.
     ///
     /// # Errors
     ///
@@ -483,7 +490,7 @@ impl NameBase {
                     write_one_byte(writer, entry.frequency as u8)?;
                 }
 
-                let name_bytes = stored_bytes(&entry.name);
+                let name_bytes = entry.name.as_bytes();
                 write_one_byte(writer, name_bytes.len() as u8)?;
 
                 let prefix = if let Some(prev) = prev_name {

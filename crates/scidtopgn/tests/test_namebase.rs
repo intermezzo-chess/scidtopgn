@@ -323,3 +323,30 @@ fn test_roundtrip_wide_ids_and_frequencies() {
     assert_eq!(reread.get_frequency(NameType::Event, 7), 65_536);
     assert_eq!(reread.get_frequency(NameType::Site, site), 300);
 }
+
+#[test]
+fn test_names_are_cut_to_255_bytes() {
+    let a = |len| "a".repeat(len);
+    let mut nb = NameBase::new();
+    let id = nb.add_name(NameType::Event, &a(255)).unwrap();
+    // As in SCID, a longer name is cut before it is looked up.
+    assert_eq!(nb.add_name(NameType::Event, &a(256)).unwrap(), id);
+    assert_eq!(nb.find_name(NameType::Event, &a(300)), Some(id));
+    assert_eq!(nb.count(NameType::Event), 1);
+
+    // A cut that would split a character ends before it.
+    let name = a(254) + "é";
+    let id = nb.add_name(NameType::Event, &name).unwrap();
+    assert_eq!(nb.get_name(NameType::Event, id), Some(a(254).as_str()));
+    assert_eq!(nb.find_name(NameType::Event, &name), Some(id));
+    assert_eq!(nb.find_name(NameType::Event, &a(254)), Some(id));
+
+    let mut sn4 = Vec::new();
+    nb.write_sn4(&mut sn4).unwrap();
+    let mut reread = NameBase::new();
+    reread.read_sn4(&mut sn4.as_slice()).unwrap();
+    assert_eq!(
+        reread.get_all_names(NameType::Event),
+        [(0, a(255), 0), (1, a(254), 0)]
+    );
+}

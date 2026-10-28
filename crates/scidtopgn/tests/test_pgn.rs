@@ -1280,3 +1280,65 @@ fn test_dropped_castling_rights_name_the_rook_file() {
         }]
     );
 }
+
+#[test]
+fn test_tags_longer_than_255_bytes_are_dropped() {
+    let a = |n| "a".repeat(n);
+    let pgn = [
+        "[Event \"x\"]".to_string(),
+        "[Annotator \"first\"]".to_string(),
+        // A later duplicate that is dropped leaves the first value.
+        format!("[Annotator \"{}\"]", a(256)),
+        // Tags read into fields are dropped too, and the field keeps `?`.
+        format!("[White \"{}\"]", a(300)),
+        format!("[{} \"v\"]", a(256)),
+        // The limit is in bytes: 128 two-byte characters are 256 bytes.
+        format!("[Opening \"{}\"]", "é".repeat(128)),
+        // 255 bytes are kept, measured after escapes are read.
+        format!("[Source \"{}\"]", a(255)),
+        format!("[{} \"{}\\\"\"]", a(255), a(254)),
+        String::new(),
+        "1. e4 *".to_string(),
+    ]
+    .join("\n");
+    let game = parse_single_game(&pgn).unwrap();
+
+    let tags: Vec<_> = game
+        .tags
+        .iter()
+        .map(|t| (t.name.clone(), t.value.clone()))
+        .collect();
+    assert_eq!(
+        tags,
+        [
+            ("Annotator".to_string(), "first".to_string()),
+            ("Source".to_string(), a(255)),
+            (a(255), a(254) + "\""),
+        ]
+    );
+    assert_eq!(game.white, "?");
+    assert_eq!(sans(&game), ["e4"]);
+
+    let long_value = |name: &str, length| PgnWarningKind::LongTagValue {
+        name: name.to_string(),
+        length,
+    };
+    assert_eq!(
+        warning_kinds(&game),
+        [
+            long_value("Annotator", 256),
+            long_value("White", 300),
+            PgnWarningKind::LongTagName { length: 256 },
+            long_value("Opening", 256),
+        ]
+    );
+    let messages: Vec<String> = game.warnings.iter().map(ToString::to_string).collect();
+    assert_eq!(
+        messages[0],
+        "PGN game 1, line 3: dropped tag \"Annotator\" because its value is 256 bytes, more than 255"
+    );
+    assert_eq!(
+        messages[2],
+        "PGN game 1, line 5: dropped a tag because its name is 256 bytes, more than 255"
+    );
+}

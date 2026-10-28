@@ -192,6 +192,17 @@ pub enum Error {
         max: usize,
     },
 
+    /// A tag whose value is too long to store in a game record.
+    #[error("Tag {name} has a value {length} bytes long; at most {max} bytes fit")]
+    TagTooLong {
+        /// The tag's name.
+        name: String,
+        /// The value's length in bytes.
+        length: usize,
+        /// The most bytes a value can have.
+        max: usize,
+    },
+
     /// A game file used after it was closed.
     #[error("File not open")]
     FileNotOpen,

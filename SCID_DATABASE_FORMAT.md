@@ -765,6 +765,8 @@ Codes 251-254 are unused. SCID never writes them, but it reads a length and a va
 [name_length][name][value_length][value]
 ```
 
+A name is at most 240 bytes, so that its length can't be read as a common tag code, and a value at most 255. SCID's `AddPgnTag` cuts a longer name to 240 bytes. Its `encodeTags` doesn't check a value's length, so the length byte of a longer value wraps; its PGN parser drops such tags first. scidtopgn cuts a name the same way, and rejects a game with a longer value (`Error::TagTooLong`).
+
 **Special EventDate**:
 ```
 [255][3-byte-date]

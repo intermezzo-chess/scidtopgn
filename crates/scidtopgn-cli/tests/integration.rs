@@ -811,6 +811,57 @@ fn test_cli_import_reads_text_that_isnt_utf8_as_windows_1252() {
 }
 
 #[test]
+fn test_cli_import_drops_tags_too_long_to_store() {
+    // #53: these imported, but the database couldn't be read back.
+    let long_tag = format!(
+        "[Event \"x\"]\n[Annotator \"{}\"]\n\n1. e4 e5 *\n",
+        "y".repeat(300)
+    );
+    let long_name = format!(
+        "[Event \"x\"]\n[White \"{}\"]\n\n1. e4 e5 *\n",
+        "é".repeat(200)
+    );
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    for (name, pgn, warning) in [
+        (
+            "long-tag",
+            long_tag,
+            "dropped tag \"Annotator\" because its value is 300 bytes, more than 255",
+        ),
+        (
+            "long-name",
+            long_name,
+            "dropped tag \"White\" because its value is 400 bytes, more than 255",
+        ),
+    ] {
+        let pgn_path = temp.path().join(format!("{name}.pgn"));
+        std::fs::write(&pgn_path, pgn).expect("Failed to write PGN");
+        let db_path = temp.path().join(name);
+        let output = cli()
+            .arg("import")
+            .arg(&pgn_path)
+            .arg("-o")
+            .arg(&db_path)
+            .output()
+            .expect("Failed to run CLI");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{name}: {stderr}");
+        assert_eq!(
+            stderr,
+            format!("Warning: PGN game 1, line 2: {warning}\n"),
+            "{name}"
+        );
+
+        let exported = cli().arg(&db_path).output().expect("Failed to run CLI");
+        let stdout = String::from_utf8(exported.stdout).expect("Output should be UTF-8");
+        assert!(exported.status.success(), "{name}: {stdout}");
+        assert!(stdout.contains("[White \"?\"]\n"), "{name}: {stdout}");
+        assert!(!stdout.contains("Annotator"), "{name}: {stdout}");
+        assert!(stdout.contains("1. e4 e5"), "{name}: {stdout}");
+    }
+}
+
+#[test]
 fn test_cli_round_trip_keeps_annotations_and_variations() {
     let temp = TempDir::new().expect("Failed to create temp dir");
     let pgn_path = temp.path().join("nag.pgn");
