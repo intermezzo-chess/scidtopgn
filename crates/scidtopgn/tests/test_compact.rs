@@ -499,6 +499,50 @@ fn test_compact_names_counts_the_games_again() {
 }
 
 #[test]
+fn test_compact_names_closes_gaps_in_the_ids() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let path = temp.path().join("gap");
+    let mut db = Database::create(&path).unwrap();
+    let game = |white: &str, black: &str| {
+        parse_single_game(&format!(
+            "[White \"{white}\"]\n[Black \"{black}\"]\n\n1. e4 *\n"
+        ))
+        .unwrap()
+    };
+    db.add_game(&game("A", "B")).unwrap();
+    db.close().unwrap();
+
+    // Give B the player ID 2, so that no name has ID 1. The name file
+    // starts with 36 bytes of header, then A's 5 bytes; B's ID is next.
+    let sn4_path = path.with_extension("sn4");
+    let mut sn4 = std::fs::read(&sn4_path).unwrap();
+    assert_eq!(sn4[36..41], [0, 0, 1, 1, b'A']);
+    assert_eq!(sn4[41..43], [0, 1]);
+    sn4[42] = 2;
+    std::fs::write(&sn4_path, sn4).unwrap();
+    change_index(&path, |index| {
+        index.get_entry_mut(0).unwrap().set_black(2);
+    });
+
+    // Every name is used, but the IDs have a gap.
+    let mut db = Database::open(&path).unwrap();
+    assert_eq!(db.get_game(0).unwrap().black, "B");
+    db.compact_names().unwrap();
+    let players = |db: &Database| db.nfile().namebase().get_all_names(NameType::Player);
+    assert_eq!(
+        players(&db),
+        [(0, "A".to_string(), 1), (1, "B".to_string(), 1)]
+    );
+
+    // A new name gets a free ID.
+    db.add_game(&game("A", "C")).unwrap();
+    db.close().unwrap();
+    let mut db = Database::open(&path).unwrap();
+    let black: Vec<String> = db.games().map(|g| g.unwrap().black).collect();
+    assert_eq!(black, ["B", "C"]);
+}
+
+#[test]
 fn test_compact_names_stops_at_a_name_the_name_file_lacks() {
     let temp = tempfile::TempDir::new().unwrap();
     let path = copy_of(temp.path(), "five");

@@ -262,16 +262,19 @@ impl NameBase {
 
     /// Returns a name base with only the names whose frequency isn't 0, and
     /// the new ID of each old ID, by kind, or `None` if every name has a
-    /// frequency. Within each kind, the new IDs count from 0 in the order of
-    /// the old ones. Names that are the same, which a damaged name file can
-    /// have, become one, with their frequencies added together.
+    /// frequency and the IDs have no gaps. Within each kind, the new IDs count
+    /// from 0 in the order of the old ones. Names that are the same, which a
+    /// damaged name file can have, become one, with their frequencies added
+    /// together.
+    ///
+    /// A name file can skip IDs, but [`add_name`](Self::add_name) gives a new
+    /// name the ID after the number of names, which may already be taken.
     pub(crate) fn without_unused(&self) -> Option<(NameBase, NewIds)> {
         if self
             .by_id
             .iter()
             .flatten()
-            .flatten()
-            .all(|e| e.frequency > 0)
+            .all(|e| e.as_ref().is_some_and(|e| e.frequency > 0))
         {
             return None;
         }
@@ -641,6 +644,22 @@ mod tests {
     fn test_without_unused_is_none_when_every_name_is_used() {
         assert!(players(&[("A", 1), ("B", 3)]).without_unused().is_none());
         assert!(NameBase::new().without_unused().is_none());
+    }
+
+    #[test]
+    fn test_without_unused_closes_gaps_in_the_ids() {
+        // A name file can skip IDs: here B has ID 2, and no name has ID 1.
+        let mut nb = players(&[("A", 1), ("B", 1)]);
+        let b = nb.by_id[0].pop().unwrap().map(|e| NameEntry { id: 2, ..e });
+        nb.by_id[0].extend([None, b]);
+        nb.trees[0].insert("B".to_string(), 2);
+        let (kept, new_ids) = nb.without_unused().unwrap();
+
+        assert_eq!(new_ids[0], [Some(0), None, Some(1)]);
+        assert_eq!(
+            kept.get_all_names(NameType::Player),
+            [(0, "A".to_string(), 1), (1, "B".to_string(), 1)]
+        );
     }
 
     #[test]
