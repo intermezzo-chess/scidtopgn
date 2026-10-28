@@ -1039,3 +1039,150 @@ fn test_update_game_too_large_changes_nothing() {
 
     assert_eq!(database_bytes(&path), before);
 }
+
+/// A game with tag `name` set to `value`.
+fn game_with_tag(name: &str, value: &str) -> Game {
+    let mut game = scidtopgn::parse_single_game("[Event \"x\"]\n\n1. e4 *\n").unwrap();
+    game.add_tag(name, value);
+    game
+}
+
+/// `game`'s tags, as name and value pairs.
+fn tags(game: &Game) -> Vec<(String, String)> {
+    game.tags
+        .iter()
+        .map(|t| (t.name.clone(), t.value.clone()))
+        .collect()
+}
+
+#[test]
+fn test_pgn_tag_value_longer_than_255_bytes_is_dropped_on_import() {
+    // #82: the game was written, but couldn't be read back.
+    let pgn = format!(
+        "[Event \"x\"]\n[Annotator \"{}\"]\n\n1. e4 *\n",
+        "a".repeat(300)
+    );
+    let game = scid_round_trip(&scidtopgn::parse_single_game(&pgn).unwrap());
+    assert!(game.tags.is_empty());
+    assert_eq!(game.event, "x");
+}
+
+#[test]
+fn test_tag_values_up_to_255_bytes_round_trip() {
+    // 85 three-byte characters are 255 bytes.
+    for value in ["a".repeat(255), "€".repeat(85)] {
+        for name in ["Annotator", "Note"] {
+            let game = scid_round_trip(&game_with_tag(name, &value));
+            assert_eq!(tags(&game), [(name.to_string(), value.clone())]);
+        }
+    }
+}
+
+#[test]
+fn test_add_game_rejects_a_tag_value_longer_than_255_bytes() {
+    // 86 three-byte characters are 258 bytes.
+    for (name, value) in [
+        ("Annotator", "a".repeat(256)),
+        ("Note", "a".repeat(300)),
+        ("Note", "€".repeat(86)),
+    ] {
+        let temp = tempfile::TempDir::new().unwrap();
+        let path = temp.path().join("long_tag");
+        Database::create(&path).unwrap().close().unwrap();
+        let before = database_bytes(&path);
+
+        let mut db = Database::open(&path).unwrap();
+        match db.add_game(&game_with_tag(name, &value)) {
+            Err(Error::TagTooLong {
+                name: tag,
+                length,
+                max: 255,
+            }) => {
+                assert_eq!(tag, name);
+                assert_eq!(length, value.len());
+            }
+            other => panic!("expected a tag too long error, got {other:?}"),
+        }
+        assert_eq!(db.num_games(), 0);
+        assert!(all_names(&db).iter().all(Vec::is_empty));
+        db.close().unwrap();
+
+        assert_eq!(database_bytes(&path), before);
+    }
+}
+
+#[test]
+fn test_update_game_with_a_tag_value_too_long_changes_nothing() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let path = five_with_deleted(temp.path(), &[]);
+    let before = database_bytes(&path);
+
+    let mut db = Database::open(&path).unwrap();
+    let entry = entry_bytes(&db, 0);
+    let names = all_names(&db);
+    let mut game = game_with_tag("Annotator", &"a".repeat(256));
+    game.white = "A new player".to_string();
+    assert!(matches!(
+        db.update_game(0, &game),
+        Err(Error::TagTooLong { length: 256, .. })
+    ));
+    assert_eq!(entry_bytes(&db, 0), entry);
+    assert_eq!(all_names(&db), names);
+    db.close().unwrap();
+
+    assert_eq!(database_bytes(&path), before);
+}
+
+#[test]
+fn test_tag_names_longer_than_240_bytes_are_cut() {
+    let n = |len| "n".repeat(len);
+    for (name, stored) in [
+        (n(240), n(240)),
+        (n(241), n(240)),
+        (n(300), n(240)),
+        // A three-byte character that the cut would split is dropped whole.
+        (n(239) + "€", n(239)),
+    ] {
+        let game = scid_round_trip(&game_with_tag(&name, "v"));
+        assert_eq!(tags(&game), [(stored, "v".to_string())], "{}", name.len());
+    }
+
+    // Names that share their first 240 bytes are read back as one tag, with
+    // the last value, as in SCID.
+    let mut game = game_with_tag(&(n(240) + "a"), "1");
+    game.add_tag(&(n(240) + "b"), "2");
+    let game = scid_round_trip(&game);
+    assert_eq!(tags(&game), [(n(240), "2".to_string())]);
+}
+
+#[test]
+fn test_names_longer_than_255_bytes_are_cut() {
+    let a = |len| "a".repeat(len);
+    // #53: 200 two-byte characters, which a cut at 255 bytes would split.
+    let accented = "é".repeat(200);
+    let temp = tempfile::TempDir::new().unwrap();
+    let path = temp.path().join("long_names");
+    let mut db = Database::create(&path).unwrap();
+    // Names that differ only after byte 255 are one name, as in SCID.
+    for (white, black) in [(accented, a(255) + "b"), (a(300), a(255) + "c")] {
+        let mut game = scidtopgn::parse_single_game("[Event \"x\"]\n\n1. e4 *\n").unwrap();
+        game.white = white;
+        game.black = black;
+        db.add_game(&game).unwrap();
+    }
+
+    let names = |db: &mut Database| {
+        let games = [db.get_game(0).unwrap(), db.get_game(1).unwrap()];
+        games.map(|g| (g.white, g.black))
+    };
+    let expected = [("é".repeat(127), a(255)), (a(255), a(255))];
+    assert_eq!(names(&mut db), expected);
+    db.close().unwrap();
+
+    let mut db = Database::open(&path).unwrap();
+    assert_eq!(names(&mut db), expected);
+    assert_eq!(
+        db.nfile().namebase().get_all_names(NameType::Player),
+        [(0, "é".repeat(127), 1), (1, a(255), 3)]
+    );
+}

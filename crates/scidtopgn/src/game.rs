@@ -20,6 +20,9 @@ pub const MAX_TAGS: usize = 40;
 /// The longest tag name a game record stores, in bytes. Bytes above it in a
 /// record's tags stand for common tags or the event date.
 pub const MAX_TAG_LEN: u8 = 240;
+/// The longest tag value a game record stores, in bytes. SCID's PGN parser
+/// reads no longer tag name or value.
+pub(crate) const MAX_TAG_VALUE_LEN: usize = 255;
 /// The most NAGs a move keeps.
 pub const MAX_NAGS: usize = 8;
 /// The deepest a variation can be nested, counting a variation of the main

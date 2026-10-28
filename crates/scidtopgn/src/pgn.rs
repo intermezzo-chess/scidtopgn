@@ -17,7 +17,7 @@ use shakmaty::{Bitboard, CastlingSide, Chess, File, Move, Position, Rank, Role, 
 
 use crate::common::GameResult;
 use crate::error::{Error, Result};
-use crate::game::{Game, Marker, MoveNode};
+use crate::game::{Game, Marker, MoveNode, MAX_TAG_VALUE_LEN};
 use crate::mov::GameMove;
 use crate::position::{chess_from_fen_reporting_drops, ScidPosition};
 use crate::Date;
@@ -95,6 +95,20 @@ pub enum PgnWarningKind {
         /// The result in the `Result` tag, if there is one.
         tag: Option<GameResult>,
     },
+    /// A tag whose name is longer than 255 bytes, which SCID doesn't read.
+    /// The tag is dropped.
+    LongTagName {
+        /// The name's length in bytes.
+        length: usize,
+    },
+    /// A tag whose value is longer than 255 bytes, which SCID doesn't read.
+    /// The tag is dropped.
+    LongTagValue {
+        /// The tag's name.
+        name: String,
+        /// The value's length in bytes.
+        length: usize,
+    },
     /// Text that isn't valid UTF-8, read with [`PgnParser::from_bytes`]. Its
     /// bytes are read as Windows-1252. Given once per game, on the first
     /// line with such bytes.
@@ -132,6 +146,14 @@ impl fmt::Display for PgnWarningKind {
             Self::MissingResult { tag: None } => write!(
                 f,
                 "the moves don't end with a result, and there is no Result tag"
+            ),
+            Self::LongTagName { length } => write!(
+                f,
+                "dropped a tag because its name is {length} bytes, more than {MAX_TAG_VALUE_LEN}"
+            ),
+            Self::LongTagValue { name, length } => write!(
+                f,
+                "dropped tag {name:?} because its value is {length} bytes, more than {MAX_TAG_VALUE_LEN}"
             ),
             Self::NotUtf8 => write!(f, "read text that isn't UTF-8 as Windows-1252"),
         }
@@ -507,7 +529,16 @@ impl PgnParser {
                     })?;
                     // Like SCID, a comment between tags is ignored.
                     comments.clear();
-                    if name == "FEN" {
+                    // Like SCID, a tag too long to store is dropped, whatever
+                    // tag it is.
+                    if name.len() > MAX_TAG_VALUE_LEN {
+                        let kind = PgnWarningKind::LongTagName { length: name.len() };
+                        self.warn(&mut game, line, kind);
+                    } else if value.len() > MAX_TAG_VALUE_LEN {
+                        let length = value.len();
+                        let kind = PgnWarningKind::LongTagValue { name, length };
+                        self.warn(&mut game, line, kind);
+                    } else if name == "FEN" {
                         fen = Some((value, line));
                     } else {
                         if name == "Variant" {

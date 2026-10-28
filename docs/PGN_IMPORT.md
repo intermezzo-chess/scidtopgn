@@ -77,6 +77,9 @@ These apply to every case below.
   - **A NAG before the first move of the game or of a variation is dropped, without a warning.** In `$1 1. e4 ($2 1. d4)`, neither NAG is kept. SCID keeps such a NAG in memory, but it neither saves it to the database nor exports it, so the result is the same.
   - `$0` means no annotation, and isn't stored.
 - **Variation limits ([issue 4](https://github.com/intermezzo-chess/scidtopgn/issues/4)).** A game with variations nested more than 100 levels deep, or with more than 255 variations of one move, is rejected with an error, whether it is read from PGN or from a SCID database. Reading and writing a game recurse once per level of nesting, so deeper nesting could overflow the stack. SCID has no limit on nesting. It counts a move's variations in a byte, which wraps, so it loses variations after the 255th.
+- **Tag and name lengths ([#53](https://github.com/intermezzo-chess/scidtopgn/issues/53), [#82](https://github.com/intermezzo-chess/scidtopgn/issues/82)).** As in SCID, a tag whose name or value is longer than 255 bytes is dropped, whatever tag it is, and the rest of the game is imported. A dropped `White`, `Black`, `Event`, `Site`, or `Round` tag leaves `?`, and a dropped duplicate leaves the earlier value. SCID logs `Error reading tag`, and `scidtopgn` warns. When the game is stored, a tag name longer than 240 bytes is cut to 240, as SCID cuts it. Lengths count the bytes of the UTF-8 that is stored, after escapes are read. Two things differ from SCID:
+  - Text read as Windows-1252 (#42) takes more bytes in UTF-8, so it can pass the limit where SCID, which stores the bytes unchanged, keeps it.
+  - A cut that would split a character ends before that character. SCID cuts in the middle of it.
 
 ## Warnings
 
@@ -94,6 +97,8 @@ A game that fails to parse is reported by its error only, without its warnings.
 | `the result 0-1 after the moves replaces the Result tag 1-0` | The result after the moves differs from the `Result` tag. A tag `scidtopgn` doesn't recognize, such as `1-0 (time)`, counts as `*`, so it gives this warning only when the moves end with another result. | #27 |
 | `the moves don't end with a result, so the Result tag 1-0 is used` | The moves end at the next game's tags, or at the end of the input, without a result. | #28a, #28b |
 | `the moves don't end with a result, and there is no Result tag` | The same, in a game with no `Result` tag. The game's result is `*`. | #28c |
+| `dropped tag "Annotator" because its value is 300 bytes, more than 255` | A tag whose value is longer than 255 bytes. The tag is dropped, as in SCID. | #53 |
+| `dropped a tag because its name is 300 bytes, more than 255` | A tag whose name is longer than 255 bytes. The tag is dropped, as in SCID. | #53 |
 | `read text that isn't UTF-8 as Windows-1252` | The game's text, including text before it that is kept as its first comment, has bytes that aren't valid UTF-8. Those bytes are read as Windows-1252. Given once per game, on the first line with such bytes. In the library, only `PgnParser::from_bytes` reads such input; the CLI uses it. | #42 |
 
 ## Already accepted by both
