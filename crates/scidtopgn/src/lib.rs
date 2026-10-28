@@ -88,6 +88,7 @@ pub mod namebase;
 pub mod nfile;
 pub mod pgn;
 pub mod position;
+mod replace;
 
 pub use bytebuf::ByteBuffer;
 pub use common::GameResult;
