@@ -1256,6 +1256,83 @@ fn test_cli_info_reads_only_the_index_and_name_files() {
     assert_eq!(info(&db), expected);
 }
 
+/// Makes the files of a database read-only, and restores their permissions
+/// when dropped, even if the test fails, so its directory can be removed.
+struct ReadOnlyFiles(Vec<(PathBuf, std::fs::Permissions)>);
+
+impl ReadOnlyFiles {
+    fn new(db: &Path) -> Self {
+        let mut files = Self(Vec::new());
+        for ext in ["si4", "sn4", "sg4"] {
+            let path = db.with_extension(ext);
+            let original = std::fs::metadata(&path)
+                .expect("Failed to read permissions")
+                .permissions();
+            let mut read_only = original.clone();
+            read_only.set_readonly(true);
+            std::fs::set_permissions(&path, read_only).expect("Failed to make file read-only");
+            files.0.push((path, original));
+        }
+        files
+    }
+}
+
+impl Drop for ReadOnlyFiles {
+    fn drop(&mut self) {
+        for (path, original) in &self.0 {
+            // A panic while unwinding would abort the test run.
+            let _ = std::fs::set_permissions(path, original.clone());
+        }
+    }
+}
+
+#[test]
+fn test_cli_exports_a_read_only_database() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let db = copy_with_deleted(temp.path(), "five", &[]);
+    let expected = export_both_ways(&db);
+    let selected = pgn_of(&db, &[1, 2]);
+    let before = database_bytes(&db);
+    let _read_only = ReadOnlyFiles::new(&db);
+
+    assert_eq!(export_both_ways(&db), expected);
+    for output in export_outputs(&db, &["--count"]) {
+        assert!(output.status.success(), "{output:?}");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "5 games\n");
+    }
+    for output in export_outputs(&db, &["--games", "2-3"]) {
+        assert!(output.status.success(), "{output:?}");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), selected);
+    }
+    for (n, subcommand) in [&[][..], &["export"][..]].into_iter().enumerate() {
+        let pgn = temp.path().join(format!("five{n}.pgn"));
+        let output = cli()
+            .args(subcommand)
+            .arg(&db)
+            .arg("-o")
+            .arg(&pgn)
+            .output()
+            .expect("Failed to run CLI");
+        assert!(output.status.success(), "{output:?}");
+        assert_eq!(
+            std::fs::read_to_string(&pgn).expect("Failed to read output"),
+            expected
+        );
+    }
+
+    // Import still opens the database for writing, so it fails.
+    let output = cli()
+        .args(["import", "tests/data/one.pgn", "-o"])
+        .arg(&db)
+        .output()
+        .expect("Failed to run CLI");
+    assert!(!output.status.success(), "import should fail");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("SCID game file (.sg4)"), "{stderr}");
+
+    assert_eq!(database_bytes(&db), before);
+}
+
 #[test]
 fn test_cli_quiet_hides_stdout_errors() {
     for args in [

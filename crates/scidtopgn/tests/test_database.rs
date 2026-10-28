@@ -1234,3 +1234,83 @@ fn test_names_longer_than_255_bytes_are_cut() {
         [(0, "é".repeat(127), 1), (1, a(255), 3)]
     );
 }
+
+/// Makes the files of a database read-only, and restores their permissions
+/// when dropped, even if the test fails, so its directory can be removed.
+struct ReadOnlyFiles(Vec<(std::path::PathBuf, std::fs::Permissions)>);
+
+impl ReadOnlyFiles {
+    fn new(path: &std::path::Path) -> Self {
+        let mut files = Self(Vec::new());
+        for ext in ["si4", "sn4", "sg4"] {
+            let file = path.with_extension(ext);
+            let original = std::fs::metadata(&file).unwrap().permissions();
+            let mut read_only = original.clone();
+            read_only.set_readonly(true);
+            std::fs::set_permissions(&file, read_only).unwrap();
+            files.0.push((file, original));
+        }
+        files
+    }
+}
+
+impl Drop for ReadOnlyFiles {
+    fn drop(&mut self) {
+        for (file, original) in &self.0 {
+            // A panic while unwinding would abort the test run.
+            let _ = std::fs::set_permissions(file, original.clone());
+        }
+    }
+}
+
+fn is_read_only<T>(result: scidtopgn::Result<T>) -> bool {
+    matches!(result, Err(Error::ReadOnly))
+}
+
+#[test]
+fn test_read_only_open_refuses_changes() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let path = five_with_deleted(temp.path(), &[1]);
+    let before = database_bytes(&path);
+    let game = scidtopgn::parse_single_game(NEW_GAME).unwrap();
+
+    let mut db = Database::open_read_only(&path).unwrap();
+    let stored = all_pgn(&mut db);
+    let names = all_names(&db);
+
+    assert!(is_read_only(db.add_game(&game)));
+    assert!(is_read_only(db.update_game(0, &game)));
+    assert!(is_read_only(db.delete_game(0)));
+    assert!(is_read_only(db.undelete_game(1)));
+    assert!(is_read_only(db.delete_game(5)), "even past the last game");
+
+    assert_eq!(db.num_games(), 5);
+    assert_eq!(delete_flags(&db), [false, true, false, false, false]);
+    assert_eq!(all_names(&db), names);
+    assert_eq!(all_pgn(&mut db), stored);
+    db.flush().unwrap();
+    db.close().unwrap();
+
+    // The files are writable, but nothing was written to them.
+    assert_eq!(database_bytes(&path), before);
+    let mut db = Database::open(&path).unwrap();
+    assert_eq!(all_pgn(&mut db), stored);
+    assert_eq!(Error::ReadOnly.to_string(), "Database is open read-only");
+}
+
+#[test]
+fn test_read_only_open_needs_no_write_permission() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let path = five_with_deleted(temp.path(), &[]);
+    let stored = all_pgn(&mut Database::open(&path).unwrap());
+    let before = database_bytes(&path);
+    let _read_only = ReadOnlyFiles::new(&path);
+
+    let mut db = Database::open_read_only(&path).unwrap();
+    assert_eq!(all_pgn(&mut db), stored);
+    let game = scidtopgn::parse_single_game(NEW_GAME).unwrap();
+    assert!(is_read_only(db.add_game(&game)));
+    db.close().unwrap();
+
+    assert_eq!(database_bytes(&path), before);
+}

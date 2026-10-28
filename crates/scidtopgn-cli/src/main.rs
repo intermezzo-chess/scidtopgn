@@ -89,7 +89,7 @@ fn export_command(args: &ExportArgs, reporter: &Reporter) -> Result<()> {
         }
     }
 
-    let mut db = Database::open(&args.database)
+    let mut db = Database::open_read_only(&args.database)
         .with_context(|| format!("Failed to open database '{}'", args.database))?;
 
     if args.count {

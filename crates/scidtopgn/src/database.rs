@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use crate::bytebuf::ByteBuffer;
 use crate::error::{DatabaseFile, Error, Result};
 use crate::game::{Game, Marker, GAME_DECODE_ALL, MAX_TAG_VALUE_LEN};
-use crate::gfile::GFile;
+use crate::gfile::{FileMode, GFile};
 use crate::index::{
     material_sig, HomePawnList, Index, IndexEntry, IDX_MASK_PROMO, IDX_MASK_UPROMO,
 };
@@ -29,7 +29,9 @@ use shakmaty::{Board, Position, Role};
 ///
 /// Changes are written by [`flush`](Self::flush) and
 /// [`close`](Self::close). Dropping a `Database` with unwritten changes
-/// loses them.
+/// loses them. A database opened with
+/// [`open_read_only`](Self::open_read_only) can't be changed, and nothing
+/// writes to its files.
 ///
 /// # Examples
 ///
@@ -77,7 +79,8 @@ pub struct Database {
 
 impl Database {
     /// Opens the database at `path`, given without an extension, for
-    /// reading and changing games.
+    /// reading and changing games. To read a database whose files may not be
+    /// writable, use [`open_read_only`](Self::open_read_only).
     ///
     /// # Errors
     ///
@@ -107,12 +110,52 @@ impl Database {
     /// # Ok::<(), scidtopgn::Error>(())
     /// ```
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let path = path.as_ref().to_path_buf();
+        Self::open_with(path.as_ref(), FileMode::Both)
+    }
+
+    /// Opens the database at `path`, given without an extension, for reading
+    /// only, so none of its files needs to be writable.
+    ///
+    /// Adding, replacing, deleting, or undeleting a game returns
+    /// [`Error::ReadOnly`] and changes nothing. [`flush`](Self::flush) and
+    /// [`close`](Self::close) write nothing.
+    ///
+    /// # Errors
+    ///
+    /// The same as [`open`](Self::open).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use scidtopgn::{parse_single_game, Database, Error};
+    ///
+    /// # let dir = tempfile::tempdir()?;
+    /// # let path = dir.path().join("games");
+    /// # let mut db = Database::create(&path)?;
+    /// # db.add_game(&parse_single_game("[White \"Anand\"]\n\n1. e4 e5 *")?)?;
+    /// # db.close()?;
+    /// let mut db = Database::open_read_only(&path)?;
+    /// assert_eq!(db.get_game(0)?.white, "Anand");
+    ///
+    /// let game = parse_single_game("[White \"Carlsen\"]\n\n1. d4 d5 *")?;
+    /// assert!(matches!(db.add_game(&game), Err(Error::ReadOnly)));
+    /// assert_eq!(db.num_games(), 1);
+    /// # Ok::<(), scidtopgn::Error>(())
+    /// ```
+    pub fn open_read_only<P: AsRef<Path>>(path: P) -> Result<Self> {
+        Self::open_with(path.as_ref(), FileMode::ReadOnly)
+    }
+
+    /// Opens the database at `path`, with its game file open in
+    /// `file_mode`, which is [`ReadOnly`](FileMode::ReadOnly) or
+    /// [`Both`](FileMode::Both).
+    fn open_with(path: &Path, file_mode: FileMode) -> Result<Self> {
+        let path = path.to_path_buf();
 
         let si4_path = path.with_extension("si4");
         let index = Index::open(&si4_path)?;
 
-        let gfile = GFile::open(&path)?;
+        let gfile = GFile::open_file(&path, file_mode)?;
 
         let sn4_path = path.with_extension("sn4");
         let nfile = NFile::open(&sn4_path)?;
@@ -359,7 +402,9 @@ impl Database {
     /// [`Error::IndexFull`] or [`Error::NameBaseFull`] if the database can't
     /// hold another game or name, [`Error::InvalidMove`] or
     /// [`Error::InvalidFen`] if the game's moves or starting position can't
-    /// be stored, and [`Error::Io`] if the game file can't be written.
+    /// be stored, [`Error::ReadOnly`] if the database was opened with
+    /// [`open_read_only`](Self::open_read_only), and [`Error::Io`] if the
+    /// game file can't be written.
     ///
     /// # Examples
     ///
@@ -376,6 +421,7 @@ impl Database {
     /// # Ok::<(), scidtopgn::Error>(())
     /// ```
     pub fn add_game(&mut self, game: &Game) -> Result<u32> {
+        self.check_writable()?;
         let entry = self.store_game(game)?;
         let game_num = self.index.add_entry(entry)?;
         let entry = self
@@ -434,6 +480,7 @@ impl Database {
     /// # Ok::<(), scidtopgn::Error>(())
     /// ```
     pub fn update_game(&mut self, game_num: u32, game: &Game) -> Result<()> {
+        self.check_writable()?;
         let old = self
             .index
             .get_entry(game_num)
@@ -471,7 +518,9 @@ impl Database {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::GameNotFound`] if there is no such game.
+    /// Returns [`Error::GameNotFound`] if there is no such game, and
+    /// [`Error::ReadOnly`] if the database was opened with
+    /// [`open_read_only`](Self::open_read_only).
     ///
     /// # Examples
     ///
@@ -504,12 +553,15 @@ impl Database {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::GameNotFound`] if there is no such game.
+    /// Returns [`Error::GameNotFound`] if there is no such game, and
+    /// [`Error::ReadOnly`] if the database was opened with
+    /// [`open_read_only`](Self::open_read_only).
     pub fn undelete_game(&mut self, game_num: u32) -> Result<()> {
         self.set_delete_flag(game_num, false)
     }
 
     fn set_delete_flag(&mut self, game_num: u32, deleted: bool) -> Result<()> {
+        self.check_writable()?;
         let entry = self
             .index
             .get_entry_mut(game_num)
@@ -519,6 +571,15 @@ impl Database {
         if entry.get_delete_flag() != deleted {
             entry.set_delete_flag(deleted);
             self.modified = true;
+        }
+        Ok(())
+    }
+
+    /// Returns [`Error::ReadOnly`] if the database was opened with
+    /// [`open_read_only`](Self::open_read_only).
+    fn check_writable(&self) -> Result<()> {
+        if self.gfile.file_mode() == FileMode::ReadOnly {
+            return Err(Error::ReadOnly);
         }
         Ok(())
     }
