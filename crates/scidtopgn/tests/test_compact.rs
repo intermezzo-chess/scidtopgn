@@ -152,7 +152,9 @@ fn game_size(path: &Path) -> u64 {
 fn test_compact_games_removes_deleted_games() {
     let temp = tempfile::TempDir::new().unwrap();
     let path = five_with_deleted(temp.path(), &[1, 3]);
-    let stored = all_pgn(&mut Database::open(get_test_data_path("five")).unwrap());
+    // Read-only, as on Windows opening the fixture for writing fails while
+    // another test copies it.
+    let stored = all_pgn(&mut Database::open_read_only(get_test_data_path("five")).unwrap());
     let kept = [stored[0].clone(), stored[2].clone(), stored[4].clone()];
     let entries = raw_entries(&path);
     let mut db = Database::open(&path).unwrap();
