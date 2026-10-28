@@ -1297,6 +1297,10 @@ fn test_tags_longer_than_255_bytes_are_dropped() {
         // 255 bytes are kept, measured after escapes are read.
         format!("[Source \"{}\"]", a(255)),
         format!("[{} \"{}\\\"\"]", a(255), a(254)),
+        // A dropped FEN leaves the standard start, and a dropped Variant
+        // standard chess.
+        format!("[FEN \"{}\"]", a(256)),
+        format!("[Variant \"{}\"]", a(256)),
         String::new(),
         "1. e4 *".to_string(),
     ]
@@ -1330,8 +1334,11 @@ fn test_tags_longer_than_255_bytes_are_dropped() {
             long_value("White", 300),
             PgnWarningKind::LongTagName { length: 256 },
             long_value("Opening", 256),
+            long_value("FEN", 256),
+            long_value("Variant", 256),
         ]
     );
+    assert!(game.start_position.is_none());
     let messages: Vec<String> = game.warnings.iter().map(ToString::to_string).collect();
     assert_eq!(
         messages[0],
@@ -1341,4 +1348,18 @@ fn test_tags_longer_than_255_bytes_are_dropped() {
         messages[2],
         "PGN game 1, line 5: dropped a tag because its name is 256 bytes, more than 255"
     );
+}
+
+#[test]
+fn test_tag_lengths_count_the_utf8_stored() {
+    // 200 Latin-1 bytes, read as Windows-1252, are 400 bytes of UTF-8.
+    let mut pgn = b"[Event \"x\"]\n[Annotator \"".to_vec();
+    pgn.extend([0xe9; 200]);
+    pgn.extend(b"\"]\n\n1. e4 *\n");
+    let game = &games_from_bytes(&pgn)[0];
+    assert!(game.tags.is_empty());
+    assert!(warning_kinds(game).contains(&PgnWarningKind::LongTagValue {
+        name: "Annotator".to_string(),
+        length: 400,
+    }));
 }
