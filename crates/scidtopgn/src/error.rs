@@ -207,8 +207,11 @@ pub enum Error {
     #[error("File not open")]
     FileNotOpen,
 
-    /// A write to a game file opened read-only.
-    #[error("File is read-only")]
+    /// A change to a database or game file opened read-only, with
+    /// [`Database::open_read_only`](crate::Database::open_read_only) or
+    /// [`GFile::open_read_only`](crate::GFile::open_read_only). The files
+    /// themselves may be writable.
+    #[error("Database is open read-only")]
     ReadOnly,
 
     /// A PGN game for a chess variant other than standard chess, named by

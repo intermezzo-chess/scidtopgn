@@ -119,9 +119,30 @@ impl GFile {
     /// Returns [`Error::File`] for [`DatabaseFile::Game`] if the file can't
     /// be opened.
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let sg4_path = path.as_ref().with_extension("sg4");
+        Self::open_file(path.as_ref(), FileMode::Both)
+    }
+
+    /// Opens the game file of the database at `path`, given without an
+    /// extension, for reading only, so the file needn't be writable. Adding
+    /// a game returns [`Error::ReadOnly`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::File`] for [`DatabaseFile::Game`] if the file can't
+    /// be opened.
+    pub fn open_read_only<P: AsRef<Path>>(path: P) -> Result<Self> {
+        Self::open_file(path.as_ref(), FileMode::ReadOnly)
+    }
+
+    /// Opens the game file in `file_mode`, which is
+    /// [`ReadOnly`](FileMode::ReadOnly) or [`Both`](FileMode::Both).
+    pub(crate) fn open_file(path: &Path, file_mode: FileMode) -> Result<Self> {
+        let sg4_path = path.with_extension("sg4");
         let open = || -> Result<(File, u64)> {
-            let file = OpenOptions::new().read(true).write(true).open(&sg4_path)?;
+            let file = OpenOptions::new()
+                .read(true)
+                .write(file_mode == FileMode::Both)
+                .open(&sg4_path)?;
             let size = file.metadata()?.len();
             Ok((file, size))
         };
@@ -147,12 +168,17 @@ impl GFile {
 
         Ok(Self {
             handle: Some(file),
-            file_mode: FileMode::Both,
+            file_mode,
             offset: 0,
             num_blocks: num_blocks as u32,
             last_block_size,
             current_block: GfBlock::new(),
         })
+    }
+
+    /// Returns how the file is open.
+    pub(crate) fn file_mode(&self) -> FileMode {
+        self.file_mode
     }
 
     /// Returns the length of the game data in bytes, including records not
@@ -542,6 +568,26 @@ mod tests {
 
         let mut gf = GFile::open(&path).unwrap();
         assert_eq!(gf.read_game_data(0, 3).unwrap(), [1, 2, 3]);
+    }
+
+    #[test]
+    fn test_gfile_open_read_only() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("read_only");
+        std::fs::write(path.with_extension("sg4"), [1, 2, 3]).unwrap();
+
+        let mut gf = GFile::open_read_only(&path).unwrap();
+        assert_eq!(gf.file_mode(), FileMode::ReadOnly);
+        assert_eq!(gf.read_game_data(0, 3).unwrap(), [1, 2, 3]);
+        assert!(matches!(gf.add_game_data(&[4]), Err(Error::ReadOnly)));
+        assert_eq!(gf.file_size(), 3);
+        gf.flush().unwrap();
+        gf.close().unwrap();
+
+        assert_eq!(
+            std::fs::read(path.with_extension("sg4")).unwrap(),
+            [1, 2, 3]
+        );
     }
 
     #[test]
