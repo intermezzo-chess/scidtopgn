@@ -758,7 +758,7 @@ errorT Game::DecodeStart (ByteBuffer * buf)
 [250][length][value]  // SetUp
 ```
 
-Codes 251-254 are unused.
+Codes 251-254 are unused. SCID never writes them, but it reads a length and a value after each one, as for the other common tags. scidtopgn drops the value, because these codes have no tag name.
 
 **Regular tags**:
 ```
