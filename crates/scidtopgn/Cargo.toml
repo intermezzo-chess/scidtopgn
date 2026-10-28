@@ -14,8 +14,8 @@ categories = ["parser-implementations", "game-development"]
 [dependencies]
 anyhow = { workspace = true }
 shakmaty = { workspace = true }
+tempfile = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = "1.4"
-tempfile = { workspace = true }

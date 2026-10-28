@@ -75,6 +75,10 @@ impl fmt::Display for NameType {
     }
 }
 
+/// The new ID of each old name ID, or `None` for a name that was dropped,
+/// indexed by kind and then by old ID.
+pub(crate) type NewIds = [Vec<Option<u32>>; NUM_NAME_TYPES];
+
 /// A name and how many games use it.
 #[derive(Debug, Clone)]
 pub struct NameEntry {
@@ -101,6 +105,7 @@ pub struct NameEntry {
 /// assert_eq!(names.find_name(NameType::Event, "Carlsen, Magnus"), None);
 /// # Ok::<(), scidtopgn::Error>(())
 /// ```
+#[derive(Clone)]
 pub struct NameBase {
     trees: [BTreeMap<String, u32>; NUM_NAME_TYPES],
     by_id: [Vec<Option<NameEntry>>; NUM_NAME_TYPES],
@@ -244,6 +249,72 @@ impl NameBase {
         if let Some(Some(entry)) = self.by_id[ntype.as_usize()].get_mut(id as usize) {
             entry.frequency = entry.frequency.saturating_sub(1);
         }
+    }
+
+    /// Sets the frequency of every name, and the highest frequency of each
+    /// kind, to 0.
+    pub(crate) fn clear_frequencies(&mut self) {
+        for (names, max) in self.by_id.iter_mut().zip(&mut self.max_frequency) {
+            names.iter_mut().flatten().for_each(|e| e.frequency = 0);
+            *max = 0;
+        }
+    }
+
+    /// Returns a name base with only the names whose frequency isn't 0, and
+    /// the new ID of each old ID, by kind, or `None` if every name has a
+    /// frequency and the IDs have no gaps. Within each kind, the new IDs count
+    /// from 0 in the order of the old ones. Names that are the same, which a
+    /// damaged name file can have, become one, with their frequencies added
+    /// together.
+    ///
+    /// A name file can skip IDs, but [`add_name`](Self::add_name) gives a new
+    /// name the ID after the number of names, which may already be taken.
+    pub(crate) fn without_unused(&self) -> Option<(NameBase, NewIds)> {
+        if self
+            .by_id
+            .iter()
+            .flatten()
+            .all(|e| e.as_ref().is_some_and(|e| e.frequency > 0))
+        {
+            return None;
+        }
+        let mut kept = NameBase::new();
+        kept.timestamp = self.timestamp;
+        let new_ids = std::array::from_fn(|idx| {
+            self.by_id[idx]
+                .iter()
+                .map(|entry| {
+                    let entry = entry.as_ref().filter(|e| e.frequency > 0)?;
+                    Some(kept.add_counted(idx, &entry.name, entry.frequency))
+                })
+                .collect()
+        });
+        Some((kept, new_ids))
+    }
+
+    /// Adds `frequency` to the frequency of `name`, of the kind at `idx`,
+    /// adding the name if it isn't present, and returns its ID.
+    fn add_counted(&mut self, idx: usize, name: &str, frequency: u32) -> u32 {
+        let id = match self.trees[idx].get(name) {
+            Some(&id) => id,
+            None => {
+                let id = self.num_names[idx];
+                self.trees[idx].insert(name.to_string(), id);
+                self.by_id[idx].push(Some(NameEntry {
+                    id,
+                    name: name.to_string(),
+                    frequency: 0,
+                }));
+                self.num_names[idx] += 1;
+                id
+            }
+        };
+        let entry = self.by_id[idx][id as usize]
+            .as_mut()
+            .expect("the IDs of a name base without gaps index its names");
+        entry.frequency += frequency;
+        self.max_frequency[idx] = self.max_frequency[idx].max(entry.frequency);
+        id
     }
 
     /// Returns the ID, name, and frequency of every name of kind `ntype`, in
@@ -539,6 +610,81 @@ mod tests {
         // A missing name is ignored.
         nb.decrement_frequency(NameType::Event, id + 1);
         nb.decrement_frequency(NameType::Player, id);
+    }
+
+    /// A name base with the players `names`, each used as often as given.
+    fn players(names: &[(&str, u32)]) -> NameBase {
+        let mut nb = NameBase::new();
+        nb.set_timestamp(7);
+        for &(name, uses) in names {
+            let id = nb.add_name(NameType::Player, name).unwrap();
+            (0..uses).for_each(|_| nb.increment_frequency(NameType::Player, id));
+        }
+        nb
+    }
+
+    #[test]
+    fn test_without_unused_renumbers_the_names_left() {
+        let nb = players(&[("A", 2), ("B", 0), ("C", 1), ("D", 0)]);
+        let (kept, new_ids) = nb.without_unused().unwrap();
+
+        assert_eq!(new_ids[0], [Some(0), None, Some(1), None]);
+        assert!(new_ids[1..].iter().all(Vec::is_empty));
+        assert_eq!(
+            kept.get_all_names(NameType::Player),
+            [(0, "A".to_string(), 2), (1, "C".to_string(), 1)]
+        );
+        assert_eq!(kept.find_name(NameType::Player, "C"), Some(1));
+        assert_eq!(kept.count(NameType::Player), 2);
+        assert_eq!(kept.max_frequency(NameType::Player), 2);
+        assert_eq!(kept.timestamp(), 7);
+    }
+
+    #[test]
+    fn test_without_unused_is_none_when_every_name_is_used() {
+        assert!(players(&[("A", 1), ("B", 3)]).without_unused().is_none());
+        assert!(NameBase::new().without_unused().is_none());
+    }
+
+    #[test]
+    fn test_without_unused_closes_gaps_in_the_ids() {
+        // A name file can skip IDs: here B has ID 2, and no name has ID 1.
+        let mut nb = players(&[("A", 1), ("B", 1)]);
+        let b = nb.by_id[0].pop().unwrap().map(|e| NameEntry { id: 2, ..e });
+        nb.by_id[0].extend([None, b]);
+        nb.trees[0].insert("B".to_string(), 2);
+        let (kept, new_ids) = nb.without_unused().unwrap();
+
+        assert_eq!(new_ids[0], [Some(0), None, Some(1)]);
+        assert_eq!(
+            kept.get_all_names(NameType::Player),
+            [(0, "A".to_string(), 1), (1, "B".to_string(), 1)]
+        );
+    }
+
+    #[test]
+    fn test_without_unused_merges_names_that_are_the_same() {
+        // A damaged name file can have names that are the same once read.
+        let mut nb = players(&[("A", 1), ("B", 0), ("C", 2)]);
+        nb.by_id[0][2].as_mut().unwrap().name = "A".to_string();
+        let (kept, new_ids) = nb.without_unused().unwrap();
+
+        assert_eq!(new_ids[0], [Some(0), None, Some(0)]);
+        assert_eq!(
+            kept.get_all_names(NameType::Player),
+            [(0, "A".to_string(), 3)]
+        );
+        assert_eq!(kept.max_frequency(NameType::Player), 3);
+    }
+
+    #[test]
+    fn test_clear_frequencies() {
+        let mut nb = players(&[("A", 2), ("B", 1)]);
+        nb.clear_frequencies();
+        assert_eq!(nb.get_frequency(NameType::Player, 0), 0);
+        assert_eq!(nb.get_frequency(NameType::Player, 1), 0);
+        assert_eq!(nb.max_frequency(NameType::Player), 0);
+        assert_eq!(nb.count(NameType::Player), 2);
     }
 
     #[test]

@@ -157,6 +157,15 @@ pub enum Error {
         name_type: NameType,
     },
 
+    /// A name ID in an index entry that the name file has no name for.
+    #[error("No {name_type} name has ID {id}")]
+    NameNotFound {
+        /// The kind of name.
+        name_type: NameType,
+        /// The ID.
+        id: u32,
+    },
+
     /// A variation nested too deeply to read or write without risking a
     /// stack overflow.
     #[error("Variation nested more than {MAX_VARIATION_DEPTH} levels deep")]

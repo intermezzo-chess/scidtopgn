@@ -1,5 +1,7 @@
 use scidtopgn::{Database, Date, Error, Game, GameResult, Index, NameType};
 
+/// The path of the fixture `name`. Open it with `Database::open_read_only`:
+/// on Windows, opening it for writing fails while another test copies it.
 fn get_test_data_path(name: &str) -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -13,7 +15,7 @@ fn get_test_data_path(name: &str) -> std::path::PathBuf {
 #[test]
 fn test_open_one_database() {
     let path = get_test_data_path("one");
-    let db = Database::open(&path).unwrap();
+    let db = Database::open_read_only(&path).unwrap();
 
     assert_eq!(db.num_games(), 1);
 }
@@ -21,7 +23,7 @@ fn test_open_one_database() {
 #[test]
 fn test_get_game_from_one() {
     let path = get_test_data_path("one");
-    let mut db = Database::open(&path).unwrap();
+    let mut db = Database::open_read_only(&path).unwrap();
 
     let game = db.get_game(0).unwrap();
 
@@ -43,7 +45,7 @@ fn test_get_game_from_one() {
 #[test]
 fn test_game_to_pgn() {
     let path = get_test_data_path("one");
-    let mut db = Database::open(&path).unwrap();
+    let mut db = Database::open_read_only(&path).unwrap();
 
     let game = db.get_game(0).unwrap();
     let pgn = game.to_pgn();
@@ -62,7 +64,7 @@ fn test_game_to_pgn() {
 #[test]
 fn test_open_five_database() {
     let path = get_test_data_path("five");
-    let db = Database::open(&path).unwrap();
+    let db = Database::open_read_only(&path).unwrap();
 
     assert_eq!(db.num_games(), 5);
 }
@@ -70,7 +72,7 @@ fn test_open_five_database() {
 #[test]
 fn test_iterate_five_games() {
     let path = get_test_data_path("five");
-    let mut db = Database::open(&path).unwrap();
+    let mut db = Database::open_read_only(&path).unwrap();
 
     let mut count = 0;
     for result in db.games() {
@@ -120,7 +122,7 @@ fn nondeleted_pgn(db: &mut Database) -> Vec<String> {
 
 #[test]
 fn test_all_record_api_includes_deleted_games() {
-    let stored = all_pgn(&mut Database::open(get_test_data_path("five")).unwrap());
+    let stored = all_pgn(&mut Database::open_read_only(get_test_data_path("five")).unwrap());
     let temp = tempfile::TempDir::new().unwrap();
     let mut db = Database::open(five_with_deleted(temp.path(), &[1, 3])).unwrap();
 
@@ -142,7 +144,7 @@ fn test_all_record_api_includes_deleted_games() {
 
 #[test]
 fn test_all_deleted_database_reads_every_record() {
-    let stored = all_pgn(&mut Database::open(get_test_data_path("five")).unwrap());
+    let stored = all_pgn(&mut Database::open_read_only(get_test_data_path("five")).unwrap());
     let temp = tempfile::TempDir::new().unwrap();
     let mut db = Database::open(five_with_deleted(temp.path(), &[0, 1, 2, 3, 4])).unwrap();
 
@@ -154,7 +156,7 @@ fn test_all_deleted_database_reads_every_record() {
 #[test]
 fn test_get_index_entry() {
     let path = get_test_data_path("one");
-    let db = Database::open(&path).unwrap();
+    let db = Database::open_read_only(&path).unwrap();
 
     let entry = db.get_entry(0).unwrap();
 
@@ -826,7 +828,7 @@ fn assert_keeps_scids_entries(changed: &[usize], changes: &[&dyn Fn(&mut Databas
 fn test_changes_keep_scids_other_entries() {
     // Game 0 of `derived` is 302 half-moves long, which needs the top bits of
     // the count.
-    let db = Database::open(get_test_data_path("derived")).unwrap();
+    let db = Database::open_read_only(get_test_data_path("derived")).unwrap();
     assert_eq!(db.get_entry(0).unwrap().get_num_half_moves(), 302);
 
     let new_game = scidtopgn::parse_single_game(NEW_GAME).unwrap();
@@ -1027,7 +1029,7 @@ fn test_update_game_sets_the_derived_fields() {
     // underpromotion, and game 5 no promotion but more than 10 variations,
     // comments, and NAGs.
     let src = get_test_data_path("derived");
-    let scid = Database::open(&src).unwrap();
+    let scid = Database::open_read_only(&src).unwrap();
     let temp = tempfile::TempDir::new().unwrap();
     let path = temp.path().join("derived");
     for ext in ["si4", "sn4", "sg4"] {

@@ -152,7 +152,9 @@ fn test_file_error_message_names_the_file() {
 
 #[test]
 fn test_get_game_numbers_missing_games_from_1() {
-    let mut db = Database::open(Path::new("../../tests/data/one")).unwrap();
+    // Read-only, as on Windows opening the fixture for writing fails while
+    // another test copies it.
+    let mut db = Database::open_read_only(Path::new("../../tests/data/one")).unwrap();
     assert!(matches!(
         db.get_game(1),
         Err(Error::GameNotFound { number: 2 })

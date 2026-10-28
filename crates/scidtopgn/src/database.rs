@@ -1,7 +1,7 @@
 //! [`Database`], which reads and writes a SCID database's three files
 //! together.
 
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
@@ -16,6 +16,7 @@ use crate::mov::{encode_move, GameMove};
 use crate::namebase::{NameBase, NameType};
 use crate::nfile::NFile;
 use crate::position::{fen, ScidPosition};
+use crate::replace::NewFiles;
 use crate::Date;
 use shakmaty::{Board, Position, Role};
 
@@ -63,8 +64,9 @@ use shakmaty::{Board, Position, Role};
 ///
 /// SCID deletes a game by setting its delete flag, as
 /// [`delete_game`](Self::delete_game) does. The game's record stays in the
-/// database, and its number doesn't change, until the database is
-/// compacted, so [`undelete_game`](Self::undelete_game) can restore it.
+/// database, and its number doesn't change, until
+/// [`compact_games`](Self::compact_games) removes it, so
+/// [`undelete_game`](Self::undelete_game) can restore it.
 /// [`num_games`](Self::num_games), [`games`](Self::games), and
 /// [`get_game`](Self::get_game) include deleted games, which is useful for
 /// inspecting or recovering them. The `scidtopgn` command skips them when
@@ -452,9 +454,11 @@ impl Database {
     /// [`flush`](Self::flush) or [`close`](Self::close).
     ///
     /// As in SCID, the new record is added to the end of the game file, and
-    /// the old one stays there unused. The game keeps its user-settable
-    /// flags, including the logical delete flag. The names the game no
-    /// longer uses stay in the name file, even when no game uses them.
+    /// the old one stays there unused until
+    /// [`compact_games`](Self::compact_games). The game keeps its
+    /// user-settable flags, including the logical delete flag. The names the
+    /// game no longer uses stay in the name file, even when no game uses
+    /// them, until [`compact_names`](Self::compact_names).
     ///
     /// The old record isn't read, so a game that can't be read can still be
     /// replaced.
@@ -927,6 +931,203 @@ impl Database {
             .map_err(|e| e.in_file(DatabaseFile::Game))
     }
 
+    /// Removes the logically deleted games, and the records that no game
+    /// uses, as SCID's Compact games command does.
+    ///
+    /// The games that aren't deleted are copied in order to a new index file
+    /// and game file, which replace the old ones. **Games are renumbered**
+    /// from 0, so a game's number changes if a game before it was deleted.
+    /// Each record and index entry is copied as stored, apart from where the
+    /// record is, so a record that was replaced by
+    /// [`update_game`](Self::update_game) is removed too. The index header is
+    /// kept, apart from the number of games. As in SCID, its auto-load game
+    /// is a game number that isn't changed, so it may name a different game.
+    ///
+    /// The name frequencies are counted again from the games that are left.
+    /// Names that no game uses stay until
+    /// [`compact_names`](Self::compact_names). SCID's tree cache file
+    /// (`.stc`), whose game numbers would be out of date, is deleted.
+    ///
+    /// Any unwritten changes are written first, as [`flush`](Self::flush)
+    /// writes them. The new files are written in a temporary directory
+    /// beside the database, and they replace the database's files only once
+    /// they are complete, with the same permissions. No other program should
+    /// have the database open while it is compacted.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::ReadOnly`] if the database was opened with
+    /// [`open_read_only`](Self::open_read_only), [`Error::Game`] for the
+    /// first game that isn't deleted whose record can't be read from the
+    /// game file, and [`Error::Io`] if a file can't be written or replaced.
+    /// After an error, the database's files are as they were after the
+    /// unwritten changes were written, unless a file that was moved aside
+    /// couldn't be put back; it is then left in the temporary directory. The
+    /// `Database` can still be used.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use scidtopgn::{parse_single_game, Database};
+    ///
+    /// # let dir = tempfile::tempdir()?;
+    /// # let path = dir.path().join("games");
+    /// # let mut db = Database::create(&path)?;
+    /// # for pgn in ["[White \"Anand\"]\n\n1. e4 e5 *", "[White \"Carlsen\"]\n\n1. d4 d5 *"] {
+    /// #     db.add_game(&parse_single_game(pgn)?)?;
+    /// # }
+    /// # db.close()?;
+    /// let mut db = Database::open(&path)?;
+    /// db.delete_game(0)?;
+    /// db.compact_games()?;
+    ///
+    /// assert_eq!(db.num_games(), 1);
+    /// assert_eq!(db.get_game(0)?.white, "Carlsen");
+    /// # Ok::<(), scidtopgn::Error>(())
+    /// ```
+    pub fn compact_games(&mut self) -> Result<()> {
+        self.check_writable()?;
+        self.flush()?;
+
+        let mut new = NewFiles::new(&self.path)?;
+        let mut index = empty_copy(&self.index);
+        let mut gfile = GFile::from_empty_file(new.create("sg4")?);
+        for (game_num, entry) in (0u32..).zip(self.index.entries()) {
+            if entry.get_delete_flag() {
+                continue;
+            }
+            let record = self
+                .gfile
+                .read_game_data(entry.get_offset(), entry.get_length())
+                .map_err(|source| Error::Game {
+                    number: u64::from(game_num) + 1,
+                    source: Box::new(source),
+                })?;
+            let mut entry = entry.clone();
+            entry.set_offset(gfile.add_game_data(&record)?);
+            index.add_entry(entry)?;
+        }
+        gfile.close()?;
+
+        let mut namebase = self.nfile.namebase().clone();
+        namebase.clear_frequencies();
+        for entry in index.entries() {
+            count_names(&mut namebase, entry, NameBase::increment_frequency);
+        }
+        write_names(&namebase, new.create("sn4")?)?;
+        write_index(&mut index, new.create("si4")?)?;
+
+        match fs::remove_file(self.path.with_extension("stc")) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
+            _ => {}
+        }
+
+        // Windows can't rename a file that is open.
+        self.gfile.close()?;
+        let replaced = new.replace();
+        if replaced.is_ok() {
+            self.index = index;
+            *self.nfile.namebase_mut() = namebase;
+        }
+        let reopened = GFile::open_file(&self.path, FileMode::Both).map(|gfile| self.gfile = gfile);
+        replaced.and(reopened)?;
+        self.saved_game_size = self.gfile.file_size();
+        Ok(())
+    }
+
+    /// Removes the names that no game uses, as SCID's Compact names command
+    /// does.
+    ///
+    /// The name frequencies are counted again from every game, without
+    /// trusting those in the name file. Names that no game uses are dropped,
+    /// and **the others get new IDs**, from 0 in the order of their old ones.
+    /// The name IDs in every index entry change to match, and nothing else
+    /// does. As in SCID, a name that only logically deleted games use is
+    /// kept; call [`compact_games`](Self::compact_games) first to drop it.
+    /// If every name is used, no file is changed.
+    ///
+    /// Any unwritten changes are written first, as [`flush`](Self::flush)
+    /// writes them. The new name file and index file are written in a
+    /// temporary directory beside the database, and they replace the
+    /// database's files only once both are complete, with the same
+    /// permissions. No other program should have the database open while
+    /// its names are compacted.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::ReadOnly`] if the database was opened with
+    /// [`open_read_only`](Self::open_read_only), [`Error::Game`] with
+    /// [`Error::NameNotFound`] for the first game that refers to a name the
+    /// name file doesn't have, and [`Error::Io`] if a file can't be written
+    /// or replaced. After an error, the database's files are as they were
+    /// after the unwritten changes were written, unless a file that was moved
+    /// aside couldn't be put back; it is then left in the temporary
+    /// directory. The `Database` can still be used.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use scidtopgn::{parse_single_game, Database, NameType};
+    ///
+    /// # let dir = tempfile::tempdir()?;
+    /// # let path = dir.path().join("games");
+    /// # let mut db = Database::create(&path)?;
+    /// # db.add_game(&parse_single_game("[White \"Anand\"]\n\n1. e4 e5 *")?)?;
+    /// # db.close()?;
+    /// let mut db = Database::open(&path)?;
+    /// db.update_game(0, &parse_single_game("[White \"Carlsen\"]\n\n1. d4 d5 *")?)?;
+    /// let players = |db: &Database| db.nfile().namebase().find_name(NameType::Player, "Anand");
+    /// assert!(players(&db).is_some());
+    ///
+    /// db.compact_names()?;
+    /// assert_eq!(players(&db), None);
+    /// assert_eq!(db.get_game(0)?.white, "Carlsen");
+    /// # Ok::<(), scidtopgn::Error>(())
+    /// ```
+    pub fn compact_names(&mut self) -> Result<()> {
+        self.check_writable()?;
+        self.flush()?;
+
+        let mut counted = self.nfile.namebase().clone();
+        counted.clear_frequencies();
+        for (game_num, entry) in (0u32..).zip(self.index.entries()) {
+            for (name_type, id) in name_ids(entry) {
+                if counted.get_name(name_type, id).is_none() {
+                    return Err(Error::Game {
+                        number: u64::from(game_num) + 1,
+                        source: Box::new(Error::NameNotFound { name_type, id }),
+                    });
+                }
+                counted.increment_frequency(name_type, id);
+            }
+        }
+        let Some((namebase, new_ids)) = counted.without_unused() else {
+            return Ok(());
+        };
+
+        let new_id = |name_type: NameType, id: u32| {
+            new_ids[name_type.as_usize()][id as usize].expect("a name that a game uses is kept")
+        };
+        let mut index = empty_copy(&self.index);
+        for entry in self.index.entries() {
+            let mut entry = entry.clone();
+            entry.set_white(new_id(NameType::Player, entry.get_white()));
+            entry.set_black(new_id(NameType::Player, entry.get_black()));
+            entry.set_event(new_id(NameType::Event, entry.get_event()));
+            entry.set_site(new_id(NameType::Site, entry.get_site()));
+            entry.set_round(new_id(NameType::Round, entry.get_round()));
+            index.add_entry(entry)?;
+        }
+
+        let mut new = NewFiles::new(&self.path)?;
+        write_names(&namebase, new.create("sn4")?)?;
+        write_index(&mut index, new.create("si4")?)?;
+        new.replace()?;
+        self.index = index;
+        *self.nfile.namebase_mut() = namebase;
+        Ok(())
+    }
+
     /// Returns an iterator that reads every game in order, including
     /// logically deleted games.
     ///
@@ -1067,14 +1268,45 @@ impl MoveSummary {
     }
 }
 
+/// Returns the kind and ID of each of the five names `entry` refers to.
+fn name_ids(entry: &IndexEntry) -> [(NameType, u32); 5] {
+    [
+        (NameType::Player, entry.get_white()),
+        (NameType::Player, entry.get_black()),
+        (NameType::Event, entry.get_event()),
+        (NameType::Site, entry.get_site()),
+        (NameType::Round, entry.get_round()),
+    ]
+}
+
 /// Calls `change` on the frequency of each of the five names `entry` refers
 /// to.
 fn count_names(nb: &mut NameBase, entry: &IndexEntry, change: fn(&mut NameBase, NameType, u32)) {
-    change(nb, NameType::Player, entry.get_white());
-    change(nb, NameType::Player, entry.get_black());
-    change(nb, NameType::Event, entry.get_event());
-    change(nb, NameType::Site, entry.get_site());
-    change(nb, NameType::Round, entry.get_round());
+    for (name_type, id) in name_ids(entry) {
+        change(nb, name_type, id);
+    }
+}
+
+/// Returns an index with no entries and the header of `index`, apart from
+/// the number of games.
+fn empty_copy(index: &Index) -> Index {
+    let mut copy = Index::new();
+    *copy.header_mut() = index.header().clone();
+    copy.header_mut().num_games = 0;
+    copy
+}
+
+/// Writes `index` to `file` as an index file.
+fn write_index(index: &mut Index, file: File) -> Result<()> {
+    index.flush(&mut BufWriter::new(file))
+}
+
+/// Writes `namebase` to `file` as a name file.
+fn write_names(namebase: &NameBase, file: File) -> Result<()> {
+    let mut writer = BufWriter::new(file);
+    namebase.write_sn4(&mut writer)?;
+    writer.flush()?;
+    Ok(())
 }
 
 /// An iterator over the games of a [`Database`], made by

@@ -101,14 +101,20 @@ impl GFile {
             .open(&sg4_path)
             .map_err(|e| Error::from(e).in_file(DatabaseFile::Game))?;
 
-        Ok(Self {
+        Ok(Self::from_empty_file(file))
+    }
+
+    /// Makes a game file from `file`, which is empty and open for reading
+    /// and writing.
+    pub(crate) fn from_empty_file(file: File) -> Self {
+        Self {
             handle: Some(file),
             file_mode: FileMode::Both,
             offset: 0,
             num_blocks: 0,
             last_block_size: 0,
             current_block: GfBlock::new(),
-        })
+        }
     }
 
     /// Opens the game file of the database at `path`, given without an
