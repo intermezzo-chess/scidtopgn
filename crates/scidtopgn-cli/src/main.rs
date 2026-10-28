@@ -153,17 +153,19 @@ fn import_command(args: &ImportArgs, reporter: &Reporter) -> Result<()> {
     let abort_on_error = args.on_error == "abort";
 
     // Parse every game before touching the database, so that aborting on a
-    // parse error leaves it unchanged.
+    // parse error leaves it unchanged. Each game keeps its number and first
+    // line, to name it if it can't be added.
     let mut games = Vec::new();
     let mut skipped = 0u32;
-    for result in PgnParser::from_bytes(&pgn) {
+    let mut parser = PgnParser::from_bytes(&pgn);
+    while let Some(result) = parser.next() {
         match result {
             Ok(game) => {
                 // Warnings don't stop the game from being imported.
                 for warning in &game.warnings {
                     reporter.warn(format_args!("{warning}"));
                 }
-                games.push(game);
+                games.push((parser.game_number(), parser.game_line(), game));
             }
             Err(e) if abort_on_error => return Err(e.into()),
             Err(e) => {
@@ -175,16 +177,20 @@ fn import_command(args: &ImportArgs, reporter: &Reporter) -> Result<()> {
 
     reporter.info(format_args!("Parsed {} games from PGN", games.len()));
 
-    let db_path = std::path::Path::new(&args.output);
+    let db_path = Path::new(&args.output);
     let si4_exists = db_path.with_extension("si4").exists();
 
-    let mut db = if si4_exists && !args.overwrite {
+    // A new database is built beside its path and moved into place once
+    // every game is added, so a failed import leaves no database, or the
+    // one it would have replaced.
+    let (mut db, staging) = if si4_exists && !args.overwrite {
         reporter.info(format_args!(
             "Appending to existing database: {}",
             args.output
         ));
-        Database::open(&args.output)
-            .with_context(|| format!("Failed to open database '{}'", args.output))?
+        let db = Database::open(&args.output)
+            .with_context(|| format!("Failed to open database '{}'", args.output))?;
+        (db, None)
     } else {
         if si4_exists {
             reporter.info(format_args!(
@@ -192,42 +198,97 @@ fn import_command(args: &ImportArgs, reporter: &Reporter) -> Result<()> {
                 args.output
             ));
         }
-        Database::create(&args.output)
-            .with_context(|| format!("Failed to create database '{}'", args.output))?
+        let create = || -> Result<_> {
+            let staging = Staging::new(db_path)?;
+            let db = Database::create(staging.database())?;
+            Ok((db, Some(staging)))
+        };
+        create().with_context(|| format!("Failed to create database '{}'", args.output))?
     };
 
     let initial_count = db.num_games();
     let mut added = 0u32;
 
     let mut progress = Progress::new(reporter, games.len() as u64);
-    for game in &games {
-        match db.add_game(game) {
-            Ok(_) => added += 1,
-            Err(e) if abort_on_error => {
-                anyhow::bail!("Failed to add game: {}", e);
+    for (number, line, game) in &games {
+        if let Err(e) = db.add_game(game) {
+            let err = anyhow::Error::new(e)
+                .context(format!("PGN game {number}, starting at line {line}"));
+            if abort_on_error {
+                // Leave an existing database as it was. A new one is
+                // removed with `staging`.
+                if let Err(discard_err) = db.discard() {
+                    reporter.error(
+                        &anyhow::Error::new(discard_err)
+                            .context(format!("Failed to restore database '{}'", args.output)),
+                    );
+                }
+                return Err(err);
             }
-            Err(e) => {
-                reporter.info(format_args!(
-                    "Warning: Failed to add game (skipping): {}",
-                    e
-                ));
-                skipped += 1;
-            }
+            reporter.warn(format_args!("skipping {err:#}"));
+            skipped += 1;
+        } else {
+            added += 1;
         }
         progress.advance();
     }
 
-    db.flush()?;
+    let total = db.num_games();
+    db.close()?;
+    if let Some(staging) = staging {
+        staging.finish(db_path)?;
+    }
 
     reporter.info(format_args!(
         "Done. {} games imported, {} skipped. Database now has {} games (was {}).",
-        added,
-        skipped,
-        db.num_games(),
-        initial_count
+        added, skipped, total, initial_count
     ));
 
     Ok(())
+}
+
+/// A directory beside a database being created, which holds its files until
+/// [`finish`](Self::finish) moves them into place. Dropping it removes it
+/// and anything still in it.
+struct Staging {
+    dir: tempfile::TempDir,
+}
+
+impl Staging {
+    /// Creates the directory beside `database`, a path without an extension,
+    /// so that its files can be renamed onto that path.
+    fn new(database: &Path) -> Result<Self> {
+        let parent = match database.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => parent,
+            _ => Path::new("."),
+        };
+        let dir = tempfile::Builder::new()
+            .prefix(".scidtopgn-import-")
+            .tempdir_in(parent)
+            .with_context(|| {
+                format!(
+                    "Failed to create a temporary directory in '{}'",
+                    parent.display()
+                )
+            })?;
+        Ok(Self { dir })
+    }
+
+    /// The path, without an extension, to create the database at.
+    fn database(&self) -> PathBuf {
+        self.dir.path().join("database")
+    }
+
+    /// Moves the database's files onto `database`, replacing any there. The
+    /// index goes last, as `Database::flush` writes it last.
+    fn finish(self, database: &Path) -> Result<()> {
+        for ext in ["sg4", "sn4", "si4"] {
+            let to = database.with_extension(ext);
+            std::fs::rename(self.database().with_extension(ext), &to)
+                .with_context(|| format!("Failed to write '{}'", to.display()))?;
+        }
+        Ok(())
+    }
 }
 
 fn info_command(args: &InfoArgs) -> Result<()> {

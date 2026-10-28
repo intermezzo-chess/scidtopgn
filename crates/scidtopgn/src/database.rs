@@ -29,7 +29,9 @@ use shakmaty::{Board, Position, Role};
 ///
 /// Changes are written by [`flush`](Self::flush) and
 /// [`close`](Self::close). Dropping a `Database` with unwritten changes
-/// loses them. A database opened with
+/// loses them, though the records of games it added or replaced may stay
+/// in the game file unused; [`discard`](Self::discard) removes those too.
+/// A database opened with
 /// [`open_read_only`](Self::open_read_only) can't be changed, and nothing
 /// writes to its files.
 ///
@@ -75,6 +77,9 @@ pub struct Database {
     gfile: GFile,
     nfile: NFile,
     modified: bool,
+    /// The game file's length when the database was opened, created, or
+    /// last flushed, which [`discard`](Self::discard) restores.
+    saved_game_size: u64,
 }
 
 impl Database {
@@ -160,12 +165,14 @@ impl Database {
         let sn4_path = path.with_extension("sn4");
         let nfile = NFile::open(&sn4_path)?;
 
+        let saved_game_size = gfile.file_size();
         Ok(Self {
             path,
             index,
             gfile,
             nfile,
             modified: false,
+            saved_game_size,
         })
     }
 
@@ -212,6 +219,7 @@ impl Database {
             gfile,
             nfile,
             modified: false,
+            saved_game_size: 0,
         })
     }
 
@@ -837,6 +845,7 @@ impl Database {
         writer.flush()?;
 
         self.modified = false;
+        self.saved_game_size = self.gfile.file_size();
 
         Ok(())
     }
@@ -864,6 +873,58 @@ impl Database {
     /// ```
     pub fn close(mut self) -> Result<()> {
         self.flush()
+    }
+
+    /// Closes the database without writing the changes made since it was
+    /// opened, created, or last flushed, so that its files are as they were
+    /// then.
+    ///
+    /// [`add_game`](Self::add_game) and [`update_game`](Self::update_game)
+    /// write each block of the game file as it fills, before
+    /// [`flush`](Self::flush), and dropping the database writes the last
+    /// one. `discard` cuts the game file back to its earlier length, which
+    /// removes those records, including any left by a game that failed to be
+    /// added. It writes nothing to a database opened with
+    /// [`open_read_only`](Self::open_read_only).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::File`] for [`DatabaseFile::Game`] if the game file
+    /// can't be cut back.
+    ///
+    /// # Examples
+    ///
+    /// Add games, and keep none of them if one fails:
+    ///
+    /// ```
+    /// use scidtopgn::{parse_pgn, Database};
+    ///
+    /// # let dir = tempfile::tempdir()?;
+    /// # let path = dir.path().join("games");
+    /// # let mut db = Database::create(&path)?;
+    /// # db.add_game(&scidtopgn::parse_single_game("[White \"Anand\"]\n\n1. e4 e5 *")?)?;
+    /// # db.close()?;
+    /// let before = std::fs::read(path.with_extension("sg4"))?;
+    ///
+    /// let mut db = Database::open(&path)?;
+    /// let big = format!("[White \"Carlsen\"]\n\n1. d4 {{{}}} d5 *", "x".repeat(140_000));
+    /// let games = parse_pgn(&format!("[White \"Kasparov\"]\n\n1. c4 *\n\n{big}"))?;
+    /// match games.iter().try_for_each(|game| db.add_game(game).map(drop)) {
+    ///     Ok(()) => db.close()?,
+    ///     Err(_) => db.discard()?,
+    /// }
+    ///
+    /// assert_eq!(std::fs::read(path.with_extension("sg4"))?, before);
+    /// assert_eq!(Database::open(&path)?.num_games(), 1);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn discard(mut self) -> Result<()> {
+        if self.gfile.file_mode() == FileMode::ReadOnly {
+            return Ok(());
+        }
+        self.gfile
+            .discard_after(self.saved_game_size)
+            .map_err(|e| e.in_file(DatabaseFile::Game))
     }
 
     /// Returns an iterator that reads every game in order, including

@@ -332,6 +332,54 @@ fn test_create_reads_back_games_from_written_blocks() {
     assert_eq!(database_bytes(&path), database_bytes(&unread));
 }
 
+#[test]
+fn test_discard_leaves_the_files_as_they_were() {
+    // Each record is about 60,000 bytes, so adding a few writes full blocks.
+    let game = |n: u32| {
+        let comment = format!("{n} {}", "x".repeat(60_000));
+        scidtopgn::parse_single_game(&format!("[Event \"{n}\"]\n\n1. e4 {{{comment}}} *\n"))
+            .unwrap()
+    };
+    let temp = tempfile::TempDir::new().unwrap();
+    let path = temp.path().join("discard");
+    let mut db = Database::create(&path).unwrap();
+    db.add_game(&game(0)).unwrap();
+    db.close().unwrap();
+    let before = database_bytes(&path);
+
+    // Games added and replaced, then one too large to add.
+    let mut db = Database::open(&path).unwrap();
+    for n in 1..5 {
+        db.add_game(&game(n)).unwrap();
+    }
+    db.update_game(0, &game(5)).unwrap();
+    let too_large = game_with_record_length(131_072);
+    assert!(matches!(
+        db.add_game(&too_large),
+        Err(Error::GameTooLarge { .. })
+    ));
+    let sg4 = path.with_extension("sg4");
+    assert!(std::fs::metadata(&sg4).unwrap().len() > before[2].len() as u64);
+    db.discard().unwrap();
+    assert_eq!(database_bytes(&path), before);
+
+    // Only the changes since the last flush are discarded.
+    let mut db = Database::open(&path).unwrap();
+    db.add_game(&game(6)).unwrap();
+    db.flush().unwrap();
+    let flushed = database_bytes(&path);
+    db.add_game(&game(7)).unwrap();
+    db.discard().unwrap();
+    assert_eq!(database_bytes(&path), flushed);
+    let mut db = Database::open(&path).unwrap();
+    assert_eq!(db.num_games(), 2);
+    assert_eq!(db.get_game(1).unwrap().event, "6");
+
+    // A database opened read-only is left alone.
+    Database::open_read_only(&path).unwrap().discard().unwrap();
+    assert_eq!(database_bytes(&path), flushed);
+}
+
 /// `game` written to a new database and read back.
 fn scid_round_trip(game: &Game) -> Game {
     let temp = tempfile::TempDir::new().unwrap();
