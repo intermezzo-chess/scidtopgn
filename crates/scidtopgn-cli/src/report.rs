@@ -72,11 +72,16 @@ impl Reporter {
     /// Writes a message when verbose.
     pub fn info(&self, message: fmt::Arguments) {
         if self.verbosity == Verbosity::Verbose {
-            if !self.quiet {
-                eprintln!("{message}");
-            }
-            self.log_line("info", message);
+            self.notice(message);
         }
+    }
+
+    /// Writes a message that isn't a warning, verbose or not.
+    pub fn notice(&self, message: fmt::Arguments) {
+        if !self.quiet {
+            eprintln!("{message}");
+        }
+        self.log_line("info", message);
     }
 
     /// Whether writing to the log failed, so that it is missing messages.
