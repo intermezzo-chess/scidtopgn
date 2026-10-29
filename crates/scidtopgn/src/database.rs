@@ -13,7 +13,7 @@ use crate::index::{
     material_sig, HomePawnList, Index, IndexEntry, IDX_MASK_PROMO, IDX_MASK_UPROMO,
 };
 use crate::mov::{encode_move, GameMove};
-use crate::namebase::{NameBase, NameType};
+use crate::namebase::{NameBase, NameType, NewIds};
 use crate::nfile::NFile;
 use crate::position::{fen, ScidPosition};
 use crate::replace::NewFiles;
@@ -73,6 +73,24 @@ use shakmaty::{Board, Position, Role};
 /// it exports, as SCID does. To do the same, check each game's
 /// [`IndexEntry::get_delete_flag`] before reading it, as the example for
 /// [`get_entry`](Self::get_entry) shows.
+///
+/// # Names that aren't UTF-8
+///
+/// Older versions of SCID store the player, event, site, and round names of
+/// a Latin-1 or Windows-1252 PGN file as they are, so a name file can hold
+/// names that aren't valid UTF-8. When the name file is read, the bytes of
+/// such a name that aren't valid UTF-8 are read as Windows-1252, and
+/// [`NameBase::converted_names`] lists the name. Games read with these
+/// names converted.
+///
+/// **Writing the database stores the converted names as UTF-8**, as SCID
+/// vs. PC stores the names of PGN it imports. Two names of a kind can then
+/// be the same, such as a name stored once as Latin-1 and once as UTF-8,
+/// and SCID can't open a name file with both. [`flush`](Self::flush),
+/// [`compact_games`](Self::compact_games), and
+/// [`compact_names`](Self::compact_names) merge them into one name, whose
+/// frequency is the sum of theirs, and give the names of that kind new IDs.
+/// Every game reads back with the same names as before.
 pub struct Database {
     path: PathBuf,
     index: Index,
@@ -830,9 +848,21 @@ impl Database {
     /// pending data, then the name file, then the index file. Does nothing
     /// if no game changed.
     ///
+    /// Names are written as UTF-8, including those read from the name file
+    /// as Latin-1 or Windows-1252; see [Names that aren't
+    /// UTF-8](#names-that-arent-utf-8). If two names of a kind read the
+    /// same, they are merged into one, **the names get new IDs**, and the
+    /// name IDs in every index entry change to match. The name file and
+    /// index file are then written in a temporary directory beside the
+    /// database, and replace the database's files once both are complete,
+    /// as [`compact_names`](Self::compact_names) does.
+    ///
     /// # Errors
     ///
-    /// Returns [`Error::Io`] if a file can't be written.
+    /// Returns [`Error::Io`] if a file can't be written. When names are
+    /// merged, it returns [`Error::Game`] with [`Error::NameNotFound`] for
+    /// the first game that refers to a name the name file doesn't have, and
+    /// the name file and index file are left as they were.
     pub fn flush(&mut self) -> Result<()> {
         if !self.modified {
             return Ok(());
@@ -840,13 +870,24 @@ impl Database {
 
         self.gfile.flush()?;
 
-        self.nfile.close()?;
+        if let Some((namebase, new_ids)) = self.nfile.namebase().merged() {
+            let mut index = renumbered(&self.index, &new_ids)?;
+            let mut new = NewFiles::new(&self.path)?;
+            write_names(&namebase, new.create("sn4")?)?;
+            write_index(&mut index, new.create("si4")?)?;
+            new.replace()?;
+            self.index = index;
+            *self.nfile.namebase_mut() = namebase;
+        } else {
+            self.nfile.close()?;
+            self.nfile.namebase_mut().clear_converted();
 
-        let si4_path = self.path.with_extension("si4");
-        let file = File::create(&si4_path)?;
-        let mut writer = BufWriter::new(file);
-        self.index.flush(&mut writer)?;
-        writer.flush()?;
+            let si4_path = self.path.with_extension("si4");
+            let file = File::create(&si4_path)?;
+            let mut writer = BufWriter::new(file);
+            self.index.flush(&mut writer)?;
+            writer.flush()?;
+        }
 
         self.modified = false;
         self.saved_game_size = self.gfile.file_size();
@@ -945,8 +986,10 @@ impl Database {
     ///
     /// The name frequencies are counted again from the games that are left.
     /// Names that no game uses stay until
-    /// [`compact_names`](Self::compact_names). SCID's tree cache file
-    /// (`.stc`), whose game numbers would be out of date, is deleted.
+    /// [`compact_names`](Self::compact_names). Names that read the same are
+    /// merged and get new IDs, as [`flush`](Self::flush) merges them. SCID's
+    /// tree cache file (`.stc`), whose game numbers would be out of date, is
+    /// deleted.
     ///
     /// Any unwritten changes are written first, as [`flush`](Self::flush)
     /// writes them. The new files are written in a temporary directory
@@ -959,7 +1002,9 @@ impl Database {
     /// Returns [`Error::ReadOnly`] if the database was opened with
     /// [`open_read_only`](Self::open_read_only), [`Error::Game`] for the
     /// first game that isn't deleted whose record can't be read from the
-    /// game file, and [`Error::Io`] if a file can't be written or replaced.
+    /// game file or, when names are merged, that refers to a name the name
+    /// file doesn't have, and [`Error::Io`] if a file can't be written or
+    /// replaced.
     /// After an error, the database's files are as they were after the
     /// unwritten changes were written, unless a file that was moved aside
     /// couldn't be put back; it is then left in the temporary directory. The
@@ -989,6 +1034,11 @@ impl Database {
         self.check_writable()?;
         self.flush()?;
 
+        let (mut namebase, new_ids) = match self.nfile.namebase().merged() {
+            Some((namebase, new_ids)) => (namebase, Some(new_ids)),
+            None => (self.nfile.namebase().clone(), None),
+        };
+
         let mut new = NewFiles::new(&self.path)?;
         let mut index = empty_copy(&self.index);
         let mut gfile = GFile::from_empty_file(new.create("sg4")?);
@@ -996,21 +1046,21 @@ impl Database {
             if entry.get_delete_flag() {
                 continue;
             }
+            let mut entry = entry.clone();
+            if let Some(new_ids) = &new_ids {
+                renumber_names(&mut entry, new_ids).map_err(|e| in_game(game_num, e))?;
+            }
             let record = self
                 .gfile
                 .read_game_data(entry.get_offset(), entry.get_length())
-                .map_err(|source| Error::Game {
-                    number: u64::from(game_num) + 1,
-                    source: Box::new(source),
-                })?;
-            let mut entry = entry.clone();
+                .map_err(|e| in_game(game_num, e))?;
             entry.set_offset(gfile.add_game_data(&record)?);
             index.add_entry(entry)?;
         }
         gfile.close()?;
 
-        let mut namebase = self.nfile.namebase().clone();
         namebase.clear_frequencies();
+        namebase.clear_converted();
         for entry in index.entries() {
             count_names(&mut namebase, entry, NameBase::increment_frequency);
         }
@@ -1044,7 +1094,11 @@ impl Database {
     /// The name IDs in every index entry change to match, and nothing else
     /// does. As in SCID, a name that only logically deleted games use is
     /// kept; call [`compact_games`](Self::compact_games) first to drop it.
-    /// If every name is used, no file is changed.
+    /// Names that read the same are merged, as [`flush`](Self::flush)
+    /// merges them. If every name is used and none are merged, the IDs
+    /// don't change: the name file is written again only if it held names
+    /// that weren't UTF-8, which it then stores as UTF-8, and otherwise no
+    /// file is changed.
     ///
     /// Any unwritten changes are written first, as [`flush`](Self::flush)
     /// writes them. The new name file and index file are written in a
@@ -1093,31 +1147,23 @@ impl Database {
         for (game_num, entry) in (0u32..).zip(self.index.entries()) {
             for (name_type, id) in name_ids(entry) {
                 if counted.get_name(name_type, id).is_none() {
-                    return Err(Error::Game {
-                        number: u64::from(game_num) + 1,
-                        source: Box::new(Error::NameNotFound { name_type, id }),
-                    });
+                    return Err(in_game(game_num, Error::NameNotFound { name_type, id }));
                 }
                 counted.increment_frequency(name_type, id);
             }
         }
         let Some((namebase, new_ids)) = counted.without_unused() else {
+            if counted.converted_names().is_empty() {
+                return Ok(());
+            }
+            let mut new = NewFiles::new(&self.path)?;
+            write_names(&counted, new.create("sn4")?)?;
+            new.replace()?;
+            counted.clear_converted();
+            *self.nfile.namebase_mut() = counted;
             return Ok(());
         };
-
-        let new_id = |name_type: NameType, id: u32| {
-            new_ids[name_type.as_usize()][id as usize].expect("a name that a game uses is kept")
-        };
-        let mut index = empty_copy(&self.index);
-        for entry in self.index.entries() {
-            let mut entry = entry.clone();
-            entry.set_white(new_id(NameType::Player, entry.get_white()));
-            entry.set_black(new_id(NameType::Player, entry.get_black()));
-            entry.set_event(new_id(NameType::Event, entry.get_event()));
-            entry.set_site(new_id(NameType::Site, entry.get_site()));
-            entry.set_round(new_id(NameType::Round, entry.get_round()));
-            index.add_entry(entry)?;
-        }
+        let mut index = renumbered(&self.index, &new_ids)?;
 
         let mut new = NewFiles::new(&self.path)?;
         write_names(&namebase, new.create("sn4")?)?;
@@ -1277,6 +1323,53 @@ fn name_ids(entry: &IndexEntry) -> [(NameType, u32); 5] {
         (NameType::Site, entry.get_site()),
         (NameType::Round, entry.get_round()),
     ]
+}
+
+/// Changes the five name IDs of `entry` to their new IDs in `new_ids`.
+///
+/// # Errors
+///
+/// Returns [`Error::NameNotFound`] for the first ID that has no new ID.
+fn renumber_names(entry: &mut IndexEntry, new_ids: &NewIds) -> Result<()> {
+    let new_id = |name_type: NameType, id: u32| {
+        new_ids[name_type.as_usize()]
+            .get(id as usize)
+            .copied()
+            .flatten()
+            .ok_or(Error::NameNotFound { name_type, id })
+    };
+    entry.set_white(new_id(NameType::Player, entry.get_white())?);
+    entry.set_black(new_id(NameType::Player, entry.get_black())?);
+    entry.set_event(new_id(NameType::Event, entry.get_event())?);
+    entry.set_site(new_id(NameType::Site, entry.get_site())?);
+    entry.set_round(new_id(NameType::Round, entry.get_round())?);
+    Ok(())
+}
+
+/// Returns a copy of `index` whose entries refer to names by their new IDs
+/// in `new_ids`.
+///
+/// # Errors
+///
+/// Returns [`Error::Game`] with [`Error::NameNotFound`] for the first game
+/// that refers to an ID that has no new ID.
+fn renumbered(index: &Index, new_ids: &NewIds) -> Result<Index> {
+    let mut copy = empty_copy(index);
+    for (game_num, entry) in (0u32..).zip(index.entries()) {
+        let mut entry = entry.clone();
+        renumber_names(&mut entry, new_ids).map_err(|e| in_game(game_num, e))?;
+        copy.add_entry(entry)?;
+    }
+    Ok(copy)
+}
+
+/// Wraps `source` in an [`Error::Game`] for game `game_num`, counting from
+/// 0.
+fn in_game(game_num: u32, source: Error) -> Error {
+    Error::Game {
+        number: u64::from(game_num) + 1,
+        source: Box::new(source),
+    }
 }
 
 /// Calls `change` on the frequency of each of the five names `entry` refers

@@ -11,7 +11,7 @@ use anyhow::{Context, Result};
 
 use args::{Cli, Command, ExportArgs, ImportArgs, InfoArgs};
 use report::{Log, Progress, Reporter};
-use scidtopgn::{Database, Index, NFile, NameType, PgnParser};
+use scidtopgn::{Database, Index, NFile, NameBase, NameType, PgnParser};
 
 fn main() -> ExitCode {
     let cli = Cli::parse_args();
@@ -44,7 +44,7 @@ fn main() -> ExitCode {
     let result = match &command {
         Command::Export(args) => export_command(args, &reporter),
         Command::Import(args) => import_command(args, &reporter),
-        Command::Info(args) => info_command(args),
+        Command::Info(args) => info_command(args, &reporter),
     };
     if let Err(err) = &result {
         reporter.error(err);
@@ -91,6 +91,7 @@ fn export_command(args: &ExportArgs, reporter: &Reporter) -> Result<()> {
 
     let mut db = Database::open_read_only(&args.database)
         .with_context(|| format!("Failed to open database '{}'", args.database))?;
+    warn_converted_names(reporter, db.nfile().namebase());
 
     if args.count {
         writeln!(std::io::stdout(), "{} games", db.num_games())?;
@@ -190,6 +191,7 @@ fn import_command(args: &ImportArgs, reporter: &Reporter) -> Result<()> {
         ));
         let db = Database::open(&args.output)
             .with_context(|| format!("Failed to open database '{}'", args.output))?;
+        warn_converted_names(reporter, db.nfile().namebase());
         (db, None)
     } else {
         if si4_exists {
@@ -291,7 +293,16 @@ impl Staging {
     }
 }
 
-fn info_command(args: &InfoArgs) -> Result<()> {
+/// Warns about each name that was read from bytes that weren't UTF-8.
+fn warn_converted_names(reporter: &Reporter, names: &NameBase) {
+    for (name_type, name) in names.converted_names() {
+        reporter.warn(format_args!(
+            "read {name_type} name \"{name}\" that isn't UTF-8 as Windows-1252"
+        ));
+    }
+}
+
+fn info_command(args: &InfoArgs, reporter: &Reporter) -> Result<()> {
     // Read only the index and name files, so the game file can be damaged,
     // missing, or read-only.
     let path = std::path::Path::new(&args.database);
@@ -300,6 +311,7 @@ fn info_command(args: &InfoArgs) -> Result<()> {
     };
     let (index, nfile) =
         open().with_context(|| format!("Failed to open database '{}'", args.database))?;
+    warn_converted_names(reporter, nfile.namebase());
 
     let mut deleted = 0u32;
     let mut years: Option<(u16, u16)> = None;

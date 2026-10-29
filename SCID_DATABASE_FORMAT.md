@@ -408,7 +408,7 @@ Each name record has variable length:
 
 3. **String Length**: Total length of reconstructed name (1 byte, max 255 chars)
 
-4. **String Data**: UTF-8 encoded suffix after front-coding
+4. **String Data**: The name's bytes after the shared prefix. The prefix is shared with the previous name's bytes as stored.
 
 #### Variable-Length Integer Encoding
 
@@ -486,7 +486,7 @@ fn clean_name_string(name: &str) -> String {
 
 ### Text Encoding and Character Handling
 
-- **Character Encoding**: UTF-8 for international character support
+- **Character Encoding**: UTF-8 in SCID vs. PC, which converts PGN to UTF-8 when it imports. Older versions of SCID store a Latin-1 or Windows-1252 PGN file's bytes unchanged. `scidtopgn` reads bytes that aren't valid UTF-8 as Windows-1252 and writes UTF-8. SCID can't open a name file that holds the same name twice.
 - **Control Character Filtering**: Characters below 0x20 (space) are removed
 - **Whitespace Handling**: Leading and trailing whitespace is trimmed
 - **Empty Names**: Zero-length names are allowed and stored as empty strings

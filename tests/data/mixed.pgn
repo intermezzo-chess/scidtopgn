@@ -1,0 +1,29 @@
+[Event "Événement"]
+[Site "Oslo"]
+[Date "2024.05.01"]
+[Round "1"]
+[White "Müller, Hans"]
+[Black "Anand, Viswanathan"]
+[Result "1-0"]
+
+1. e4 e5 1-0
+
+[Event "Ã‰vÃ©nement"]
+[Site "Oslo"]
+[Date "2024.05.02"]
+[Round "2"]
+[White "Anand, Viswanathan"]
+[Black "MÃ¼ller, Hans"]
+[Result "0-1"]
+
+1. d4 d5 0-1
+
+[Event "Open"]
+[Site "Oslo"]
+[Date "2024.05.03"]
+[Round "3"]
+[White "MÃ¼ller, Hans"]
+[Black "Mueller, Hans"]
+[Result "1/2-1/2"]
+
+1. c4 c5 1/2-1/2

@@ -943,6 +943,64 @@ fn test_cli_import_reads_text_that_isnt_utf8_as_windows_1252() {
     }
 }
 
+/// The warnings for the names of `tests/data/mixed` that aren't UTF-8.
+const MIXED_WARNINGS: &str =
+    "Warning: read player name \"Müller, Hans\" that isn't UTF-8 as Windows-1252\n\
+    Warning: read event name \"Événement\" that isn't UTF-8 as Windows-1252\n";
+
+#[test]
+fn test_cli_reads_names_that_arent_utf8() {
+    // #49: export, append, and info failed for these databases.
+    let output = cli()
+        .arg("tests/data/mixed")
+        .output()
+        .expect("Failed to run CLI");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+    assert_eq!(stderr, MIXED_WARNINGS);
+    let exported = String::from_utf8(output.stdout).expect("Output should be UTF-8");
+    assert_eq!(exported.matches("Müller, Hans\"]").count(), 3, "{exported}");
+    assert_eq!(
+        exported.matches("[Event \"Événement\"]").count(),
+        2,
+        "{exported}"
+    );
+
+    let output = cli()
+        .args(["info", "tests/data/mixed"])
+        .output()
+        .expect("Failed to run CLI");
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stderr), MIXED_WARNINGS);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Player names: 4\n"), "{stdout}");
+
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let db = temp.path().join("mixed");
+    for ext in ["si4", "sn4", "sg4"] {
+        std::fs::copy(
+            get_workspace_root()
+                .join("tests/data/mixed")
+                .with_extension(ext),
+            db.with_extension(ext),
+        )
+        .expect("Failed to copy fixture");
+    }
+    let output = cli()
+        .args(["import", "tests/data/one.pgn", "-o"])
+        .arg(&db)
+        .output()
+        .expect("Failed to run CLI");
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stderr), MIXED_WARNINGS);
+
+    // The names were written as UTF-8, and the two Müllers merged.
+    let stdout = info(&db);
+    assert!(stdout.contains("Total games: 4\n"), "{stdout}");
+    assert!(stdout.contains("Player names: 5\n"), "{stdout}");
+    assert!(stdout.contains("Event names: 3\n"), "{stdout}");
+}
+
 #[test]
 fn test_cli_import_drops_tags_too_long_to_store() {
     // #53: these imported, but the database couldn't be read back.

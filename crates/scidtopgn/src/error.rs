@@ -150,13 +150,6 @@ pub enum Error {
         length: u8,
     },
 
-    /// A name in the name file that isn't valid UTF-8.
-    #[error("A {name_type} name isn't valid UTF-8")]
-    NameNotUtf8 {
-        /// The kind of name.
-        name_type: NameType,
-    },
-
     /// A name ID in an index entry that the name file has no name for.
     #[error("No {name_type} name has ID {id}")]
     NameNotFound {

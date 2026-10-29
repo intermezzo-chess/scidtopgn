@@ -7,6 +7,7 @@ use std::fmt;
 use std::io::{Read, Write};
 
 use crate::error::{Error, Result};
+use crate::pgn::windows_1252_char;
 
 /// The first eight bytes of a `.sn4` file.
 pub const NAMEBASE_MAGIC: &[u8; 8] = b"Scid.sn\0";
@@ -112,6 +113,8 @@ pub struct NameBase {
     num_names: [u32; NUM_NAME_TYPES],
     max_frequency: [u32; NUM_NAME_TYPES],
     timestamp: u32,
+    /// The names read from bytes that weren't valid UTF-8, by kind.
+    converted: Vec<(NameType, String)>,
 }
 
 impl Default for NameBase {
@@ -134,6 +137,7 @@ impl NameBase {
             num_names: [0; NUM_NAME_TYPES],
             max_frequency: [0; NUM_NAME_TYPES],
             timestamp: 0,
+            converted: Vec::new(),
         }
     }
 
@@ -146,6 +150,7 @@ impl NameBase {
             self.max_frequency[i] = 0;
         }
         self.timestamp = 0;
+        self.converted.clear();
     }
 
     /// Sets the timestamp written to the file's header.
@@ -161,6 +166,23 @@ impl NameBase {
     /// Returns the number of names of kind `ntype`.
     pub fn count(&self, ntype: NameType) -> u32 {
         self.num_names[ntype.as_usize()]
+    }
+
+    /// Returns the kind and text of each name that
+    /// [`read_sn4`](Self::read_sn4) read from bytes that weren't valid UTF-8,
+    /// in the order the file stores them. A [`Database`](crate::Database)
+    /// empties the list once it has written the names as UTF-8.
+    ///
+    /// Older versions of SCID store the bytes of a Latin-1 or Windows-1252
+    /// PGN file unchanged, so their name files can hold such names.
+    pub fn converted_names(&self) -> &[(NameType, String)] {
+        &self.converted
+    }
+
+    /// Empties the list of [`converted_names`](Self::converted_names), once
+    /// the names have been written as UTF-8.
+    pub(crate) fn clear_converted(&mut self) {
+        self.converted.clear();
     }
 
     /// Returns the highest frequency of any name of kind `ntype`.
@@ -262,34 +284,62 @@ impl NameBase {
 
     /// Returns a name base with only the names whose frequency isn't 0, and
     /// the new ID of each old ID, by kind, or `None` if every name has a
-    /// frequency and the IDs have no gaps. Within each kind, the new IDs count
-    /// from 0 in the order of the old ones. Names that are the same, which a
-    /// damaged name file can have, become one, with their frequencies added
-    /// together.
+    /// frequency, no two names of a kind are the same, and the IDs have no
+    /// gaps. The names left are renumbered as [`merged`](Self::merged)
+    /// renumbers them.
     ///
     /// A name file can skip IDs, but [`add_name`](Self::add_name) gives a new
     /// name the ID after the number of names, which may already be taken.
     pub(crate) fn without_unused(&self) -> Option<(NameBase, NewIds)> {
-        if self
+        let all_used = self
             .by_id
             .iter()
             .flatten()
-            .all(|e| e.as_ref().is_some_and(|e| e.frequency > 0))
-        {
+            .all(|e| e.as_ref().is_some_and(|e| e.frequency > 0));
+        if all_used && !self.has_duplicates() {
             return None;
         }
+        Some(self.renumbered(|e| e.frequency > 0))
+    }
+
+    /// Returns a name base in which the names of a kind that are the same
+    /// are one name, and the new ID of each old ID, by kind, or `None` if no
+    /// two names of a kind are the same. Names that no game uses are kept.
+    ///
+    /// Names read from the name file can be the same when they were stored
+    /// differently, such as one as Latin-1 and the other as UTF-8, and SCID
+    /// can't open a name file that has both. The merged name's frequency is
+    /// the sum of theirs. Within each kind, the new IDs count from 0, without
+    /// gaps, in the order of the old ones, and a merged name takes the place
+    /// of its lowest old ID.
+    pub(crate) fn merged(&self) -> Option<(NameBase, NewIds)> {
+        self.has_duplicates().then(|| self.renumbered(|_| true))
+    }
+
+    /// Returns whether two names of a kind are the same.
+    fn has_duplicates(&self) -> bool {
+        self.trees
+            .iter()
+            .zip(&self.by_id)
+            .any(|(tree, names)| tree.len() < names.iter().flatten().count())
+    }
+
+    /// Returns a name base with the names for which `keep` is true, those
+    /// that are the same made one, and the new ID of each old ID, by kind,
+    /// as [`merged`](Self::merged) describes.
+    fn renumbered(&self, keep: impl Fn(&NameEntry) -> bool) -> (NameBase, NewIds) {
         let mut kept = NameBase::new();
         kept.timestamp = self.timestamp;
         let new_ids = std::array::from_fn(|idx| {
             self.by_id[idx]
                 .iter()
                 .map(|entry| {
-                    let entry = entry.as_ref().filter(|e| e.frequency > 0)?;
+                    let entry = entry.as_ref().filter(|e| keep(e))?;
                     Some(kept.add_counted(idx, &entry.name, entry.frequency))
                 })
                 .collect()
         });
-        Some((kept, new_ids))
+        (kept, new_ids)
     }
 
     /// Adds `frequency` to the frequency of `name`, of the kind at `idx`,
@@ -407,6 +457,20 @@ fn write_four_bytes<W: Write>(writer: &mut W, value: u32) -> Result<()> {
     Ok(())
 }
 
+/// Reads a name's bytes as UTF-8, and any bytes that aren't valid UTF-8 as
+/// Windows-1252, as [`PgnParser::from_bytes`](crate::PgnParser::from_bytes)
+/// reads PGN. Returns the name and whether any byte wasn't valid UTF-8.
+fn decode_name(bytes: &[u8]) -> (String, bool) {
+    let mut name = String::with_capacity(bytes.len());
+    let mut converted = false;
+    for chunk in bytes.utf8_chunks() {
+        name.push_str(chunk.valid());
+        converted |= !chunk.invalid().is_empty();
+        name.extend(chunk.invalid().iter().map(|&b| windows_1252_char(b)));
+    }
+    (name, converted)
+}
+
 /// Returns the number of leading bytes `s1` and `s2` share, at most 255.
 fn compute_prefix(s1: &[u8], s2: &[u8]) -> u8 {
     let count = s1.iter().zip(s2).take_while(|(b1, b2)| b1 == b2).count();
@@ -415,14 +479,28 @@ fn compute_prefix(s1: &[u8], s2: &[u8]) -> u8 {
 
 impl NameBase {
     /// Reads a `.sn4` file into this name base, which should be empty.
-    /// Control characters and surrounding spaces are removed from each name.
+    ///
+    /// A name that isn't valid UTF-8, as older versions of SCID store
+    /// Latin-1 or Windows-1252 names, is converted: the bytes that aren't
+    /// valid UTF-8 are read as Windows-1252, as
+    /// [`PgnParser::from_bytes`](crate::PgnParser::from_bytes) reads them,
+    /// and [`converted_names`](Self::converted_names) lists the name. Then
+    /// control characters and surrounding spaces are removed from each name,
+    /// and a name longer than 255 bytes is cut as
+    /// [`add_name`](Self::add_name) cuts it.
+    ///
+    /// Names of a kind that read the same, such as a name stored as Latin-1
+    /// and as UTF-8, keep their IDs, which [`get_name`](Self::get_name)
+    /// gives the same name for, and [`find_name`](Self::find_name) and
+    /// [`add_name`](Self::add_name) give the lowest of them. A
+    /// [`Database`](crate::Database) merges them into one name when it next
+    /// writes its name file.
     ///
     /// # Errors
     ///
     /// Returns [`Error::InvalidMagic`] if the data doesn't start with
-    /// [`NAMEBASE_MAGIC`], [`Error::NamePrefixTooLong`] or
-    /// [`Error::NameNotUtf8`] for a damaged name, and [`Error::Io`] if the
-    /// data can't be read or ends early.
+    /// [`NAMEBASE_MAGIC`], [`Error::NamePrefixTooLong`] for a damaged name,
+    /// and [`Error::Io`] if the data can't be read or ends early.
     pub fn read_sn4<R: Read>(&mut self, reader: &mut R) -> Result<()> {
         let mut magic = [0u8; 8];
         reader.read_exact(&mut magic)?;
@@ -449,7 +527,8 @@ impl NameBase {
             let max_f = max_freq[nt_idx];
             let ntype = NameType::try_from(nt_idx)?;
 
-            let mut prev_name = String::new();
+            // A name shares its prefix with the previous name as stored.
+            let mut prev_bytes = Vec::new();
 
             for i in 0..count {
                 let id = if count >= 65536 {
@@ -481,21 +560,17 @@ impl NameBase {
                 reader.read_exact(&mut suffix)?;
 
                 let mut name_bytes = Vec::with_capacity(length);
-                if prefix > 0 {
-                    let prev_bytes = prev_name.as_bytes();
-                    name_bytes.extend_from_slice(&prev_bytes[..prefix.min(prev_bytes.len())]);
-                }
+                name_bytes.extend_from_slice(&prev_bytes[..prefix.min(prev_bytes.len())]);
                 name_bytes.extend_from_slice(&suffix);
 
-                let name = String::from_utf8(name_bytes)
-                    .map_err(|_| Error::NameNotUtf8 { name_type: ntype })?;
-
-                let clean_name: String = name
-                    .chars()
-                    .filter(|&c| c >= ' ')
-                    .collect::<String>()
-                    .trim()
-                    .to_string();
+                let (name, converted) = decode_name(&name_bytes);
+                let name: String = name.chars().filter(|&c| c >= ' ').collect();
+                // The cut can leave spaces at the end, which reading the
+                // name again would remove.
+                let clean_name = stored_name(name.trim()).trim_end().to_string();
+                if converted {
+                    self.converted.push((ntype, clean_name.clone()));
+                }
 
                 let entry = NameEntry {
                     id,
@@ -508,9 +583,12 @@ impl NameBase {
                     self.by_id[idx].push(None);
                 }
                 self.by_id[idx][id as usize] = Some(entry);
-                self.trees[idx].insert(clean_name.clone(), id);
+                self.trees[idx]
+                    .entry(clean_name)
+                    .and_modify(|first| *first = (*first).min(id))
+                    .or_insert(id);
 
-                prev_name = clean_name;
+                prev_bytes = name_bytes;
             }
 
             self.num_names[nt_idx] = count;
@@ -818,6 +896,184 @@ mod tests {
         assert_eq!(nb.find_name(NameType::Player, "Øst, Ole"), Some(0));
         assert_eq!(nb.find_name(NameType::Player, "Abc"), Some(8));
         assert_eq!(nb.add_name(NameType::Player, "Bl").unwrap(), 1);
+    }
+
+    /// A name file whose players are `players`: each one's ID, frequency,
+    /// bytes shared with the previous name, and remaining bytes, in the
+    /// order the file stores them. It has no names of the other kinds.
+    fn sn4_with_players(players: &[(u16, u8, u8, &[u8])]) -> Vec<u8> {
+        let mut file = NAMEBASE_MAGIC.to_vec();
+        file.extend([0; 4]);
+        let max_frequency = players.iter().map(|p| p.1).max().unwrap_or(0);
+        for counts in [players.len() as u8, max_frequency] {
+            file.extend([0, 0, counts]);
+            file.extend([0; 9]);
+        }
+        for (i, &(id, frequency, prefix, suffix)) in players.iter().enumerate() {
+            file.extend(id.to_be_bytes());
+            file.push(frequency);
+            file.push(prefix + suffix.len() as u8);
+            if i > 0 {
+                file.push(prefix);
+            }
+            file.extend(suffix);
+        }
+        file
+    }
+
+    fn read(file: &[u8]) -> NameBase {
+        let mut nb = NameBase::new();
+        nb.read_sn4(&mut &file[..]).unwrap();
+        nb
+    }
+
+    #[test]
+    fn test_read_converts_names_that_arent_utf8() {
+        let nb = read(&sn4_with_players(&[
+            (0, 1, 0, b"M\xfcller, Hans"),
+            (1, 1, 0, b"Anand"),
+            // The five bytes Windows-1252 leaves undefined, and the euro.
+            (2, 1, 0, b"\x81\x8d\x8f\x90\x9d \x80"),
+            // A Latin-1 "\xc3\xa9" is valid UTF-8, so only the first byte
+            // is converted.
+            (3, 1, 0, b"\xe9\xc3\xa9"),
+            (4, 1, 0, "Müller, Hans".as_bytes()),
+        ]));
+
+        let names: Vec<_> = nb
+            .get_all_names(NameType::Player)
+            .into_iter()
+            .map(|(_, name, _)| name)
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "Müller, Hans",
+                "Anand",
+                "\u{81}\u{8d}\u{8f}\u{90}\u{9d} €",
+                "éé",
+                "Müller, Hans"
+            ]
+        );
+        assert_eq!(
+            nb.converted_names(),
+            [
+                (NameType::Player, "Müller, Hans".to_string()),
+                (
+                    NameType::Player,
+                    "\u{81}\u{8d}\u{8f}\u{90}\u{9d} €".to_string()
+                ),
+                (NameType::Player, "éé".to_string()),
+            ]
+        );
+        assert!(players(&[("A", 1)]).converted_names().is_empty());
+    }
+
+    #[test]
+    fn test_read_cuts_a_converted_name_to_255_bytes() {
+        // 200 Latin-1 bytes are 400 bytes of UTF-8, cut before the 128th é.
+        let nb = read(&sn4_with_players(&[(0, 1, 0, &[0xe9; 200])]));
+        let name = "é".repeat(127);
+        assert_eq!(nb.get_name(NameType::Player, 0), Some(name.as_str()));
+        assert_eq!(nb.converted_names(), [(NameType::Player, name.clone())]);
+
+        let mut file = Vec::new();
+        nb.write_sn4(&mut file).unwrap();
+        assert_eq!(
+            read(&file).get_name(NameType::Player, 0),
+            Some(name.as_str())
+        );
+    }
+
+    #[test]
+    fn test_read_removes_spaces_the_cut_leaves_at_the_end() {
+        // 127 é and a space are 255 bytes of UTF-8, and the é after them is
+        // cut, which would leave the space at the end.
+        let mut stored = vec![0xe9; 127];
+        stored.extend([b' ', 0xe9]);
+        let nb = read(&sn4_with_players(&[(0, 1, 0, &stored)]));
+        let name = "é".repeat(127);
+        assert_eq!(nb.get_name(NameType::Player, 0), Some(name.as_str()));
+
+        let mut file = Vec::new();
+        nb.write_sn4(&mut file).unwrap();
+        assert_eq!(
+            read(&file).get_name(NameType::Player, 0),
+            Some(name.as_str())
+        );
+    }
+
+    #[test]
+    fn test_read_takes_the_shared_prefix_from_the_stored_name() {
+        // The first name is stored with a control character, which isn't
+        // part of the name read, but is part of the prefix the next shares.
+        let nb = read(&sn4_with_players(&[(0, 1, 0, b"\x01Ab"), (1, 1, 2, b"Zz")]));
+        assert_eq!(nb.get_name(NameType::Player, 0), Some("Ab"));
+        assert_eq!(nb.get_name(NameType::Player, 1), Some("AZz"));
+    }
+
+    /// Three players that read as "Müller, Hans", stored as UTF-8, as
+    /// Latin-1, and as Latin-1 with a space before it, with IDs 2, 0, and 3,
+    /// and an unused player with ID 1.
+    fn three_millers() -> NameBase {
+        read(&sn4_with_players(&[
+            (1, 0, 0, b"Anand"),
+            (2, 3, 0, "Müller, Hans".as_bytes()),
+            (0, 1, 1, b"\xfcller, Hans"),
+            (3, 2, 0, b" M\xfcller, Hans"),
+        ]))
+    }
+
+    #[test]
+    fn test_names_that_read_the_same_share_the_lowest_id() {
+        let nb = three_millers();
+        for id in [0, 2, 3] {
+            assert_eq!(nb.get_name(NameType::Player, id), Some("Müller, Hans"));
+        }
+        assert_eq!(nb.find_name(NameType::Player, "Müller, Hans"), Some(0));
+        let mut nb = nb;
+        assert_eq!(nb.add_name(NameType::Player, "Müller, Hans").unwrap(), 0);
+    }
+
+    #[test]
+    fn test_merged_makes_names_that_are_the_same_one() {
+        let (merged, new_ids) = three_millers().merged().unwrap();
+
+        assert_eq!(new_ids[0], [Some(0), Some(1), Some(0), Some(0)]);
+        assert!(new_ids[1..].iter().all(Vec::is_empty));
+        // The unused name is kept.
+        assert_eq!(
+            merged.get_all_names(NameType::Player),
+            [
+                (0, "Müller, Hans".to_string(), 6),
+                (1, "Anand".to_string(), 0)
+            ]
+        );
+        assert_eq!(merged.count(NameType::Player), 2);
+        assert_eq!(merged.max_frequency(NameType::Player), 6);
+        assert!(merged.converted_names().is_empty());
+        assert!(merged.merged().is_none());
+    }
+
+    #[test]
+    fn test_merged_is_none_without_names_that_are_the_same() {
+        assert!(players(&[("A", 1), ("B", 0)]).merged().is_none());
+        assert!(NameBase::new().merged().is_none());
+    }
+
+    #[test]
+    fn test_without_unused_merges_names_read_the_same_when_every_name_is_used() {
+        let (kept, new_ids) = read(&sn4_with_players(&[
+            (0, 1, 0, b"M\xfcller"),
+            (1, 1, 0, "Müller".as_bytes()),
+        ]))
+        .without_unused()
+        .unwrap();
+        assert_eq!(new_ids[0], [Some(0), Some(0)]);
+        assert_eq!(
+            kept.get_all_names(NameType::Player),
+            [(0, "Müller".to_string(), 2)]
+        );
     }
 
     #[test]

@@ -109,6 +109,12 @@ Years of active games: 2022-2022
 
 Total games counts every stored game, and Active games those export writes. The name counts are the names stored in the database's name file, which can include names used only by deleted games. The years come from active games with a known date, or are `unknown`. `info` reads only the index and name files, so it works even when some games are damaged. It accepts `--quiet` and `--log`.
 
+### Names that aren't UTF-8
+
+Older versions of SCID, and the C++ reference converter, store the player, event, site, and round names of a Latin-1 or Windows-1252 PGN file as they are, so their name files can hold names that aren't valid UTF-8. Export, append, and `info` read the bytes of such a name that aren't valid UTF-8 as Windows-1252, as import reads PGN, and print a warning for each name, such as `read player name "Müller, Hans" that isn't UTF-8 as Windows-1252`.
+
+**Appending to such a database rewrites its names as UTF-8**, as SCID vs. PC stores the names of PGN it imports. If a name was stored both ways, for example `Müller, Hans` once as Latin-1 and once as UTF-8, the two become one name, and the names get new IDs, because SCID can't open a name file that holds the same name twice. Every game keeps its names. Export and `info` don't change the database.
+
 ### Quiet mode
 
 With `--quiet`, a command writes nothing to stderr: no warnings, progress, or error messages. Only the exit status shows whether it failed. Its results are still written, such as PGN, the `--count` line, and `info`'s output. Mistakes in the arguments themselves, such as an unknown option, are still reported.
@@ -152,7 +158,7 @@ let game = db.get_game(0)?;
 println!("{} vs {}", game.white, game.black);
 ```
 
-`update_game()` replaces a game and keeps its number. `delete_game()` marks a game as logically deleted, as SCID does, and `undelete_game()` reverses it; the game's record and number stay until the database is compacted. `compact_games()` removes deleted games and replaced records and renumbers the games that are left, and `compact_names()` removes names that no game uses, as SCID's Compact commands do. `games()` and `get_game()` include games that SCID has logically deleted, unlike the CLI's export. The [API documentation](https://docs.rs/scidtopgn) shows how to skip them and covers the rest of the library. To build it locally, run `cargo doc -p scidtopgn --open`.
+`update_game()` replaces a game and keeps its number. `delete_game()` marks a game as logically deleted, as SCID does, and `undelete_game()` reverses it; the game's record and number stay until the database is compacted. `compact_games()` removes deleted games and replaced records and renumbers the games that are left, and `compact_names()` removes names that no game uses, as SCID's Compact commands do. Writing a database stores its names as UTF-8 and merges names that read the same, as described in [Names that aren't UTF-8](#names-that-arent-utf-8); `NameBase::converted_names()` lists the names that weren't UTF-8 when read. `games()` and `get_game()` include games that SCID has logically deleted, unlike the CLI's export. The [API documentation](https://docs.rs/scidtopgn) shows how to skip them and covers the rest of the library. To build it locally, run `cargo doc -p scidtopgn --open`.
 
 ## Building & testing
 
