@@ -944,7 +944,7 @@ impl Iterator for PgnParser {
 /// The character a byte stands for in Windows-1252. The five bytes it leaves
 /// undefined stand for the C1 control characters with the same numbers, as in
 /// the WHATWG Encoding Standard.
-fn windows_1252_char(byte: u8) -> char {
+pub(crate) fn windows_1252_char(byte: u8) -> char {
     const BYTES_80_TO_9F: [char; 32] = [
         '\u{20AC}', '\u{0081}', '\u{201A}', '\u{0192}', '\u{201E}', '\u{2026}', '\u{2020}',
         '\u{2021}', '\u{02C6}', '\u{2030}', '\u{0160}', '\u{2039}', '\u{0152}', '\u{008D}',

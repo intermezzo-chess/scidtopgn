@@ -64,7 +64,7 @@ reference the issue the PR addresses.
 
 ## Test data
 
-The fixtures in `tests/data/` (`one`, `five`, `edge`, `castling`, `annotated`, `long`, `accents`, and `derived`, each
+The fixtures in `tests/data/` (`one`, `five`, `edge`, `castling`, `annotated`, `long`, `accents`, `derived`, `latin1`, and `mixed`, each
 with `.si4`, `.sn4`, `.sg4`, and a matching `.pgn`) are shared by both crates'
 integration tests. `castling` and `annotated` were written by the C++ reference
 converter from `castling.pgn` and `annotated.pgn`, like `edge`. `annotated` has
@@ -79,7 +79,12 @@ unsigned bytes, to check that the name file keeps SCID's order. `derived` was
 written from `derived.pgn` by `pgnscid -f derived.pgn derived`. It covers the
 index fields SCID derives from the moves: games longer than 255 and 1,023
 half-moves, promotions in the main line and in a variation, and more than 10
-variations, comments, and NAGs.
+variations, comments, and NAGs. `latin1` and `mixed` were written by the C++
+reference converter from `latin1.pgn` and `mixed.pgn`, which aren't valid UTF-8.
+The converter stores their names' bytes as they are, and counts no names, so
+every frequency in their name files is 0. `latin1.pgn` has Latin-1 and
+Windows-1252 names. `mixed.pgn` has `Müller, Hans` and `Événement` both as
+Latin-1 and as UTF-8, so `mixed.sn4` holds each of them twice.
 `notation.pgn` has one game per case in
 [docs/PGN_IMPORT.md](docs/PGN_IMPORT.md). `.gitignore` excludes `*.si4`, `*.sn4`, and `*.sg4` everywhere, so new
 fixtures must be added with `git add -f`.
