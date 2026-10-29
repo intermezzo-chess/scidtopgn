@@ -981,6 +981,14 @@ fn test_cli_reads_names_that_arent_utf8() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Player names: 4\n"), "{stdout}");
 
+    assert_eq!(
+        validate(&get_workspace_root().join("tests/data/mixed"), &[]),
+        (
+            Some(0),
+            format!("{MIXED_WARNINGS}3 games checked, 0 damaged\n")
+        )
+    );
+
     let temp = TempDir::new().expect("Failed to create temp dir");
     let db = temp.path().join("mixed");
     for ext in ["si4", "sn4", "sg4"] {
