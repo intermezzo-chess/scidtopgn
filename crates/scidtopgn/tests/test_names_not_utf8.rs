@@ -166,6 +166,8 @@ fn test_appending_writes_the_names_as_utf8() {
     let before = all_pgn(&mut db);
 
     db.add_game(&parse_single_game(NEW_GAME).unwrap()).unwrap();
+    db.flush().unwrap();
+    assert_eq!(db.nfile().namebase().converted_names(), []);
     db.close().unwrap();
 
     assert_names_written_as_utf8(&path);
@@ -271,6 +273,51 @@ fn test_compacting_merges_names_stored_two_ways() {
         assert_frequencies_counted(&path);
         assert_eq!(all_pgn(&mut Database::open(&path).unwrap()), expected);
     }
+}
+
+#[test]
+fn test_compact_names_writes_names_that_arent_utf8_when_none_is_dropped() {
+    // Every name of `latin1` is used, and none read the same.
+    let temp = TempDir::new().unwrap();
+    let path = copy_of(temp.path(), "latin1");
+    let mut db = Database::open(&path).unwrap();
+    let before = all_pgn(&mut db);
+    let names_before: Vec<_> = NAME_TYPES
+        .map(|ntype| db.nfile().namebase().get_all_names(ntype))
+        .into();
+    let si4 = std::fs::read(path.with_extension("si4")).unwrap();
+
+    db.compact_names().unwrap();
+    assert_eq!(db.nfile().namebase().converted_names(), []);
+    drop(db);
+
+    assert_names_written_as_utf8(&path);
+    assert_frequencies_counted(&path);
+    assert_eq!(std::fs::read(path.with_extension("si4")).unwrap(), si4);
+    let mut db = Database::open(&path).unwrap();
+    assert_eq!(all_pgn(&mut db), before);
+    // The IDs don't change.
+    let ids = |names: &[(u32, String, u32)]| -> Vec<(u32, String)> {
+        names
+            .iter()
+            .map(|(id, name, _)| (*id, name.clone()))
+            .collect()
+    };
+    for (ntype, names) in NAME_TYPES.iter().zip(&names_before) {
+        assert_eq!(
+            ids(&db.nfile().namebase().get_all_names(*ntype)),
+            ids(names)
+        );
+    }
+
+    // Once the names are UTF-8, there is nothing to do.
+    let after = database_bytes(&path);
+    db.compact_names().unwrap();
+    assert_eq!(database_bytes(&path), after);
+    assert_eq!(
+        files_in(temp.path()),
+        ["latin1.sg4", "latin1.si4", "latin1.sn4"]
+    );
 }
 
 #[test]

@@ -170,12 +170,19 @@ impl NameBase {
 
     /// Returns the kind and text of each name that
     /// [`read_sn4`](Self::read_sn4) read from bytes that weren't valid UTF-8,
-    /// in the order the file stores them.
+    /// in the order the file stores them. A [`Database`](crate::Database)
+    /// empties the list once it has written the names as UTF-8.
     ///
     /// Older versions of SCID store the bytes of a Latin-1 or Windows-1252
     /// PGN file unchanged, so their name files can hold such names.
     pub fn converted_names(&self) -> &[(NameType, String)] {
         &self.converted
+    }
+
+    /// Empties the list of [`converted_names`](Self::converted_names), once
+    /// the names have been written as UTF-8.
+    pub(crate) fn clear_converted(&mut self) {
+        self.converted.clear();
     }
 
     /// Returns the highest frequency of any name of kind `ntype`.
@@ -558,7 +565,9 @@ impl NameBase {
 
                 let (name, converted) = decode_name(&name_bytes);
                 let name: String = name.chars().filter(|&c| c >= ' ').collect();
-                let clean_name = stored_name(name.trim()).to_string();
+                // The cut can leave spaces at the end, which reading the
+                // name again would remove.
+                let clean_name = stored_name(name.trim()).trim_end().to_string();
                 if converted {
                     self.converted.push((ntype, clean_name.clone()));
                 }
@@ -967,6 +976,24 @@ mod tests {
         let name = "é".repeat(127);
         assert_eq!(nb.get_name(NameType::Player, 0), Some(name.as_str()));
         assert_eq!(nb.converted_names(), [(NameType::Player, name.clone())]);
+
+        let mut file = Vec::new();
+        nb.write_sn4(&mut file).unwrap();
+        assert_eq!(
+            read(&file).get_name(NameType::Player, 0),
+            Some(name.as_str())
+        );
+    }
+
+    #[test]
+    fn test_read_removes_spaces_the_cut_leaves_at_the_end() {
+        // 127 é and a space are 255 bytes of UTF-8, and the é after them is
+        // cut, which would leave the space at the end.
+        let mut stored = vec![0xe9; 127];
+        stored.extend([b' ', 0xe9]);
+        let nb = read(&sn4_with_players(&[(0, 1, 0, &stored)]));
+        let name = "é".repeat(127);
+        assert_eq!(nb.get_name(NameType::Player, 0), Some(name.as_str()));
 
         let mut file = Vec::new();
         nb.write_sn4(&mut file).unwrap();

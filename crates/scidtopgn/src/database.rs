@@ -880,6 +880,7 @@ impl Database {
             *self.nfile.namebase_mut() = namebase;
         } else {
             self.nfile.close()?;
+            self.nfile.namebase_mut().clear_converted();
 
             let si4_path = self.path.with_extension("si4");
             let file = File::create(&si4_path)?;
@@ -1059,6 +1060,7 @@ impl Database {
         gfile.close()?;
 
         namebase.clear_frequencies();
+        namebase.clear_converted();
         for entry in index.entries() {
             count_names(&mut namebase, entry, NameBase::increment_frequency);
         }
@@ -1093,8 +1095,10 @@ impl Database {
     /// does. As in SCID, a name that only logically deleted games use is
     /// kept; call [`compact_games`](Self::compact_games) first to drop it.
     /// Names that read the same are merged, as [`flush`](Self::flush)
-    /// merges them. If every name is used and none are merged, no file is
-    /// changed.
+    /// merges them. If every name is used and none are merged, the IDs
+    /// don't change: the name file is written again only if it held names
+    /// that weren't UTF-8, which it then stores as UTF-8, and otherwise no
+    /// file is changed.
     ///
     /// Any unwritten changes are written first, as [`flush`](Self::flush)
     /// writes them. The new name file and index file are written in a
@@ -1149,6 +1153,14 @@ impl Database {
             }
         }
         let Some((namebase, new_ids)) = counted.without_unused() else {
+            if counted.converted_names().is_empty() {
+                return Ok(());
+            }
+            let mut new = NewFiles::new(&self.path)?;
+            write_names(&counted, new.create("sn4")?)?;
+            new.replace()?;
+            counted.clear_converted();
+            *self.nfile.namebase_mut() = counted;
             return Ok(());
         };
         let mut index = renumbered(&self.index, &new_ids)?;
