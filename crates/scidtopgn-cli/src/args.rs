@@ -7,14 +7,17 @@ use clap::parser::ValueSource;
 use clap::{ArgMatches, Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 
 use crate::report::Verbosity;
+use crate::search::SearchArgs;
 use crate::selection::GameSelection;
 
 /// Help for `--count`, shared by the default invocation and `export`.
-const COUNT_HELP: &str = "Show the number of games stored and exit. This includes logically \
-                          deleted games, so it can be more than the number exported";
+const COUNT_HELP: &str = "Show the number of games stored and exit, or with search options, \
+                          the number that match. This includes logically deleted games, so \
+                          it can be more than the number exported";
 /// Help for `--games`, shared by the default invocation and `export`.
 const GAMES_HELP: &str = "Export only these games, numbered from 1, such as 10-20 or 1-5,8. \
-                          Logically deleted games are still skipped";
+                          With search options, a game must also match them. Logically \
+                          deleted games are still skipped";
 /// Help for `--quiet`, shared by every command.
 const QUIET_HELP: &str = "Write nothing to stderr, not even errors. The exit status still \
                           shows whether the command failed";
@@ -59,6 +62,9 @@ pub struct Cli {
         help = LOG_HELP
     )]
     pub log: Option<PathBuf>,
+
+    #[command(flatten)]
+    pub search: SearchArgs,
 }
 
 impl Cli {
@@ -82,7 +88,7 @@ impl Cli {
     /// both.
     pub fn into_command(self) -> Option<Command> {
         match (self.database, self.command) {
-            (Some(database), None) => Some(Command::Export(ExportArgs {
+            (Some(database), None) => Some(Command::Export(Box::new(ExportArgs {
                 database,
                 output: self.output,
                 count: self.count,
@@ -91,7 +97,8 @@ impl Cli {
                 verbose: self.verbose,
                 quiet: self.quiet,
                 log: self.log,
-            })),
+                search: self.search,
+            }))),
             (None, Some(command)) => Some(command),
             _ => None,
         }
@@ -262,7 +269,7 @@ pub fn describe_words(args: &[OsString]) -> String {
 #[derive(Subcommand)]
 pub enum Command {
     /// Export SCID database to PGN format
-    Export(ExportArgs),
+    Export(Box<ExportArgs>),
     /// Import PGN file to SCID database
     Import(ImportArgs),
     /// Show the number of games and names in a SCID database
@@ -352,6 +359,9 @@ pub struct ExportArgs {
         help = LOG_HELP
     )]
     pub log: Option<PathBuf>,
+
+    #[command(flatten)]
+    pub search: SearchArgs,
 }
 
 #[derive(Args)]
@@ -508,6 +518,16 @@ mod tests {
             &["validate", "mydb", "-q", "--log", "run.log"],
             &["merge", "db1", "db2", "-o", "merged", "--overwrite"],
             &["merge", "db1", "-o", "merged", "-qv", "--log", "run.log"],
+            &["mydb", "--white", "Carlsen", "--elo-diff", "-100..100"],
+            &[
+                "export",
+                "mydb",
+                "--elo-diff=-100..",
+                "--flag",
+                "comments=yes",
+                "--flag",
+                "deleted=no",
+            ],
         ] {
             assert!(parse(args).is_ok(), "{args:?}");
         }
@@ -575,6 +595,10 @@ mod tests {
             ),
             // Options go before the end of options.
             (&["-q", "export", "--", "mydb"], "export -q -- mydb"),
+            (
+                &["--white", "Carlsen", "--ignore-colors", "export", "mydb"],
+                "export mydb --white Carlsen --ignore-colors",
+            ),
         ];
         if cfg!(windows) {
             cases.push((

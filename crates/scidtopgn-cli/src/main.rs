@@ -1,5 +1,6 @@
 mod args;
 mod report;
+mod search;
 mod selection;
 
 use std::fs::File;
@@ -100,29 +101,50 @@ fn export_command(args: &ExportArgs, reporter: &Reporter) -> Result<()> {
         }
     }
 
+    let search = args.search.to_search()?;
+
     let mut db = Database::open_read_only(&args.database)
         .with_context(|| format!("Failed to open database '{}'", args.database))?;
     warn_converted_names(reporter, db.nfile().namebase());
 
+    let matches = match &search {
+        Some(search) => {
+            let matches = db
+                .search_header(search)
+                .with_context(|| format!("Failed to search database '{}'", args.database))?;
+            reporter.info(format_args!("{} games match the search.", matches.len()));
+            Some(matches)
+        }
+        None => None,
+    };
+
     if args.count {
-        writeln!(std::io::stdout(), "{} games", db.num_games())?;
+        let count = matches.map_or(db.num_games(), |matches| matches.len() as u32);
+        writeln!(std::io::stdout(), "{count} games")?;
         return Ok(());
     }
 
     let total = db.num_games();
     // Check the selection before creating the output file.
-    let (selected, indexes): (u32, Box<dyn Iterator<Item = u32>>) = match &args.games {
-        Some(games) => {
-            if games.last() > total {
-                anyhow::bail!(
-                    "--games: no game {} in the database, which has {} games",
-                    games.last(),
-                    total
-                );
-            }
-            (games.count(), Box::new(games.indexes()))
+    if let Some(games) = &args.games {
+        if games.last() > total {
+            anyhow::bail!(
+                "--games: no game {} in the database, which has {} games",
+                games.last(),
+                total
+            );
         }
-        None => (total, Box::new(0..total)),
+    }
+    let (selected, indexes): (u32, Box<dyn Iterator<Item = u32>>) = match (matches, &args.games) {
+        (Some(matches), games) => {
+            let matches: Vec<u32> = matches
+                .into_iter()
+                .filter(|&i| games.as_ref().is_none_or(|games| games.contains(i)))
+                .collect();
+            (matches.len() as u32, Box::new(matches.into_iter()))
+        }
+        (None, Some(games)) => (games.count(), Box::new(games.indexes())),
+        (None, None) => (total, Box::new(0..total)),
     };
 
     let mut writer: Box<dyn Write> = match &args.output {

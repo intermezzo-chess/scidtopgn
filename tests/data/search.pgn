@@ -1,0 +1,293 @@
+[Event "Norway Chess"]
+[Site "Stavanger NOR"]
+[Date "2023.06.01"]
+[Round "1"]
+[White "Carlsen, Magnus"]
+[Black "Caruana, Fabiano"]
+[Result "1-0"]
+[WhiteElo "2850"]
+[BlackElo "2800"]
+[ECO "B20"]
+
+1. e4 c5 2. Nf3 d6 1-0
+
+[Event "Norway Chess"]
+[Site "Stavanger NOR"]
+[Date "2023.06.02"]
+[Round "2"]
+[White "Caruana, Fabiano"]
+[Black "Carlsen, Magnus"]
+[Result "0-1"]
+[WhiteElo "2790"]
+[BlackElo "2855"]
+[ECO "B99"]
+
+1. e4 c5 2. Nf3 d6 3. d4 0-1
+
+[Event "Casual game"]
+[Site "Oslo NOR"]
+[Date "2023.??.??"]
+[Round "?"]
+[White "Carlsen, Magnus"]
+[Black "Nepomniachtchi, Ian"]
+[Result "1/2-1/2"]
+[BlackElo "2790"]
+
+1. d4 d5 1/2-1/2
+
+[Event "World Championship 2021"]
+[Site "Dubai UAE"]
+[Date "2021.12.03"]
+[Round "6"]
+[White "Nepomniachtchi, Ian"]
+[Black "Carlsen, Magnus"]
+[Result "0-1"]
+[WhiteElo "2795"]
+[ECO "D02"]
+
+1. d4 d5 2. Nf3 Nf6 3. g3 0-1
+
+[Event "Hoogovens"]
+[Site "Wijk aan Zee NED"]
+[Date "1985.01.??"]
+[Round "1.2"]
+[White "van der Wiel, John"]
+[Black "Doe,John"]
+[Result "1-0"]
+[WhiteElo "2500"]
+[BlackElo "2100"]
+[ECO "B07a"]
+
+1. e4 d6 2. d4 Nf6 3. Nc3 g6 1-0
+
+[Event "Hoogovens"]
+[Site "Wijk aan Zee NED"]
+[Date "1985.??.??"]
+[Round "1.3"]
+[White "Doe,John"]
+[Black "van der Wiel, John"]
+[Result "*"]
+[BlackElo "2490"]
+[ECO "B07z4"]
+
+1. e4 d6 *
+
+[Event "Chennai Open"]
+[Site "Chennai IND"]
+[Date "2010.05.05"]
+[Round "12"]
+[White "Anand, Viswanathan"]
+[Black "Anand, Aruna"]
+[Result "1-0"]
+[WhiteElo "2750"]
+[BlackElo "1800"]
+[ECO "B08"]
+
+1. e4 d6 2. d4 Nf6 3. Nc3 g6 4. Nf3 Bg7 1-0
+
+[Event "Chennai Open"]
+[Site "Chennai IND"]
+[Date "2010.05.06"]
+[Round "13"]
+[White "Anand, Aruna"]
+[Black "Anand, Viswanathan"]
+[Result "0-1"]
+[WhiteElo "1810"]
+[BlackElo "2760"]
+[ECO "B06"]
+
+1. e4 g6 2. d4 Bg7 0-1
+
+[Event "Bundesliga"]
+[Site "Berlin GER"]
+[Date "2005.03.12"]
+[Round "3"]
+[White "Polgar, Judit"]
+[Black "Müller, Hans"]
+[Result "1/2-1/2"]
+[WhiteElo "2735"]
+[BlackElo "2400"]
+[ECO "A00"]
+
+{A comment before the game} 1. a3 {A comment} e5 1/2-1/2
+
+[Event "Bundesliga"]
+[Site "Berlin GER"]
+[Date "2005.03.13"]
+[Round "4"]
+[White "MÜLLER, Karl"]
+[Black "Polgar, Judit"]
+[Result "0-1"]
+[WhiteElo "2300"]
+[BlackElo "2700"]
+[ECO "E99"]
+
+1. d4 Nf6 (1... d5 2. c4) 2. c4 g6 0-1
+
+[Event "Club Championship"]
+[Site "London ENG"]
+[Date "2015.09.01"]
+[Round "1"]
+[White "Smith [A]"]
+[Black "Smith, Bob"]
+[Result "1-0"]
+[WhiteElo "2200"]
+[BlackElo "2210"]
+[ECO "C42"]
+
+1. e4 $1 e5 2. Nf3 Nf6 $2 1-0
+
+[Event "Club Championship"]
+[Site "London ENG"]
+[Date "2015.09.08"]
+[Round "2"]
+[White "Smith, Bob"]
+[Black "Smith [A]"]
+[Result "1/2-1/2"]
+[WhiteElo "2205"]
+[BlackElo "2195"]
+[ECO "C42"]
+
+1. e4 e5 2. Nf3 Nf6 3. Nxe5 1/2-1/2
+
+[Event "Casual game"]
+[Site "?"]
+[Date "????.??.??"]
+[Round "?"]
+[White "Unrated, Ursula"]
+[Black "Unrated, Ulrich"]
+[Result "*"]
+
+*
+
+[Event "?"]
+[Site "?"]
+[Date "????.??.??"]
+[Round "?"]
+[White "?"]
+[Black "?"]
+[Result "*"]
+
+*
+
+[Event "Studies"]
+[Site "?"]
+[Date "1999.12.31"]
+[Round "?"]
+[White "Study, Composer"]
+[Black "Study, Solver"]
+[Result "1-0"]
+[SetUp "1"]
+[FEN "8/P7/8/8/8/8/8/k6K w - - 0 1"]
+
+1. a8=Q+ 1-0
+
+[Event "Studies"]
+[Site "?"]
+[Date "1999.12.30"]
+[Round "?"]
+[White "Study, Solver"]
+[Black "Study, Composer"]
+[Result "0-1"]
+[SetUp "1"]
+[FEN "k7/8/8/8/8/8/p7/7K b - - 0 1"]
+
+1... a1=N 0-1
+
+[Event "Marathon"]
+[Site "Reykjavik ISL"]
+[Date "2020.02.02"]
+[Round "1"]
+[White "Carlsen, Magnus"]
+[Black "Caruana, Fabiano"]
+[Result "1/2-1/2"]
+[WhiteElo "2862"]
+[BlackElo "2822"]
+[ECO "A05"]
+
+1. Nf3 Nf6 2. Ng1 Ng8 3. Nf3 Nf6 4. Ng1 Ng8 5. Nf3 Nf6 6. Ng1 Ng8 7. Nf3 Nf6 8. Ng1 Ng8 9. Nf3 Nf6 10. Ng1 Ng8 11. Nf3 Nf6 12. Ng1 Ng8 13. Nf3 Nf6 14. Ng1 Ng8 15. Nf3 Nf6 16. Ng1 Ng8 17. Nf3 Nf6 18. Ng1 Ng8 19. Nf3 Nf6 20. Ng1 Ng8 21. Nf3 Nf6 22. Ng1 Ng8 23. Nf3 Nf6 24. Ng1 Ng8 25. Nf3 Nf6 26. Ng1 Ng8 27. Nf3 Nf6 28. Ng1 Ng8 29. Nf3 Nf6 30. Ng1 Ng8 31. Nf3 Nf6 32. Ng1 Ng8 33. Nf3 Nf6 34. Ng1 Ng8 35. Nf3 Nf6 36. Ng1 Ng8 37. Nf3 Nf6 38. Ng1 Ng8 39. Nf3 Nf6 40. Ng1 Ng8 41. Nf3 Nf6 42. Ng1 Ng8 43. Nf3 Nf6 44. Ng1 Ng8 45. Nf3 Nf6 46. Ng1 Ng8 47. Nf3 Nf6 48. Ng1 Ng8 49. Nf3 Nf6 50. Ng1 Ng8 51. Nf3 Nf6 52. Ng1 Ng8 53. Nf3 Nf6 54. Ng1 Ng8 55. Nf3 Nf6 56. Ng1 Ng8 57. Nf3 Nf6 58. Ng1 Ng8 59. Nf3 Nf6 60. Ng1 Ng8 61. Nf3 Nf6 62. Ng1 Ng8 63. Nf3 Nf6 64. Ng1 Ng8 65. Nf3 Nf6 66. Ng1 Ng8 67. Nf3 Nf6 68. Ng1 Ng8 69. Nf3 Nf6 70. Ng1 Ng8 71. Nf3 Nf6 72. Ng1 Ng8 73. Nf3 Nf6 74. Ng1 Ng8 75. Nf3 Nf6 76. Ng1 Ng8 77. Nf3 Nf6 78. Ng1 Ng8 79. Nf3 Nf6 80. Ng1 Ng8 81. Nf3 Nf6 82. Ng1 Ng8 83. Nf3 Nf6 84. Ng1 Ng8 85. Nf3 Nf6 86. Ng1 Ng8 87. Nf3 Nf6 88. Ng1 Ng8 89. Nf3 Nf6 90. Ng1 Ng8 91. Nf3 Nf6 92. Ng1 Ng8 93. Nf3 Nf6 94. Ng1 Ng8 95. Nf3 Nf6 96. Ng1 Ng8 97. Nf3 Nf6 98. Ng1 Ng8 99. Nf3 Nf6 100. Ng1 Ng8 101. Nf3 Nf6 102. Ng1 Ng8 103. Nf3 Nf6 104. Ng1 Ng8 105. Nf3 Nf6 106. Ng1 Ng8 107. Nf3 Nf6 108. Ng1 Ng8 109. Nf3 Nf6 110. Ng1 Ng8 111. Nf3 Nf6 112. Ng1 Ng8 113. Nf3 Nf6 114. Ng1 Ng8 115. Nf3 Nf6 116. Ng1 Ng8 117. Nf3 Nf6 118. Ng1 Ng8 119. Nf3 Nf6 120. Ng1 Ng8 121. Nf3 Nf6 122. Ng1 Ng8 123. Nf3 Nf6 124. Ng1 Ng8 125. Nf3 Nf6 126. Ng1 Ng8 127. Nf3 Nf6 128. Ng1 Ng8 129. Nf3 Nf6 130. Ng1 Ng8 131. Nf3 Nf6 132. Ng1 Ng8 133. Nf3 Nf6 134. Ng1 Ng8 135. Nf3 Nf6 136. Ng1 Ng8 137. Nf3 Nf6 138. Ng1 Ng8 139. Nf3 Nf6 140. Ng1 Ng8 141. Nf3 Nf6 142. Ng1 Ng8 143. Nf3 Nf6 144. Ng1 Ng8 145. Nf3 Nf6 146. Ng1 Ng8 147. Nf3 Nf6 148. Ng1 Ng8 149. Nf3 Nf6 150. Ng1 Ng8 151. Nf3 Nf6 152. Ng1 Ng8 153. Nf3 Nf6 154. Ng1 Ng8 155. Nf3 Nf6 156. Ng1 Ng8 157. Nf3 Nf6 158. Ng1 Ng8 159. Nf3 Nf6 160. Ng1 Ng8 161. Nf3 Nf6 162. Ng1 Ng8 163. Nf3 Nf6 164. Ng1 Ng8 165. Nf3 Nf6 166. Ng1 Ng8 167. Nf3 Nf6 168. Ng1 Ng8 169. Nf3 Nf6 170. Ng1 Ng8 171. Nf3 Nf6 172. Ng1 Ng8 173. Nf3 Nf6 174. Ng1 Ng8 175. Nf3 Nf6 176. Ng1 Ng8 177. Nf3 Nf6 178. Ng1 Ng8 179. Nf3 Nf6 180. Ng1 Ng8 181. Nf3 Nf6 182. Ng1 Ng8 183. Nf3 Nf6 184. Ng1 Ng8 185. Nf3 Nf6 186. Ng1 Ng8 187. Nf3 Nf6 188. Ng1 Ng8 189. Nf3 Nf6 190. Ng1 Ng8 191. Nf3 Nf6 192. Ng1 Ng8 193. Nf3 Nf6 194. Ng1 Ng8 195. Nf3 Nf6 196. Ng1 Ng8 197. Nf3 Nf6 198. Ng1 Ng8 199. Nf3 Nf6 200. Ng1 Ng8 201. Nf3 Nf6 202. Ng1 Ng8 203. Nf3 Nf6 204. Ng1 Ng8 205. Nf3 Nf6 206. Ng1 Ng8 207. Nf3 Nf6 208. Ng1 Ng8 209. Nf3 Nf6 210. Ng1 Ng8 211. Nf3 Nf6 212. Ng1 Ng8 213. Nf3 Nf6 214. Ng1 Ng8 215. Nf3 Nf6 216. Ng1 Ng8 217. Nf3 Nf6 218. Ng1 Ng8 219. Nf3 Nf6 220. Ng1 Ng8 221. Nf3 Nf6 222. Ng1 Ng8 223. Nf3 Nf6 224. Ng1 Ng8 225. Nf3 Nf6 226. Ng1 Ng8 227. Nf3 Nf6 228. Ng1 Ng8 229. Nf3 Nf6 230. Ng1 Ng8 231. Nf3 Nf6 232. Ng1 Ng8 233. Nf3 Nf6 234. Ng1 Ng8 235. Nf3 Nf6 236. Ng1 Ng8 237. Nf3 Nf6 238. Ng1 Ng8 239. Nf3 Nf6 240. Ng1 Ng8 241. Nf3 Nf6 242. Ng1 Ng8 243. Nf3 Nf6 244. Ng1 Ng8 245. Nf3 Nf6 246. Ng1 Ng8 247. Nf3 Nf6 248. Ng1 Ng8 249. Nf3 Nf6 250. Ng1 Ng8 251. Nf3 Nf6 252. Ng1 Ng8 253. Nf3 Nf6 254. Ng1 Ng8 255. Nf3 Nf6 256. Ng1 Ng8 257. Nf3 Nf6 258. Ng1 Ng8 259. Nf3 Nf6 260. Ng1 Ng8 261. Nf3 Nf6 262. Ng1 Ng8 263. Nf3 Nf6 264. Ng1 Ng8 265. Nf3 Nf6 266. Ng1 Ng8 267. Nf3 Nf6 268. Ng1 Ng8 269. Nf3 Nf6 270. Ng1 Ng8 271. Nf3 Nf6 272. Ng1 Ng8 273. Nf3 Nf6 274. Ng1 Ng8 275. Nf3 Nf6 276. Ng1 Ng8 277. Nf3 Nf6 278. Ng1 Ng8 279. Nf3 Nf6 280. Ng1 Ng8 281. Nf3 Nf6 282. Ng1 Ng8 283. Nf3 Nf6 284. Ng1 Ng8 285. Nf3 Nf6 286. Ng1 Ng8 287. Nf3 Nf6 288. Ng1 Ng8 289. Nf3 Nf6 290. Ng1 Ng8 291. Nf3 Nf6 292. Ng1 Ng8 293. Nf3 Nf6 294. Ng1 Ng8 295. Nf3 Nf6 296. Ng1 Ng8 297. Nf3 Nf6 298. Ng1 Ng8 299. Nf3 Nf6 300. Ng1 Ng8 301. Nf3 Nf6 302. Ng1 Ng8 303. Nf3 Nf6 304. Ng1 Ng8 305. Nf3 Nf6 306. Ng1 Ng8 307. Nf3 Nf6 308. Ng1 Ng8 309. Nf3 Nf6 310. Ng1 Ng8 311. Nf3 Nf6 312. Ng1 Ng8 313. Nf3 Nf6 314. Ng1 Ng8 315. Nf3 Nf6 316. Ng1 Ng8 317. Nf3 Nf6 318. Ng1 Ng8 319. Nf3 Nf6 320. Ng1 Ng8 321. Nf3 Nf6 322. Ng1 Ng8 323. Nf3 Nf6 324. Ng1 Ng8 325. Nf3 Nf6 326. Ng1 Ng8 327. Nf3 Nf6 328. Ng1 Ng8 329. Nf3 Nf6 330. Ng1 Ng8 331. Nf3 Nf6 332. Ng1 Ng8 333. Nf3 Nf6 334. Ng1 Ng8 335. Nf3 Nf6 336. Ng1 Ng8 337. Nf3 Nf6 338. Ng1 Ng8 339. Nf3 Nf6 340. Ng1 Ng8 341. Nf3 Nf6 342. Ng1 Ng8 343. Nf3 Nf6 344. Ng1 Ng8 345. Nf3 Nf6 346. Ng1 Ng8 347. Nf3 Nf6 348. Ng1 Ng8 349. Nf3 Nf6 350. Ng1 Ng8 351. Nf3 Nf6 352. Ng1 Ng8 353. Nf3 Nf6 354. Ng1 Ng8 355. Nf3 Nf6 356. Ng1 Ng8 357. Nf3 Nf6 358. Ng1 Ng8 359. Nf3 Nf6 360. Ng1 Ng8 361. Nf3 Nf6 362. Ng1 Ng8 363. Nf3 Nf6 364. Ng1 Ng8 365. Nf3 Nf6 366. Ng1 Ng8 367. Nf3 Nf6 368. Ng1 Ng8 369. Nf3 Nf6 370. Ng1 Ng8 371. Nf3 Nf6 372. Ng1 Ng8 373. Nf3 Nf6 374. Ng1 Ng8 375. Nf3 Nf6 376. Ng1 Ng8 377. Nf3 Nf6 378. Ng1 Ng8 379. Nf3 Nf6 380. Ng1 Ng8 381. Nf3 Nf6 382. Ng1 Ng8 383. Nf3 Nf6 384. Ng1 Ng8 385. Nf3 Nf6 386. Ng1 Ng8 387. Nf3 Nf6 388. Ng1 Ng8 389. Nf3 Nf6 390. Ng1 Ng8 391. Nf3 Nf6 392. Ng1 Ng8 393. Nf3 Nf6 394. Ng1 Ng8 395. Nf3 Nf6 396. Ng1 Ng8 397. Nf3 Nf6 398. Ng1 Ng8 399. Nf3 Nf6 400. Ng1 Ng8 401. Nf3 Nf6 402. Ng1 Ng8 403. Nf3 Nf6 404. Ng1 Ng8 405. Nf3 Nf6 406. Ng1 Ng8 407. Nf3 Nf6 408. Ng1 Ng8 409. Nf3 Nf6 410. Ng1 Ng8 411. Nf3 Nf6 412. Ng1 Ng8 413. Nf3 Nf6 414. Ng1 Ng8 415. Nf3 Nf6 416. Ng1 Ng8 417. Nf3 Nf6 418. Ng1 Ng8 419. Nf3 Nf6 420. Ng1 Ng8 421. Nf3 Nf6 422. Ng1 Ng8 423. Nf3 Nf6 424. Ng1 Ng8 425. Nf3 Nf6 426. Ng1 Ng8 427. Nf3 Nf6 428. Ng1 Ng8 429. Nf3 Nf6 430. Ng1 Ng8 431. Nf3 Nf6 432. Ng1 Ng8 433. Nf3 Nf6 434. Ng1 Ng8 435. Nf3 Nf6 436. Ng1 Ng8 437. Nf3 Nf6 438. Ng1 Ng8 439. Nf3 Nf6 440. Ng1 Ng8 441. Nf3 Nf6 442. Ng1 Ng8 443. Nf3 Nf6 444. Ng1 Ng8 445. Nf3 Nf6 446. Ng1 Ng8 447. Nf3 Nf6 448. Ng1 Ng8 449. Nf3 Nf6 450. Ng1 Ng8 451. Nf3 Nf6 452. Ng1 Ng8 453. Nf3 Nf6 454. Ng1 Ng8 455. Nf3 Nf6 456. Ng1 Ng8 457. Nf3 Nf6 458. Ng1 Ng8 459. Nf3 Nf6 460. Ng1 Ng8 461. Nf3 Nf6 462. Ng1 Ng8 463. Nf3 Nf6 464. Ng1 Ng8 465. Nf3 Nf6 466. Ng1 Ng8 467. Nf3 Nf6 468. Ng1 Ng8 469. Nf3 Nf6 470. Ng1 Ng8 471. Nf3 Nf6 472. Ng1 Ng8 473. Nf3 Nf6 474. Ng1 Ng8 475. Nf3 Nf6 476. Ng1 Ng8 477. Nf3 Nf6 478. Ng1 Ng8 479. Nf3 Nf6 480. Ng1 Ng8 481. Nf3 Nf6 482. Ng1 Ng8 483. Nf3 Nf6 484. Ng1 Ng8 485. Nf3 Nf6 486. Ng1 Ng8 487. Nf3 Nf6 488. Ng1 Ng8 489. Nf3 Nf6 490. Ng1 Ng8 491. Nf3 Nf6 492. Ng1 Ng8 493. Nf3 Nf6 494. Ng1 Ng8 495. Nf3 Nf6 496. Ng1 Ng8 497. Nf3 Nf6 498. Ng1 Ng8 499. Nf3 Nf6 500. Ng1 Ng8 501. Nf3 Nf6 502. Ng1 Ng8 503. Nf3 Nf6 504. Ng1 Ng8 505. Nf3 Nf6 1/2-1/2
+
+[Event "Marathon"]
+[Site "Reykjavik ISL"]
+[Date "2020.02.03"]
+[Round "2"]
+[White "Caruana, Fabiano"]
+[Black "Carlsen, Magnus"]
+[Result "1/2-1/2"]
+[WhiteElo "2822"]
+[BlackElo "2862"]
+[ECO "A05"]
+
+1. Nf3 Nf6 2. Ng1 Ng8 3. Nf3 Nf6 4. Ng1 Ng8 5. Nf3 Nf6 6. Ng1 Ng8 7. Nf3 Nf6 8. Ng1 Ng8 9. Nf3 Nf6 10. Ng1 Ng8 11. Nf3 Nf6 12. Ng1 Ng8 13. Nf3 Nf6 14. Ng1 Ng8 15. Nf3 Nf6 16. Ng1 Ng8 17. Nf3 Nf6 18. Ng1 Ng8 19. Nf3 Nf6 20. Ng1 Ng8 21. Nf3 Nf6 22. Ng1 Ng8 23. Nf3 Nf6 24. Ng1 Ng8 25. Nf3 Nf6 26. Ng1 Ng8 27. Nf3 Nf6 28. Ng1 Ng8 29. Nf3 Nf6 30. Ng1 Ng8 31. Nf3 Nf6 32. Ng1 Ng8 33. Nf3 Nf6 34. Ng1 Ng8 35. Nf3 Nf6 36. Ng1 Ng8 37. Nf3 Nf6 38. Ng1 Ng8 39. Nf3 Nf6 40. Ng1 Ng8 41. Nf3 Nf6 42. Ng1 Ng8 43. Nf3 Nf6 44. Ng1 Ng8 45. Nf3 Nf6 46. Ng1 Ng8 47. Nf3 Nf6 48. Ng1 Ng8 49. Nf3 Nf6 50. Ng1 Ng8 51. Nf3 Nf6 52. Ng1 Ng8 53. Nf3 Nf6 54. Ng1 Ng8 55. Nf3 Nf6 56. Ng1 Ng8 57. Nf3 Nf6 58. Ng1 Ng8 59. Nf3 Nf6 60. Ng1 Ng8 61. Nf3 Nf6 62. Ng1 Ng8 63. Nf3 Nf6 64. Ng1 Ng8 65. Nf3 Nf6 66. Ng1 Ng8 67. Nf3 Nf6 68. Ng1 Ng8 69. Nf3 Nf6 70. Ng1 Ng8 71. Nf3 Nf6 72. Ng1 Ng8 73. Nf3 Nf6 74. Ng1 Ng8 75. Nf3 Nf6 76. Ng1 Ng8 77. Nf3 Nf6 78. Ng1 Ng8 79. Nf3 Nf6 80. Ng1 Ng8 81. Nf3 Nf6 82. Ng1 Ng8 83. Nf3 Nf6 84. Ng1 Ng8 85. Nf3 Nf6 86. Ng1 Ng8 87. Nf3 Nf6 88. Ng1 Ng8 89. Nf3 Nf6 90. Ng1 Ng8 91. Nf3 Nf6 92. Ng1 Ng8 93. Nf3 Nf6 94. Ng1 Ng8 95. Nf3 Nf6 96. Ng1 Ng8 97. Nf3 Nf6 98. Ng1 Ng8 99. Nf3 Nf6 100. Ng1 Ng8 101. Nf3 Nf6 102. Ng1 Ng8 103. Nf3 Nf6 104. Ng1 Ng8 105. Nf3 Nf6 106. Ng1 Ng8 107. Nf3 Nf6 108. Ng1 Ng8 109. Nf3 Nf6 110. Ng1 Ng8 111. Nf3 Nf6 112. Ng1 Ng8 113. Nf3 Nf6 114. Ng1 Ng8 115. Nf3 Nf6 116. Ng1 Ng8 117. Nf3 Nf6 118. Ng1 Ng8 119. Nf3 Nf6 120. Ng1 Ng8 121. Nf3 Nf6 122. Ng1 Ng8 123. Nf3 Nf6 124. Ng1 Ng8 125. Nf3 Nf6 126. Ng1 Ng8 127. Nf3 Nf6 128. Ng1 Ng8 129. Nf3 Nf6 130. Ng1 Ng8 131. Nf3 Nf6 132. Ng1 Ng8 133. Nf3 Nf6 134. Ng1 Ng8 135. Nf3 Nf6 136. Ng1 Ng8 137. Nf3 Nf6 138. Ng1 Ng8 139. Nf3 Nf6 140. Ng1 Ng8 141. Nf3 Nf6 142. Ng1 Ng8 143. Nf3 Nf6 144. Ng1 Ng8 145. Nf3 Nf6 146. Ng1 Ng8 147. Nf3 Nf6 148. Ng1 Ng8 149. Nf3 Nf6 150. Ng1 Ng8 151. Nf3 Nf6 152. Ng1 Ng8 153. Nf3 Nf6 154. Ng1 Ng8 155. Nf3 Nf6 156. Ng1 Ng8 157. Nf3 Nf6 158. Ng1 Ng8 159. Nf3 Nf6 160. Ng1 Ng8 161. Nf3 Nf6 162. Ng1 Ng8 163. Nf3 Nf6 164. Ng1 Ng8 165. Nf3 Nf6 166. Ng1 Ng8 167. Nf3 Nf6 168. Ng1 Ng8 169. Nf3 Nf6 170. Ng1 Ng8 171. Nf3 Nf6 172. Ng1 Ng8 173. Nf3 Nf6 174. Ng1 Ng8 175. Nf3 Nf6 176. Ng1 Ng8 177. Nf3 Nf6 178. Ng1 Ng8 179. Nf3 Nf6 180. Ng1 Ng8 181. Nf3 Nf6 182. Ng1 Ng8 183. Nf3 Nf6 184. Ng1 Ng8 185. Nf3 Nf6 186. Ng1 Ng8 187. Nf3 Nf6 188. Ng1 Ng8 189. Nf3 Nf6 190. Ng1 Ng8 191. Nf3 Nf6 192. Ng1 Ng8 193. Nf3 Nf6 194. Ng1 Ng8 195. Nf3 Nf6 196. Ng1 Ng8 197. Nf3 Nf6 198. Ng1 Ng8 199. Nf3 Nf6 200. Ng1 Ng8 201. Nf3 Nf6 202. Ng1 Ng8 203. Nf3 Nf6 204. Ng1 Ng8 205. Nf3 Nf6 206. Ng1 Ng8 207. Nf3 Nf6 208. Ng1 Ng8 209. Nf3 Nf6 210. Ng1 Ng8 211. Nf3 Nf6 212. Ng1 Ng8 213. Nf3 Nf6 214. Ng1 Ng8 215. Nf3 Nf6 216. Ng1 Ng8 217. Nf3 Nf6 218. Ng1 Ng8 219. Nf3 Nf6 220. Ng1 Ng8 221. Nf3 Nf6 222. Ng1 Ng8 223. Nf3 Nf6 224. Ng1 Ng8 225. Nf3 Nf6 226. Ng1 Ng8 227. Nf3 Nf6 228. Ng1 Ng8 229. Nf3 Nf6 230. Ng1 Ng8 231. Nf3 Nf6 232. Ng1 Ng8 233. Nf3 Nf6 234. Ng1 Ng8 235. Nf3 Nf6 236. Ng1 Ng8 237. Nf3 Nf6 238. Ng1 Ng8 239. Nf3 Nf6 240. Ng1 Ng8 241. Nf3 Nf6 242. Ng1 Ng8 243. Nf3 Nf6 244. Ng1 Ng8 245. Nf3 Nf6 246. Ng1 Ng8 247. Nf3 Nf6 248. Ng1 Ng8 249. Nf3 Nf6 250. Ng1 Ng8 251. Nf3 Nf6 252. Ng1 Ng8 253. Nf3 Nf6 254. Ng1 Ng8 255. Nf3 Nf6 256. Ng1 Ng8 257. Nf3 Nf6 258. Ng1 Ng8 259. Nf3 Nf6 260. Ng1 Ng8 261. Nf3 Nf6 262. Ng1 Ng8 263. Nf3 Nf6 264. Ng1 Ng8 265. Nf3 Nf6 266. Ng1 Ng8 267. Nf3 Nf6 268. Ng1 Ng8 269. Nf3 Nf6 270. Ng1 Ng8 271. Nf3 Nf6 272. Ng1 Ng8 273. Nf3 Nf6 274. Ng1 Ng8 275. Nf3 Nf6 276. Ng1 Ng8 277. Nf3 Nf6 278. Ng1 Ng8 279. Nf3 Nf6 280. Ng1 Ng8 281. Nf3 Nf6 282. Ng1 Ng8 283. Nf3 Nf6 284. Ng1 Ng8 285. Nf3 Nf6 286. Ng1 Ng8 287. Nf3 Nf6 288. Ng1 Ng8 289. Nf3 Nf6 290. Ng1 Ng8 291. Nf3 Nf6 292. Ng1 Ng8 293. Nf3 Nf6 294. Ng1 Ng8 295. Nf3 Nf6 296. Ng1 Ng8 297. Nf3 Nf6 298. Ng1 Ng8 299. Nf3 Nf6 300. Ng1 Ng8 301. Nf3 Nf6 302. Ng1 Ng8 303. Nf3 Nf6 304. Ng1 Ng8 305. Nf3 Nf6 306. Ng1 Ng8 307. Nf3 Nf6 308. Ng1 Ng8 309. Nf3 Nf6 310. Ng1 Ng8 311. Nf3 Nf6 312. Ng1 Ng8 313. Nf3 Nf6 314. Ng1 Ng8 315. Nf3 Nf6 316. Ng1 Ng8 317. Nf3 Nf6 318. Ng1 Ng8 319. Nf3 Nf6 320. Ng1 Ng8 321. Nf3 Nf6 322. Ng1 Ng8 323. Nf3 Nf6 324. Ng1 Ng8 325. Nf3 Nf6 326. Ng1 Ng8 327. Nf3 Nf6 328. Ng1 Ng8 329. Nf3 Nf6 330. Ng1 Ng8 331. Nf3 Nf6 332. Ng1 Ng8 333. Nf3 Nf6 334. Ng1 Ng8 335. Nf3 Nf6 336. Ng1 Ng8 337. Nf3 Nf6 338. Ng1 Ng8 339. Nf3 Nf6 340. Ng1 Ng8 341. Nf3 Nf6 342. Ng1 Ng8 343. Nf3 Nf6 344. Ng1 Ng8 345. Nf3 Nf6 346. Ng1 Ng8 347. Nf3 Nf6 348. Ng1 Ng8 349. Nf3 Nf6 350. Ng1 Ng8 351. Nf3 Nf6 352. Ng1 Ng8 353. Nf3 Nf6 354. Ng1 Ng8 355. Nf3 Nf6 356. Ng1 Ng8 357. Nf3 Nf6 358. Ng1 Ng8 359. Nf3 Nf6 360. Ng1 Ng8 361. Nf3 Nf6 362. Ng1 Ng8 363. Nf3 Nf6 364. Ng1 Ng8 365. Nf3 Nf6 366. Ng1 Ng8 367. Nf3 Nf6 368. Ng1 Ng8 369. Nf3 Nf6 370. Ng1 Ng8 371. Nf3 Nf6 372. Ng1 Ng8 373. Nf3 Nf6 374. Ng1 Ng8 375. Nf3 Nf6 376. Ng1 Ng8 377. Nf3 Nf6 378. Ng1 Ng8 379. Nf3 Nf6 380. Ng1 Ng8 381. Nf3 Nf6 382. Ng1 Ng8 383. Nf3 Nf6 384. Ng1 Ng8 385. Nf3 Nf6 386. Ng1 Ng8 387. Nf3 Nf6 388. Ng1 Ng8 389. Nf3 Nf6 390. Ng1 Ng8 391. Nf3 Nf6 392. Ng1 Ng8 393. Nf3 Nf6 394. Ng1 Ng8 395. Nf3 Nf6 396. Ng1 Ng8 397. Nf3 Nf6 398. Ng1 Ng8 399. Nf3 Nf6 400. Ng1 Ng8 401. Nf3 Nf6 402. Ng1 Ng8 403. Nf3 Nf6 404. Ng1 Ng8 405. Nf3 Nf6 406. Ng1 Ng8 407. Nf3 Nf6 408. Ng1 Ng8 409. Nf3 Nf6 410. Ng1 Ng8 411. Nf3 Nf6 412. Ng1 Ng8 413. Nf3 Nf6 414. Ng1 Ng8 415. Nf3 Nf6 416. Ng1 Ng8 417. Nf3 Nf6 418. Ng1 Ng8 419. Nf3 Nf6 420. Ng1 Ng8 421. Nf3 Nf6 422. Ng1 Ng8 423. Nf3 Nf6 424. Ng1 Ng8 425. Nf3 Nf6 426. Ng1 Ng8 427. Nf3 Nf6 428. Ng1 Ng8 429. Nf3 Nf6 430. Ng1 Ng8 431. Nf3 Nf6 432. Ng1 Ng8 433. Nf3 Nf6 434. Ng1 Ng8 435. Nf3 Nf6 436. Ng1 Ng8 437. Nf3 Nf6 438. Ng1 Ng8 439. Nf3 Nf6 440. Ng1 Ng8 441. Nf3 Nf6 442. Ng1 Ng8 443. Nf3 Nf6 444. Ng1 Ng8 445. Nf3 Nf6 446. Ng1 Ng8 447. Nf3 Nf6 448. Ng1 Ng8 449. Nf3 Nf6 450. Ng1 Ng8 451. Nf3 Nf6 452. Ng1 Ng8 453. Nf3 Nf6 454. Ng1 Ng8 455. Nf3 Nf6 456. Ng1 Ng8 457. Nf3 Nf6 458. Ng1 Ng8 459. Nf3 Nf6 460. Ng1 Ng8 461. Nf3 Nf6 462. Ng1 Ng8 463. Nf3 Nf6 464. Ng1 Ng8 465. Nf3 Nf6 466. Ng1 Ng8 467. Nf3 Nf6 468. Ng1 Ng8 469. Nf3 Nf6 470. Ng1 Ng8 471. Nf3 Nf6 472. Ng1 Ng8 473. Nf3 Nf6 474. Ng1 Ng8 475. Nf3 Nf6 476. Ng1 Ng8 477. Nf3 Nf6 478. Ng1 Ng8 479. Nf3 Nf6 480. Ng1 Ng8 481. Nf3 Nf6 482. Ng1 Ng8 483. Nf3 Nf6 484. Ng1 Ng8 485. Nf3 Nf6 486. Ng1 Ng8 487. Nf3 Nf6 488. Ng1 Ng8 489. Nf3 Nf6 490. Ng1 Ng8 491. Nf3 Nf6 492. Ng1 Ng8 493. Nf3 Nf6 494. Ng1 Ng8 495. Nf3 Nf6 496. Ng1 Ng8 497. Nf3 Nf6 498. Ng1 Ng8 499. Nf3 Nf6 500. Ng1 Ng8 501. Nf3 Nf6 502. Ng1 Ng8 503. Nf3 Nf6 504. Ng1 Ng8 505. Nf3 Nf6 506. Ng1 Ng8 507. Nf3 Nf6 508. Ng1 Ng8 509. Nf3 Nf6 510. Ng1 Ng8 511. Nf3 Nf6 512. Ng1 Ng8 513. Nf3 Nf6 514. Ng1 Ng8 515. Nf3 Nf6 1/2-1/2
+
+[Event "Tata Steel Masters"]
+[Site "Wijk aan Zee NED"]
+[Date "2019.01.27"]
+[Round "13"]
+[White "Carlsen, Magnus"]
+[Black "Polgar, Judit"]
+[Result "1/2-1/2"]
+[WhiteElo "2835"]
+[BlackElo "2690"]
+[ECO "B20"]
+
+1. e4 c5 1/2-1/2
+
+[Event "Sinquefield Cup"]
+[Site "Saint Louis USA"]
+[Date "2018.08.22"]
+[Round "5"]
+[White "Caruana, Fabiano"]
+[Black "Carlsen, Magnus"]
+[Result "1-0"]
+[WhiteElo "2820"]
+[BlackElo "2835"]
+[ECO "C67"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 Nf6 1-0
+
+[Event "World Championship 2023"]
+[Site "Astana KAZ"]
+[Date "2023.04.09"]
+[Round "7"]
+[White "Nepomniachtchi, Ian"]
+[Black "Ding, Liren"]
+[Result "1-0"]
+[WhiteElo "2795"]
+[BlackElo "2788"]
+[ECO "C50"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 4. O-O 1-0
+
+[Event "Promotions"]
+[Site "?"]
+[Date "2001.01.01"]
+[Round "?"]
+[White "Promoter, Paula"]
+[Black "Promoter, Peter"]
+[Result "1-0"]
+[ECO "A00"]
+
+1. h4 g5 2. hxg5 h6 3. gxh6 Nf6 4. h7 Ng8 5. hxg8=Q 1-0
+
+[Event "Promotions"]
+[Site "?"]
+[Date "2001.01.02"]
+[Round "?"]
+[White "Promoter, Peter"]
+[Black "Promoter, Paula"]
+[Result "1-0"]
+[ECO "A00"]
+
+1. h4 g5 2. hxg5 h6 3. gxh6 Nf6 4. h7 Ng8 5. hxg8=R 1-0
+
+[Event "Promotions"]
+[Site "?"]
+[Date "2001.01.03"]
+[Round "?"]
+[White "Promoter, Paula"]
+[Black "Promoter, Peter"]
+[Result "*"]
+[ECO "A00"]
+
+1. h4 g5 2. hxg5 h6 3. gxh6 Nf6 4. h7 Ng8 (4... Rg8 5. h8=Q) 5. Nf3 *

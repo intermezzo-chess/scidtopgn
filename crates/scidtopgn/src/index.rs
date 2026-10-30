@@ -595,6 +595,14 @@ impl IndexEntry {
         self.set_flag(IDX_MASK_DELETE, value);
     }
 
+    /// Returns whether custom flag `flag` is set, numbered from 1 to
+    /// [`CUSTOM_FLAG_MAX`]. Any other number returns `false`.
+    pub fn get_custom_flag(&self, flag: usize) -> bool {
+        // The custom flags are the low six bits of `length_high`, flag 1 in
+        // bit 0.
+        (1..=CUSTOM_FLAG_MAX).contains(&flag) && self.length_high & (1 << (flag - 1)) != 0
+    }
+
     /// Replaces this entry's user-settable flags with those of `other`, as
     /// SCID does when it replaces a game: the delete flag, the flags from
     /// [`IDX_MASK_WHITE_OP`] to [`IDX_MASK_USER`], and the six custom flags.
@@ -1164,6 +1172,89 @@ pub fn eco_from_string(s: &str) -> u16 {
     }
 
     eco + 1
+}
+
+/// An ECO code, such as `B36` or SCID's extended `B36f` and `B36f1`.
+///
+/// Codes compare in SCID's order, in which each code comes before its
+/// extensions: `B36` < `B36a` < `B36a1` < `B36b` < `B37`.
+///
+/// # Examples
+///
+/// ```
+/// use scidtopgn::Eco;
+///
+/// let code: Eco = "B36f".parse()?;
+/// assert_eq!(code.to_string(), "B36f");
+/// assert!(code > "B36".parse()?);
+/// assert!("B36x".parse::<Eco>().is_ok());
+/// assert!("B3".parse::<Eco>().is_err());
+/// # Ok::<(), scidtopgn::Error>(())
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Eco(u16);
+
+impl Eco {
+    /// The first code, `A00`.
+    pub const A00: Eco = Eco(1);
+    /// The last code without an extension, `E99`.
+    pub const E99: Eco = Eco(4 * 13100 + 9 * 1310 + 9 * 131 + 1);
+
+    /// Returns the code in SCID's numbering, as
+    /// [`IndexEntry::get_eco_code`] returns it.
+    pub fn code(self) -> u16 {
+        self.0
+    }
+
+    /// Returns the last extension of this code, as SCID's
+    /// `eco_LastSubCode` does: `B07z4` for `B07`, and `B07a4` for `B07a`.
+    pub(crate) fn last_sub_code(self) -> Eco {
+        let mut eco = self.0 - 1;
+        // Add the `z` to a code without an extension.
+        if eco.is_multiple_of(131) {
+            eco += 126;
+        }
+        // Add the `4` to a code without a final digit.
+        if (eco % 131) % 5 == 1 {
+            eco += 4;
+        }
+        Eco(eco + 1)
+    }
+}
+
+impl std::str::FromStr for Eco {
+    type Err = Error;
+
+    /// Reads a code of a letter from `A` to `E`, two digits, and optionally
+    /// a letter from `a` to `z` and a digit from 1 to 4. The first letter
+    /// may be lowercase, as SCID reads it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Parse`] for anything else, which SCID would read as
+    /// no code, or as a shorter code.
+    fn from_str(s: &str) -> Result<Self> {
+        let b = s.as_bytes();
+        let valid = matches!(b.len(), 3..=5)
+            && matches!(b[0].to_ascii_uppercase(), b'A'..=b'E')
+            && b[1..3].iter().all(u8::is_ascii_digit)
+            && b.get(3).is_none_or(u8::is_ascii_lowercase)
+            && b.get(4).is_none_or(|digit| (b'1'..=b'4').contains(digit));
+        if !valid {
+            return Err(Error::Parse {
+                line: 0,
+                message: format!("{s:?} isn't an ECO code such as B20 or B20a1"),
+            });
+        }
+        Ok(Eco(eco_from_string(s)))
+    }
+}
+
+impl std::fmt::Display for Eco {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let code = eco_to_string(self.0).expect("an Eco is never 0");
+        f.write_str(&code)
+    }
 }
 
 /// SCID's home pawn signature of `board`: a bit for each pawn on its

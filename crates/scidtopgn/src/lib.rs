@@ -65,8 +65,8 @@
 //! A game record is decoded into a [`Game`] by [`game`], using SCID's move
 //! encoding from [`mov`] and the piece numbering in [`position`].
 //! [`bytebuf`] reads and writes the record's bytes, and [`date`] SCID's packed
-//! dates. [`twins`] chooses the twin games [`Database::delete_twins`]
-//! deletes. Chess rules come from [`shakmaty`], which is re-exported. [`pgn`]
+//! dates. [`search`] chooses the games [`Database::search_header`] selects,
+//! and [`twins`] the twin games [`Database::delete_twins`] deletes. Chess rules come from [`shakmaty`], which is re-exported. [`pgn`]
 //! reads PGN, and [`error`] defines the errors.
 //!
 //! Games are numbered from 0 in this API and from 1 in error messages. The
@@ -90,6 +90,7 @@ pub mod nfile;
 pub mod pgn;
 pub mod position;
 mod replace;
+pub mod search;
 pub mod twins;
 
 pub use bytebuf::ByteBuffer;
@@ -106,8 +107,8 @@ pub use game::{
 };
 pub use gfile::{FileMode, GFile, GFILE_SUFFIX, GF_BLOCKSIZE};
 pub use index::{
-    Index, IndexEntry, IndexHeader, INDEX_ENTRY_SIZE, INDEX_HEADER_SIZE, INDEX_MAGIC, INDEX_SUFFIX,
-    MAX_GAMES, SCID_VERSION,
+    Eco, Index, IndexEntry, IndexHeader, INDEX_ENTRY_SIZE, INDEX_HEADER_SIZE, INDEX_MAGIC,
+    INDEX_SUFFIX, MAX_GAMES, SCID_VERSION,
 };
 pub use mov::{
     decode_move, encode_move, make_move_byte, parse_move_byte, GameMove, ENCODE_COMMENT,
@@ -117,6 +118,7 @@ pub use namebase::{NameBase, NameEntry, NameType, NAMEBASE_MAGIC, NUM_NAME_TYPES
 pub use nfile::NFile;
 pub use pgn::{parse_pgn, parse_single_game, PgnParser, PgnWarning, PgnWarningKind};
 pub use position::{PieceList, ScidPosition};
+pub use search::{FlagMatch, HeaderFlags, HeaderSearch};
 /// The chess library that provides the rules, positions, and moves.
 pub use shakmaty;
 pub use twins::{DeleteTwin, TwinOptions};

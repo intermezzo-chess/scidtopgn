@@ -20,6 +20,15 @@ impl GameSelection {
             .sum()
     }
 
+    /// Returns whether the game with index `index`, counting from 0, is
+    /// selected.
+    pub fn contains(&self, index: u32) -> bool {
+        let number = u64::from(index) + 1;
+        self.0
+            .iter()
+            .any(|range| (u64::from(*range.start())..=u64::from(*range.end())).contains(&number))
+    }
+
     /// Returns the selected games' indexes, counting from 0, in order.
     pub fn indexes(&self) -> impl Iterator<Item = u32> + '_ {
         self.0
@@ -96,6 +105,8 @@ mod tests {
         assert_eq!(selection, GameSelection(vec![1..=6, 8..=8]));
         assert_eq!(selection.count(), 7);
         assert_eq!(selection.last(), 8);
+        assert!(selection.contains(0) && selection.contains(5) && selection.contains(7));
+        assert!(!selection.contains(6) && !selection.contains(8));
         assert_eq!(indexes("5,4"), [3, 4]);
     }
 

@@ -2786,3 +2786,135 @@ fn test_cli_merge_refuses_a_target_hard_linked_to_a_source() {
     assert_eq!(database_bytes(&target), before);
     assert_eq!(file_names(temp.path()), names);
 }
+
+/// Runs the default invocation and `export` on `db` with `args`, asserting
+/// both succeed with identical stdout, and returns that output.
+fn export_both_ways_with(db: &str, args: &[&str]) -> String {
+    let default = cli()
+        .arg(db)
+        .args(args)
+        .output()
+        .expect("Failed to run CLI");
+    let explicit = cli()
+        .args(["export", db])
+        .args(args)
+        .output()
+        .expect("Failed to run CLI");
+    for output in [&default, &explicit] {
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    assert_eq!(default.stdout, explicit.stdout, "{args:?}");
+    String::from_utf8(default.stdout).expect("Output should be UTF-8")
+}
+
+/// The PGN of games `games` of `tests/data/search`, counting from 1, that
+/// aren't logically deleted: 6 and 12 are.
+fn search_games_pgn(games: &[u32]) -> String {
+    let mut db =
+        scidtopgn::Database::open_read_only(get_workspace_root().join("tests/data/search"))
+            .expect("Failed to open database");
+    games
+        .iter()
+        .filter(|&&game| game != 6 && game != 12)
+        .map(|&game| format!("{}\n", db.get_game(game - 1).unwrap().to_pgn()))
+        .collect()
+}
+
+#[test]
+fn test_cli_exports_the_games_a_search_matches() {
+    // The games are those SCID selects in `tests/data/search.tcl`.
+    for (args, games) in [
+        (&["--white", "carlsen"][..], &[1, 3, 19][..]),
+        (&["--black", "\"M?ller, Hans\""], &[9]),
+        (&["--event", "championship"], &[4, 11, 12, 21]),
+        (&["--site", "wijk aan zee"], &[5, 6, 19]),
+        (&["--round", "\"1\""], &[1, 11]),
+        (&["--date", "2023.01.01..2023.12.31"], &[1, 2, 21]),
+        (&["--date", "2023"], &[1, 2, 3, 21]),
+        (
+            &["--result", "1/2-1/2,*"],
+            &[3, 6, 9, 12, 13, 14, 18, 19, 24],
+        ),
+        (&["--white-elo", "2840.."], &[1, 3]),
+        (&["--black-elo", "2800..2900"], &[1, 2, 4, 18, 20]),
+        (
+            &["--elo-diff", "-20..20"],
+            &[11, 12, 13, 14, 15, 16, 20, 21, 22, 23, 24],
+        ),
+        (&["--eco", "B20..B99"], &[1, 2, 3, 13, 14, 15, 16, 19]),
+        (&["--eco", "B07", "--eco-missing", "exclude"], &[5, 6]),
+        (&["--length", "1000..1023"], &[17]),
+        (&["--to-move", "black"], &[2, 4, 12, 15, 16, 21, 22, 23, 24]),
+        (
+            &["--white", "carlsen", "--result", "1-0", "--ignore-colors"],
+            &[1, 2, 4],
+        ),
+        (&["--flag", "custom6=yes"], &[20]),
+        (&["--flag", "comments=yes", "--flag", "promotions=no"], &[9]),
+        (&["--games", "2-19", "--white", "carlsen"], &[3, 19]),
+        (&["--white", "carlsen", "--games", "4-18"], &[]),
+    ] {
+        assert_eq!(
+            export_both_ways_with("tests/data/search", args),
+            search_games_pgn(games),
+            "{args:?}"
+        );
+    }
+}
+
+#[test]
+fn test_cli_counts_the_games_a_search_matches() {
+    for (args, count) in [
+        (&["--white", "carlsen"][..], 3),
+        // Deleted games are counted, as SCID counts them.
+        (&["--white", "doe"], 1),
+        (&["--flag", "deleted=yes"], 2),
+        (&["--white", "doe", "--flag", "deleted=no"], 0),
+        // Without a search, every stored game, even one too long to match.
+        (&[], 24),
+    ] {
+        let stdout = export_both_ways_with("tests/data/search", &[args, &["--count"]].concat());
+        assert_eq!(stdout, format!("{count} games\n"), "{args:?}");
+    }
+    // The deleted game isn't exported.
+    assert_eq!(
+        export_both_ways_with("tests/data/search", &["--white", "doe"]),
+        ""
+    );
+}
+
+#[test]
+fn test_cli_rejects_bad_search_options() {
+    for (args, message) in [
+        (&["--white-elo", "high"][..], "\"high\" isn't a number"),
+        (&["--eco", "B2..B99"], "isn't an ECO code"),
+        (&["--date", "2023.13"], "isn't a date"),
+        (
+            &["--result", "1-0,draw"],
+            "\"draw\" isn't 1-0, 1/2-1/2, 0-1, or *",
+        ),
+        (&["--flag", "comment=yes"], "\"comment\" isn't a flag"),
+        (
+            &["--flag", "comments=yes", "--flag", "comments=no"],
+            "--flag comments is given more than once",
+        ),
+        (
+            &["--count", "--games", "1", "--white", "x"],
+            "cannot be used with",
+        ),
+    ] {
+        let output = cli()
+            .arg("tests/data/search")
+            .args(args)
+            .output()
+            .expect("Failed to run CLI");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success(), "{args:?}");
+        assert!(output.stdout.is_empty(), "{args:?}");
+        assert!(stderr.contains(message), "{args:?}: {stderr}");
+    }
+}
