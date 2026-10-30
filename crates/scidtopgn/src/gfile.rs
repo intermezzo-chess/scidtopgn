@@ -796,4 +796,22 @@ mod tests {
         // Don't write the block 4 GiB into the file.
         gf.current_block.dirty = false;
     }
+
+    #[test]
+    fn test_add_game_accepts_a_record_at_the_largest_offset() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut gf = GFile::create(temp_dir.path().join("test")).unwrap();
+        // The file seems to end one byte before the end of block 32,767.
+        let last_block = u32::MAX / GF_BLOCKSIZE as u32;
+        gf.num_blocks = last_block + 1;
+        gf.last_block_size = GF_BLOCKSIZE - 1;
+        gf.current_block.block_num = last_block as i32;
+        gf.current_block.length = GF_BLOCKSIZE - 1;
+
+        let at_max = gf.add_game_data(&[1]);
+        // Don't write the block 4 GiB into the file.
+        gf.current_block.dirty = false;
+        assert_eq!(at_max.unwrap(), u32::MAX);
+        assert!(matches!(gf.add_game_data(&[2]), Err(Error::GameFileFull)));
+    }
 }

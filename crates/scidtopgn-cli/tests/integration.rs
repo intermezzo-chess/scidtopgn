@@ -2654,3 +2654,135 @@ fn test_cli_overwrite_refuses_to_replace_a_directory() {
         std::fs::remove_dir_all(&dir).expect("Failed to remove directory");
     }
 }
+
+#[test]
+fn test_cli_merge_gives_the_output_a_default_header() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let source = copy_fixture(temp.path(), "one");
+    let si4 = source.with_extension("si4");
+    let mut index = scidtopgn::Index::open(&si4).unwrap();
+    index.set_description("source description");
+    index.header_mut().base_type = 7;
+    index.header_mut().auto_load = 1;
+    index.header_mut().custom_flag_desc[0][0] = b'X';
+    index
+        .flush(&mut std::fs::File::create(&si4).unwrap())
+        .unwrap();
+    let target = temp.path().join("target");
+    let (status, stderr) = merge(&[source.as_os_str(), "-o".as_ref(), target.as_os_str()]);
+    assert_eq!(status, Some(0), "{stderr}");
+    let index = scidtopgn::Index::open(target.with_extension("si4")).unwrap();
+    let expected = scidtopgn::index::IndexHeader::default();
+    assert_eq!(index.header().base_type, expected.base_type);
+    assert_eq!(index.header().auto_load, expected.auto_load);
+    assert_eq!(index.header().description, expected.description);
+    assert_eq!(index.header().custom_flag_desc, expected.custom_flag_desc);
+}
+
+#[test]
+fn test_cli_merge_copies_from_empty_sources() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let empty = temp.path().join("empty");
+    scidtopgn::Database::create(&empty)
+        .unwrap()
+        .close()
+        .unwrap();
+    let target = temp.path().join("target");
+    let (status, stderr) = merge(&[empty.as_os_str(), "-o".as_ref(), target.as_os_str()]);
+    assert_eq!(status, Some(0), "{stderr}");
+    let db = scidtopgn::Database::open_read_only(&target).unwrap();
+    assert_eq!(db.num_games(), 0);
+    for kind in [
+        scidtopgn::NameType::Player,
+        scidtopgn::NameType::Event,
+        scidtopgn::NameType::Site,
+        scidtopgn::NameType::Round,
+    ] {
+        assert_eq!(db.nfile().namebase().count(kind), 0);
+    }
+    drop(db);
+    let one = get_workspace_root().join("tests/data/one");
+    let (status, stderr) = merge(&[
+        empty.as_os_str(),
+        one.as_os_str(),
+        empty.as_os_str(),
+        "-o".as_ref(),
+        target.as_os_str(),
+        "--overwrite".as_ref(),
+    ]);
+    assert_eq!(status, Some(0), "{stderr}");
+    assert_eq!(export_both_ways(&target), export_both_ways(&one));
+}
+
+#[test]
+fn test_cli_merge_keeps_the_tree_cache_if_the_output_cant_be_replaced() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let target = copy_fixture(temp.path(), "five");
+    let cache = target.with_extension("stc");
+    std::fs::write(&cache, b"original cache").unwrap();
+    // A directory at the index makes replacing the output fail, after every
+    // game is copied.
+    let blocked = target.with_extension("si4");
+    std::fs::remove_file(&blocked).unwrap();
+    std::fs::create_dir(&blocked).unwrap();
+    std::fs::write(blocked.join("keep.txt"), b"keep").unwrap();
+    let before: Vec<_> = ["sg4", "sn4", "stc"]
+        .map(|ext| std::fs::read(target.with_extension(ext)).unwrap())
+        .into();
+    let names = file_names(temp.path());
+    let (status, stderr) = merge(&[
+        "tests/data/one".as_ref(),
+        "-o".as_ref(),
+        target.as_os_str(),
+        "--overwrite".as_ref(),
+    ]);
+    assert_eq!(status, Some(1), "{stderr}");
+    for (ext, bytes) in ["sg4", "sn4", "stc"].iter().zip(before) {
+        assert_eq!(std::fs::read(target.with_extension(ext)).unwrap(), bytes);
+    }
+    assert_eq!(std::fs::read(blocked.join("keep.txt")).unwrap(), b"keep");
+    assert_eq!(file_names(temp.path()), names);
+}
+
+#[test]
+fn test_cli_merge_keeps_every_file_of_the_output_after_an_error() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let target = copy_fixture(temp.path(), "five");
+    let before = database_bytes(&target);
+    let missing = temp.path().join("missing");
+    let names = file_names(temp.path());
+    let (status, stderr) = merge(&[
+        "tests/data/one".as_ref(),
+        missing.as_os_str(),
+        "-o".as_ref(),
+        target.as_os_str(),
+        "--overwrite".as_ref(),
+    ]);
+    assert_eq!(status, Some(1), "{stderr}");
+    assert!(stderr.contains("Failed to open database"), "{stderr}");
+    assert_eq!(database_bytes(&target), before);
+    assert_eq!(file_names(temp.path()), names);
+}
+
+#[test]
+fn test_cli_merge_refuses_a_target_hard_linked_to_a_source() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let source = copy_fixture(temp.path(), "one");
+    let target = temp.path().join("target");
+    for ext in ["si4", "sn4", "sg4"] {
+        std::fs::hard_link(source.with_extension(ext), target.with_extension(ext)).unwrap();
+    }
+    let before = database_bytes(&source);
+    let names = file_names(temp.path());
+    let (status, stderr) = merge(&[
+        source.as_os_str(),
+        "-o".as_ref(),
+        target.as_os_str(),
+        "--overwrite".as_ref(),
+    ]);
+    assert_eq!(status, Some(1), "{stderr}");
+    assert!(stderr.contains("is also a source"), "{stderr}");
+    assert_eq!(database_bytes(&source), before);
+    assert_eq!(database_bytes(&target), before);
+    assert_eq!(file_names(temp.path()), names);
+}

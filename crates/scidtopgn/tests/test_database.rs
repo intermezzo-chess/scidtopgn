@@ -1509,3 +1509,82 @@ fn test_copy_game_errors_leave_the_database_unchanged() {
     assert!(is_read_only(read_only.copy_game(&mut source, 2)));
     assert_eq!(read_only.num_games(), 1);
 }
+
+/// The byte of an index entry whose low six bits are its custom flags,
+/// after the offset and the low bytes of the length.
+const ENTRY_CUSTOM_FLAGS_BYTE: usize = 6;
+
+#[test]
+fn test_copy_game_keeps_custom_and_user_flags() {
+    use scidtopgn::index::{IDX_MASK_BRILLIANCY, IDX_MASK_TACTICS, IDX_MASK_USER};
+
+    let temp = tempfile::TempDir::new().unwrap();
+    let path = copy_fixture(temp.path(), "one");
+    let si4 = path.with_extension("si4");
+    let mut index = Index::open(&si4).unwrap();
+    let entry = index.get_entry_mut(0).unwrap();
+    for mask in [IDX_MASK_TACTICS, IDX_MASK_BRILLIANCY, IDX_MASK_USER] {
+        entry.set_flag(mask, true);
+    }
+    index
+        .flush(&mut std::fs::File::create(&si4).unwrap())
+        .unwrap();
+    // No method sets the custom flags, so set all six in the file.
+    let mut bytes = std::fs::read(&si4).unwrap();
+    bytes[scidtopgn::index::INDEX_HEADER_SIZE + ENTRY_CUSTOM_FLAGS_BYTE] |= 0x3f;
+    std::fs::write(&si4, bytes).unwrap();
+
+    let mut source = Database::open_read_only(&path).unwrap();
+    let mut db = Database::create(temp.path().join("merged")).unwrap();
+    db.copy_game(&mut source, 0).unwrap();
+    let entry = db.get_entry(0).unwrap();
+    for mask in [IDX_MASK_TACTICS, IDX_MASK_BRILLIANCY, IDX_MASK_USER] {
+        assert!(entry.get_flag(mask), "{mask:#x}");
+    }
+    assert_eq!(entry_bytes(&db, 0)[ENTRY_CUSTOM_FLAGS_BYTE] & 0x3f, 0x3f);
+}
+
+#[test]
+fn test_copy_game_into_a_read_only_database_changes_nothing() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let mut source = Database::open_read_only(get_test_data_path("one")).unwrap();
+    let path = temp.path().join("target");
+    let mut target = Database::create(&path).unwrap();
+    target.copy_game(&mut source, 0).unwrap();
+    target.close().unwrap();
+    let before = database_bytes(&path);
+    let mut target = Database::open_read_only(&path).unwrap();
+    let entry = entry_bytes(&target, 0);
+    let names = all_names(&target);
+    assert!(matches!(
+        target.copy_game(&mut source, 0),
+        Err(Error::ReadOnly)
+    ));
+    assert_eq!(target.num_games(), 1);
+    assert_eq!(entry_bytes(&target, 0), entry);
+    assert_eq!(all_names(&target), names);
+    target.close().unwrap();
+    assert_eq!(database_bytes(&path), before);
+}
+
+#[test]
+fn test_copy_game_copies_a_record_it_cant_decode() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let source = copy_fixture(temp.path(), "one");
+    let sg4 = source.with_extension("sg4");
+    let mut bytes = std::fs::read(&sg4).unwrap();
+    let index = Index::open(source.with_extension("si4")).unwrap();
+    let entry = index.get_entry(0).unwrap();
+    let start = entry.get_offset() as usize;
+    let end = start + entry.get_length() as usize;
+    bytes[start..end].fill(0xff);
+    std::fs::write(&sg4, bytes).unwrap();
+    let mut source_db = Database::open_read_only(&source).unwrap();
+    // The record is copied as stored, so it needn't be one that decodes.
+    assert!(source_db.get_game(0).is_err());
+    let path = temp.path().join("target");
+    let mut target = Database::create(&path).unwrap();
+    assert_eq!(target.copy_game(&mut source_db, 0).unwrap(), 0);
+    target.close().unwrap();
+    assert_eq!(record(&path, 0), record(&source, 0));
+}
