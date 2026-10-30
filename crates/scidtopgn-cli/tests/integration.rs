@@ -2172,6 +2172,8 @@ fn test_cli_rejects_a_log_that_is_a_file_of_the_command() {
         &["import", "input.pgn", "-o", "new", "--log", "new.sg4"],
         &["merge", "five", "-o", "new", "--log", "./five.si4"],
         &["merge", "five", "-o", "new", "--log", "new.sn4"],
+        // Merge removes the output's tree cache.
+        &["merge", "five", "-o", "new", "--log", "new.stc"],
     ] {
         let output = cli()
             .current_dir(dir)
@@ -2186,6 +2188,7 @@ fn test_cli_rejects_a_log_that_is_a_file_of_the_command() {
     assert!(!temp.path().join("out.pgn").exists());
     assert!(!temp.path().join("new.sg4").exists());
     assert!(!temp.path().join("new.si4").exists());
+    assert!(!temp.path().join("new.stc").exists());
     assert_eq!(database_bytes(&db), before);
     assert_eq!(std::fs::read_to_string(&pgn).unwrap(), VALID_GAME);
 }

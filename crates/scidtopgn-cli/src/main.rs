@@ -83,6 +83,7 @@ fn command_files(command: &Command) -> Vec<PathBuf> {
                 files.extend(database(source));
             }
             files.extend(database(&args.output));
+            files.push(Path::new(&args.output).with_extension("stc"));
         }
     }
     files
