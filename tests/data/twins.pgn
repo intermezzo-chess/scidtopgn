@@ -1,0 +1,678 @@
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P01w"]
+[Black "P01b"]
+[Result "1-0"]
+[Case "Game 1: Three equal copies"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P01w"]
+[Black "P01b"]
+[Result "1-0"]
+[Case "Game 2: Three equal copies"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P01w"]
+[Black "P01b"]
+[Result "1-0"]
+[Case "Game 3: Three equal copies"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P02w"]
+[Black "P02b"]
+[Result "1-0"]
+[Case "Game 4: Shorter copy"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P02w"]
+[Black "P02b"]
+[Result "1-0"]
+[Case "Game 5: Longer copy"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 8. c3 O-O 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P03w"]
+[Black "P03b"]
+[Result "1-0"]
+[Case "Game 6: Colors as played"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P03b"]
+[Black "P03w"]
+[Result "1-0"]
+[Case "Game 7: Colors swapped"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P04w"]
+[Black "P04b"]
+[Result "1-0"]
+[Case "Game 8: Same home pawns"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P04w"]
+[Black "P04b"]
+[Result "1-0"]
+[Case "Game 9: Same home pawns, last move differs"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 O-O 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P05w"]
+[Black "P05b"]
+[Result "1-0"]
+[Case "Game 10: Placeholder"]
+
+1. e4 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P05w"]
+[Black "P05b"]
+[Result "1-0"]
+[Case "Game 11: Full game after placeholder"]
+
+1. d4 d5 2. c4 e6 3. Nc3 Nf6 4. Bg5 Be7 5. e3 O-O 1-0
+
+[Event "?"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P06w"]
+[Black "P06b"]
+[Result "1-0"]
+[Case "Game 12: Placeholder, no event"]
+
+1. e4 1-0
+
+[Event "?"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P06w"]
+[Black "P06b"]
+[Result "1-0"]
+[Case "Game 13: Full game, no event"]
+
+1. d4 d5 2. c4 e6 3. Nc3 Nf6 4. Bg5 Be7 5. e3 O-O 1-0
+
+[Event "Real"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P07w"]
+[Black "P07b"]
+[Result "1-0"]
+[Case "Game 14: Full game with event"]
+
+1. d4 d5 2. c4 e6 3. Nc3 Nf6 4. Bg5 Be7 5. e3 O-O 1-0
+
+[Event "?"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P07w"]
+[Black "P07b"]
+[Result "1-0"]
+[Case "Game 15: Placeholder after, no event"]
+
+1. e4 1-0
+
+[Event "?"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P08w"]
+[Black "P08b"]
+[Result "1-0"]
+[Case "Game 16: Full game, no event"]
+
+1. d4 d5 2. c4 e6 3. Nc3 Nf6 4. Bg5 Be7 5. e3 O-O 1-0
+
+[Event "Real"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P08w"]
+[Black "P08b"]
+[Result "1-0"]
+[Case "Game 17: Placeholder after, with event"]
+
+1. e4 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "?"]
+[Black "P09b"]
+[Result "1-0"]
+[Case "Game 18: Full game, no White"]
+
+1. d4 d5 2. c4 e6 3. Nc3 Nf6 4. Bg5 Be7 5. e3 O-O 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "?"]
+[Black "P09b"]
+[Result "1-0"]
+[Case "Game 19: Placeholder after, no White"]
+
+1. e4 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P10w"]
+[Black "P10b"]
+[Result "1-0"]
+[Case "Game 20: Shorter with a comment"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 {The Spanish} 3... a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P10w"]
+[Black "P10b"]
+[Result "1-0"]
+[Case "Game 21: Longer without"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 8. c3 O-O 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P11w"]
+[Black "P11b"]
+[Result "1-0"]
+[Case "Game 22: Shorter with a variation"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 (3. Bc4 Bc5) 3... a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P11w"]
+[Black "P11b"]
+[Result "1-0"]
+[Case "Game 23: Longer without"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 8. c3 O-O 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P12w"]
+[Black "P12b"]
+[Result "1-0"]
+[Case "Game 24: Longer with a comment"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 {The Spanish} 3... a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 8. c3 O-O 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P12w"]
+[Black "P12b"]
+[Result "1-0"]
+[Case "Game 25: Shorter without"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P13w"]
+[Black "P13b"]
+[Result "1-0"]
+[WhiteElo "2500"]
+[Case "Game 26: Shorter with White's rating"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P13w"]
+[Black "P13b"]
+[Result "1-0"]
+[BlackElo "2400"]
+[Case "Game 27: Longer with Black's rating"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 8. c3 O-O 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P14w"]
+[Black "P14b"]
+[Result "1-0"]
+[Case "Game 28: Differs after 120 half-moves"]
+
+1. Nf3 Nf6 2. Ng1 Ng8 3. Nf3 Nf6 4. Ng1 Ng8 5. Nf3 Nf6 6. Ng1 Ng8 7. Nf3 Nf6 8. Ng1 Ng8 9. Nf3 Nf6 10. Ng1 Ng8 11. Nf3 Nf6 12. Ng1 Ng8 13. Nf3 Nf6 14. Ng1 Ng8 15. Nf3 Nf6 16. Ng1 Ng8 17. Nf3 Nf6 18. Ng1 Ng8 19. Nf3 Nf6 20. Ng1 Ng8 21. Nf3 Nf6 22. Ng1 Ng8 23. Nf3 Nf6 24. Ng1 Ng8 25. Nf3 Nf6 26. Ng1 Ng8 27. Nf3 Nf6 28. Ng1 Ng8 29. Nf3 Nf6 30. Ng1 Ng8 31. Nf3 Nf6 32. Ng1 Ng8 33. Nf3 Nf6 34. Ng1 Ng8 35. Nf3 Nf6 36. Ng1 Ng8 37. Nf3 Nf6 38. Ng1 Ng8 39. Nf3 Nf6 40. Ng1 Ng8 41. Nf3 Nf6 42. Ng1 Ng8 43. Nf3 Nf6 44. Ng1 Ng8 45. Nf3 Nf6 46. Ng1 Ng8 47. Nf3 Nf6 48. Ng1 Ng8 49. Nf3 Nf6 50. Ng1 Ng8 51. Nf3 Nf6 52. Ng1 Ng8 53. Nf3 Nf6 54. Ng1 Ng8 55. Nf3 Nf6 56. Ng1 Ng8 57. Nf3 Nf6 58. Ng1 Ng8 59. Nf3 Nf6 60. Ng1 Ng8 61. Nc3 Nc6 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P14w"]
+[Black "P14b"]
+[Result "1-0"]
+[Case "Game 29: Differs after 120 half-moves"]
+
+1. Nf3 Nf6 2. Ng1 Ng8 3. Nf3 Nf6 4. Ng1 Ng8 5. Nf3 Nf6 6. Ng1 Ng8 7. Nf3 Nf6 8. Ng1 Ng8 9. Nf3 Nf6 10. Ng1 Ng8 11. Nf3 Nf6 12. Ng1 Ng8 13. Nf3 Nf6 14. Ng1 Ng8 15. Nf3 Nf6 16. Ng1 Ng8 17. Nf3 Nf6 18. Ng1 Ng8 19. Nf3 Nf6 20. Ng1 Ng8 21. Nf3 Nf6 22. Ng1 Ng8 23. Nf3 Nf6 24. Ng1 Ng8 25. Nf3 Nf6 26. Ng1 Ng8 27. Nf3 Nf6 28. Ng1 Ng8 29. Nf3 Nf6 30. Ng1 Ng8 31. Nf3 Nf6 32. Ng1 Ng8 33. Nf3 Nf6 34. Ng1 Ng8 35. Nf3 Nf6 36. Ng1 Ng8 37. Nf3 Nf6 38. Ng1 Ng8 39. Nf3 Nf6 40. Ng1 Ng8 41. Nf3 Nf6 42. Ng1 Ng8 43. Nf3 Nf6 44. Ng1 Ng8 45. Nf3 Nf6 46. Ng1 Ng8 47. Nf3 Nf6 48. Ng1 Ng8 49. Nf3 Nf6 50. Ng1 Ng8 51. Nf3 Nf6 52. Ng1 Ng8 53. Nf3 Nf6 54. Ng1 Ng8 55. Nf3 Nf6 56. Ng1 Ng8 57. Nf3 Nf6 58. Ng1 Ng8 59. Nf3 Nf6 60. Ng1 Ng8 61. Nf3 Nf6 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P15w"]
+[Black "P15b"]
+[Result "1-0"]
+[Case "Game 30: Differs at half-move 119"]
+
+1. Nf3 Nf6 2. Ng1 Ng8 3. Nf3 Nf6 4. Ng1 Ng8 5. Nf3 Nf6 6. Ng1 Ng8 7. Nf3 Nf6 8. Ng1 Ng8 9. Nf3 Nf6 10. Ng1 Ng8 11. Nf3 Nf6 12. Ng1 Ng8 13. Nf3 Nf6 14. Ng1 Ng8 15. Nf3 Nf6 16. Ng1 Ng8 17. Nf3 Nf6 18. Ng1 Ng8 19. Nf3 Nf6 20. Ng1 Ng8 21. Nf3 Nf6 22. Ng1 Ng8 23. Nf3 Nf6 24. Ng1 Ng8 25. Nf3 Nf6 26. Ng1 Ng8 27. Nf3 Nf6 28. Ng1 Ng8 29. Nf3 Nf6 30. Ng1 Ng8 31. Nf3 Nf6 32. Ng1 Ng8 33. Nf3 Nf6 34. Ng1 Ng8 35. Nf3 Nf6 36. Ng1 Ng8 37. Nf3 Nf6 38. Ng1 Ng8 39. Nf3 Nf6 40. Ng1 Ng8 41. Nf3 Nf6 42. Ng1 Ng8 43. Nf3 Nf6 44. Ng1 Ng8 45. Nf3 Nf6 46. Ng1 Ng8 47. Nf3 Nf6 48. Ng1 Ng8 49. Nf3 Nf6 50. Ng1 Ng8 51. Nf3 Nf6 52. Ng1 Ng8 53. Nf3 Nf6 54. Ng1 Ng8 55. Nf3 Nf6 56. Ng1 Ng8 57. Nf3 Nf6 58. Ng1 Ng8 59. Nf3 Nf6 60. Ng1 Ng8 61. Nf3 Nf6 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P15w"]
+[Black "P15b"]
+[Result "1-0"]
+[Case "Game 31: Differs at half-move 119"]
+
+1. Nf3 Nf6 2. Ng1 Ng8 3. Nf3 Nf6 4. Ng1 Ng8 5. Nf3 Nf6 6. Ng1 Ng8 7. Nf3 Nf6 8. Ng1 Ng8 9. Nf3 Nf6 10. Ng1 Ng8 11. Nf3 Nf6 12. Ng1 Ng8 13. Nf3 Nf6 14. Ng1 Ng8 15. Nf3 Nf6 16. Ng1 Ng8 17. Nf3 Nf6 18. Ng1 Ng8 19. Nf3 Nf6 20. Ng1 Ng8 21. Nf3 Nf6 22. Ng1 Ng8 23. Nf3 Nf6 24. Ng1 Ng8 25. Nf3 Nf6 26. Ng1 Ng8 27. Nf3 Nf6 28. Ng1 Ng8 29. Nf3 Nf6 30. Ng1 Ng8 31. Nf3 Nf6 32. Ng1 Ng8 33. Nf3 Nf6 34. Ng1 Ng8 35. Nf3 Nf6 36. Ng1 Ng8 37. Nf3 Nf6 38. Ng1 Ng8 39. Nf3 Nf6 40. Ng1 Ng8 41. Nf3 Nf6 42. Ng1 Ng8 43. Nf3 Nf6 44. Ng1 Ng8 45. Nf3 Nf6 46. Ng1 Ng8 47. Nf3 Nf6 48. Ng1 Ng8 49. Nf3 Nf6 50. Ng1 Ng8 51. Nf3 Nf6 52. Ng1 Ng8 53. Nf3 Nf6 54. Ng1 Ng8 55. Nf3 Nf6 56. Ng1 Ng8 57. Nf3 Nf6 58. Ng1 Ng8 59. Nf3 Nf6 60. Ne5 Ng8 61. Nf3 Nf6 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P16w"]
+[Black "P16b"]
+[Result "1-0"]
+[Case "Game 32: Event"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 1-0
+
+[Event "Other"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P16w"]
+[Black "P16b"]
+[Result "1-0"]
+[Case "Game 33: Event"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P17w"]
+[Black "P17b"]
+[Result "1-0"]
+[Case "Game 34: Site"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 1-0
+
+[Event "Twins"]
+[Site "There"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P17w"]
+[Black "P17b"]
+[Result "1-0"]
+[Case "Game 35: Site"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P18w"]
+[Black "P18b"]
+[Result "1-0"]
+[Case "Game 36: Round"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "2"]
+[White "P18w"]
+[Black "P18b"]
+[Result "1-0"]
+[Case "Game 37: Round"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P19w"]
+[Black "P19b"]
+[Result "1-0"]
+[Case "Game 38: Day"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.02"]
+[Round "1"]
+[White "P19w"]
+[Black "P19b"]
+[Result "1-0"]
+[Case "Game 39: Day"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P20w"]
+[Black "P20b"]
+[Result "1-0"]
+[Case "Game 40: Month"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.02.01"]
+[Round "1"]
+[White "P20w"]
+[Black "P20b"]
+[Result "1-0"]
+[Case "Game 41: Month"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P21w"]
+[Black "P21b"]
+[Result "1-0"]
+[Case "Game 42: Year"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2021.01.01"]
+[Round "1"]
+[White "P21w"]
+[Black "P21b"]
+[Result "1-0"]
+[Case "Game 43: Year"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P22w"]
+[Black "P22b"]
+[Result "1-0"]
+[Case "Game 44: Result"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P22w"]
+[Black "P22b"]
+[Result "0-1"]
+[Case "Game 45: Result"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 0-1
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P23w"]
+[Black "P23b"]
+[Result "1-0"]
+[ECO "C78"]
+[Case "Game 46: Same basic ECO"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P23w"]
+[Black "P23b"]
+[Result "1-0"]
+[ECO "C78a"]
+[Case "Game 47: Same basic ECO"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P24w"]
+[Black "P24b"]
+[Result "1-0"]
+[ECO "C78"]
+[Case "Game 48: Different ECO"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P24w"]
+[Black "P24b"]
+[Result "1-0"]
+[ECO "C79"]
+[Case "Game 49: Different ECO"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P25w Smith"]
+[Black "P25b"]
+[Result "1-0"]
+[Case "Game 50: First 4 letters match"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P25w Jones"]
+[Black "P25b"]
+[Result "1-0"]
+[Case "Game 51: First 4 letters match"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "AbcÀ"]
+[Black "P26b"]
+[Result "1-0"]
+[Case "Game 52: Hashes equal only as unsigned bytes"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "AbdC"]
+[Black "P26b"]
+[Result "1-0"]
+[Case "Game 53: Hashes equal only as unsigned bytes"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P27w"]
+[Black "P27b"]
+[Result "1-0"]
+[Case "Game 54: Three copies"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 8. c3 O-O 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P27w"]
+[Black "P27b"]
+[Result "1-0"]
+[Case "Game 55: Three copies"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P27w"]
+[Black "P27b"]
+[Result "1-0"]
+[Case "Game 56: Three copies"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 8. c3 O-O 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P28w"]
+[Black "P28b"]
+[Result "1-0"]
+[Case "Game 57: Three copies, first with a comment"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 {The Spanish} 3... a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 8. c3 O-O 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P28w"]
+[Black "P28b"]
+[Result "1-0"]
+[Case "Game 58: Three copies"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P28w"]
+[Black "P28b"]
+[Result "1-0"]
+[Case "Game 59: Three copies"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P30w"]
+[Black "P30b"]
+[Result "1-0"]
+[Case "Game 60: Standard start"]
+
+1. Nf3 Nf6 2. Ng1 Ng8 3. Nf3 Nf6 4. Ng1 Ng8 5. Nf3 Nf6 1-0
+
+[Event "Twins"]
+[Site "Here"]
+[Date "2020.01.01"]
+[Round "1"]
+[White "P30w"]
+[Black "P30b"]
+[Result "1-0"]
+[SetUp "1"]
+[FEN "rnbqkbnr/pppppppp/8/8/8/8/1PPPPPPP/RNBQKBNR w KQkq - 0 1"]
+[Case "Game 61: FEN start"]
+
+1. Nf3 Nf6 2. Ng1 Ng8 3. Nf3 Nf6 4. Ng1 Ng8 5. Nf3 Nf6 1-0

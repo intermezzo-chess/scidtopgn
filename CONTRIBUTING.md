@@ -64,7 +64,7 @@ reference the issue the PR addresses.
 
 ## Test data
 
-The fixtures in `tests/data/` (`one`, `five`, `edge`, `castling`, `annotated`, `long`, `accents`, `derived`, `latin1`, and `mixed`, each
+The fixtures in `tests/data/` (`one`, `five`, `edge`, `castling`, `annotated`, `long`, `accents`, `derived`, `latin1`, `mixed`, and `twins`, each
 with `.si4`, `.sn4`, `.sg4`, and a matching `.pgn`) are shared by both crates'
 integration tests. `castling` and `annotated` were written by the C++ reference
 converter from `castling.pgn` and `annotated.pgn`, like `edge`. `annotated` has
@@ -85,6 +85,15 @@ The converter stores their names' bytes as they are, and counts no names, so
 every frequency in their name files is 0. `latin1.pgn` has Latin-1 and
 Windows-1252 names. `mixed.pgn` has `Müller, Hans` and `Événement` both as
 Latin-1 and as UTF-8, so `mixed.sn4` holds each of them twice.
+`twins` was written from `twins.pgn` by `pgnscid -f twins.pgn twins`. Each pair
+of players in it has its own case of twin games, named by the games' `Case`
+tags. `twins.tcl` runs SCID vs. PC's `sc_base duplicates` on copies of it with
+several sets of options, as
+`tcscid tests/data/twins.tcl tests/data/twins <scratch directory>`, and
+`crates/scidtopgn/tests/test_twins.rs` holds the games it deleted with each.
+`tcscid` is built from `scidvspc/` like `pgnscid`, with `make tcscid`, on a
+platform whose `char` is signed, such as x86 or Apple arm64, as SCID's name hash
+depends on it.
 `notation.pgn` has one game per case in
 [docs/PGN_IMPORT.md](docs/PGN_IMPORT.md). `.gitignore` excludes `*.si4`, `*.sn4`, and `*.sg4` everywhere, so new
 fixtures must be added with `git add -f`.
