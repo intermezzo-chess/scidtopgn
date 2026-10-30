@@ -268,6 +268,8 @@ fn test_cli_pgn_roundtrip() {
 // Byte offset of the low byte of an index entry's big-endian flags field
 // (offset u32, length u16, length-high u8, then flags u16).
 const ENTRY_FLAGS_LOW_BYTE: usize = 8;
+// Byte offset of an index entry's big-endian game-file offset.
+const ENTRY_OFFSET: usize = 0;
 
 /// Copies a test database into `dir` and sets the logical delete flag on the
 /// given entries directly in the copied .si4, leaving every record in place.
@@ -1496,6 +1498,13 @@ fn test_cli_validate_undamaged_database() {
     );
 }
 
+/// The error `validate` reports for a game whose first move
+/// [`corrupt_first_move`] replaced, given the changed byte's position.
+fn illegal_first_move(byte: usize) -> String {
+    let start = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    format!("Damaged game data at byte {byte}: invalid move byte 0xc2 (e2f3 is illegal) in {start}")
+}
+
 #[test]
 fn test_cli_validate_reports_damaged_active_and_deleted_games() {
     let temp = TempDir::new().expect("Failed to create temp dir");
@@ -1507,20 +1516,14 @@ fn test_cli_validate_reports_damaged_active_and_deleted_games() {
 
     let (status, stderr) = validate(&db, &[]);
     assert_eq!(status, Some(1), "{stderr}");
-    let start = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-    let damage = |byte| {
-        format!(
-            "Damaged game data at byte {byte}: invalid move byte 0xc2 (e2f3 is illegal) in {start}"
-        )
-    };
     assert_eq!(
         stderr,
         format!(
             "Warning: SCID game 2: {}\n\
              Warning: SCID game 4 (deleted): {}\n\
              5 games checked, 2 damaged\n",
-            damage(second),
-            damage(fourth)
+            illegal_first_move(second),
+            illegal_first_move(fourth)
         )
     );
 }
@@ -1548,6 +1551,67 @@ fn test_cli_validate_reports_records_past_the_end_of_the_game_file() {
             "Warning: SCID game 5: Game data at byte {offset}, {length} bytes long, \
              is past the end of the game file\n\
              5 games checked, 1 damaged\n"
+        )
+    );
+}
+
+#[test]
+fn test_cli_validate_continues_past_a_record_past_the_end_of_the_game_file() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let db = copy_with_deleted(temp.path(), "five", &[]);
+    let fourth = corrupt_first_move(&db, 3);
+
+    // Point game 2's entry at the end of the game file, leaving its length
+    // and every other entry as they were.
+    let end = std::fs::metadata(db.with_extension("sg4"))
+        .expect("Failed to read .sg4")
+        .len() as u32;
+    let si4 = db.with_extension("si4");
+    let mut index = std::fs::read(&si4).expect("Failed to read index");
+    let pos =
+        scidtopgn::index::INDEX_HEADER_SIZE + scidtopgn::index::INDEX_ENTRY_SIZE + ENTRY_OFFSET;
+    index[pos..pos + 4].copy_from_slice(&end.to_be_bytes());
+    std::fs::write(&si4, index).expect("Failed to write index");
+    let length = {
+        let db = scidtopgn::Database::open(&db).expect("Failed to open database");
+        let entry = db.get_entry(1).expect("five has five games");
+        assert_eq!(entry.get_offset(), end);
+        entry.get_length()
+    };
+    assert!(length > 0);
+
+    // The games after game 2 are still read: game 4's damage is reported.
+    let (status, stderr) = validate(&db, &[]);
+    assert_eq!(status, Some(1), "{stderr}");
+    assert_eq!(
+        stderr,
+        format!(
+            "Warning: SCID game 2: Game data at byte {end}, {length} bytes long, \
+             is past the end of the game file\n\
+             Warning: SCID game 4: {}\n\
+             5 games checked, 2 damaged\n",
+            illegal_first_move(fourth)
+        )
+    );
+}
+
+#[test]
+fn test_cli_validate_reads_a_read_only_database() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let db = copy_with_deleted(temp.path(), "five", &[]);
+    let second = corrupt_first_move(&db, 1);
+    let _read_only = ReadOnlyFiles::new(&db);
+    // The files can't be opened for writing, so validate passes only if it
+    // opens them read-only.
+    assert!(scidtopgn::Database::open(&db).is_err());
+
+    let (status, stderr) = validate(&db, &[]);
+    assert_eq!(status, Some(1), "{stderr}");
+    assert_eq!(
+        stderr,
+        format!(
+            "Warning: SCID game 2: {}\n5 games checked, 1 damaged\n",
+            illegal_first_move(second)
         )
     );
 }
@@ -1594,26 +1658,55 @@ fn test_cli_validate_fails_with_2_when_it_cant_check() {
         }
     }
 
-    // The log can't be a file of the database.
+    // The log can't be any of the database's files. `validate` checks that
+    // each one is left unchanged.
     let db = copy_with_deleted(temp.path(), "five", &[]);
-    let si4 = db.with_extension("si4");
-    let (status, stderr) = validate(&db, &["--log", si4.to_str().unwrap()]);
-    assert_eq!(status, Some(2), "{stderr}");
-    assert!(stderr.contains("is the same file as"), "{stderr}");
+    for ext in ["si4", "sn4", "sg4"] {
+        let file = db.with_extension(ext);
+        let (status, stderr) = validate(&db, &["--log", file.to_str().unwrap()]);
+        assert_eq!(status, Some(2), "{ext}: {stderr}");
+        assert!(stderr.contains("is the same file as"), "{ext}: {stderr}");
+        // No game was checked.
+        assert!(!stderr.contains("games checked"), "{ext}: {stderr}");
+    }
 }
 
 #[cfg(target_os = "linux")]
 #[test]
 fn test_cli_validate_fails_with_2_when_the_log_cant_be_written() {
-    let five = get_workspace_root().join("tests/data/five");
-    let (status, stderr) = validate(&five, &["--log", "/dev/full"]);
-    // Every game is checked, but the log is missing messages.
-    assert_eq!(status, Some(2), "{stderr}");
-    assert!(
-        stderr.contains("Error: Failed to write log '/dev/full'"),
-        "{stderr}"
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let db = copy_with_deleted(temp.path(), "five", &[]);
+    let clean = "5 games checked, 0 damaged\n".to_owned();
+    let second = corrupt_first_move(&db, 1);
+    let damaged = format!(
+        "Warning: SCID game 2: {}\n5 games checked, 1 damaged\n",
+        illegal_first_move(second)
     );
-    assert!(stderr.contains("5 games checked, 0 damaged"), "{stderr}");
+    let clean_dir = temp.path().join("clean");
+    std::fs::create_dir(&clean_dir).expect("Failed to create dir");
+    let undamaged = copy_with_deleted(&clean_dir, "five", &[]);
+
+    for (db, report) in [(&undamaged, clean), (&db, damaged)] {
+        for quiet in [false, true] {
+            let mut args = vec!["--log", "/dev/full"];
+            args.extend(quiet.then_some("--quiet"));
+            let (status, stderr) = validate(db, &args);
+            // Every game is checked, but the log is missing messages, so
+            // the check didn't finish, whether or not games are damaged.
+            assert_eq!(status, Some(2), "{args:?}: {stderr}");
+            if quiet {
+                assert_eq!(stderr, "", "{args:?}");
+            } else {
+                // The failure is reported once, at the first write.
+                let (error, rest) = stderr.split_once('\n').expect("an error line");
+                assert!(
+                    error.starts_with("Error: Failed to write log '/dev/full': "),
+                    "{stderr}"
+                );
+                assert_eq!(rest, report, "{args:?}");
+            }
+        }
+    }
 }
 
 /// Makes the files of a database read-only, and restores their permissions
