@@ -8,4 +8,4 @@ default: minor
 
 In the library, `Database::copy_game` copies a game from another database as stored.
 
-When `import --overwrite` or `merge --overwrite` can't move one of the new database's files into place, the old database's files are now put back. Before, the old database could be left with some of its files replaced.
+When `import --overwrite` or `merge --overwrite` can't move one of the new database's files into place, the old database's files, and with `merge` its tree cache, are now put back. Before, the old database could be left with some of its files replaced. A directory at one of the output database's paths is now an error before any file is moved.

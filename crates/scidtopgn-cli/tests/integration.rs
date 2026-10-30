@@ -2622,3 +2622,35 @@ fn test_cli_merge_failures_leave_no_database_behind() {
         std::fs::read(five.with_extension("si4")).unwrap()
     );
 }
+
+#[test]
+fn test_cli_overwrite_refuses_to_replace_a_directory() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let target = temp.path().join("target");
+    for (ext, command) in [("si4", "merge"), ("sg4", "import"), ("stc", "merge")] {
+        let dir = target.with_extension(ext);
+        std::fs::create_dir(&dir).expect("Failed to create directory");
+        std::fs::write(dir.join("keep.txt"), "keep").expect("Failed to write file");
+
+        let mut cmd = cli();
+        match command {
+            "merge" => cmd.args(["merge", "tests/data/one"]),
+            _ => cmd.args(["import", "tests/data/one.pgn"]),
+        };
+        let output = cmd
+            .args(["--overwrite", "-o"])
+            .arg(&target)
+            .output()
+            .expect("Failed to run CLI");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{ext} {command}: {stderr}");
+        assert!(stderr.contains("is a directory"), "{stderr}");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("keep.txt")).unwrap(),
+            "keep",
+            "{ext} {command}"
+        );
+        assert_eq!(file_names(temp.path()), [format!("target.{ext}")]);
+        std::fs::remove_dir_all(&dir).expect("Failed to remove directory");
+    }
+}

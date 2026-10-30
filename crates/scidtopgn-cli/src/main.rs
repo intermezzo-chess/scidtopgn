@@ -249,7 +249,7 @@ fn import_command(args: &ImportArgs, reporter: &Reporter) -> Result<()> {
     let total = db.num_games();
     db.close()?;
     if let Some(staging) = staging {
-        staging.finish(db_path)?;
+        staging.finish(db_path, &[])?;
     }
 
     reporter.info(format_args!(
@@ -327,15 +327,9 @@ fn merge_command(args: &MergeArgs, reporter: &Reporter) -> Result<()> {
     let total = db.num_games();
     db.close()
         .with_context(|| format!("Failed to write database '{}'", args.output))?;
-    // SCID's tree cache would be out of date, as `scmerge` removes it.
-    let stc = target.with_extension("stc");
-    match std::fs::remove_file(&stc) {
-        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
-            return Err(e).with_context(|| format!("Failed to remove '{}'", stc.display()));
-        }
-        _ => {}
-    }
-    staging.finish(target)?;
+    // Remove SCID's tree cache, which would be out of date, as `scmerge`
+    // does.
+    staging.finish(target, &["stc"])?;
 
     reporter.notice(format_args!(
         "Done. {} games merged from {} databases into {}.",
@@ -396,20 +390,34 @@ impl Staging {
         self.dir.path().join("database")
     }
 
-    /// Moves the database's files onto `database`, replacing any there. The
+    /// Moves the database's files onto `database`, replacing any there, and
+    /// removes the files at `database` with the extensions in `stale`. The
     /// index goes last, as `Database::flush` writes it last.
     ///
-    /// The files already at `database` are moved into the directory first.
-    /// If a file can't be moved, they are put back and the new files placed
-    /// so far are removed, so that `database` is as it was. If that fails
-    /// too, the directory is kept, so that no file of the old database is
-    /// lost.
-    fn finish(self, database: &Path) -> Result<()> {
+    /// The files already at `database` are moved into the directory first,
+    /// and removed with it. If a file can't be moved, they are put back and
+    /// the new files placed so far are removed, so that `database` is as it
+    /// was. If that fails too, the directory is kept, so that no file of the
+    /// old database is lost. A directory at one of the paths is an error,
+    /// and nothing is moved, because removing it would remove what it holds.
+    fn finish(self, database: &Path, stale: &[&'static str]) -> Result<()> {
+        let replaced: Vec<&str> = ["sg4", "sn4", "si4"].iter().chain(stale).copied().collect();
+        for ext in &replaced {
+            let path = database.with_extension(ext);
+            if path.symlink_metadata().is_ok_and(|m| m.is_dir()) {
+                anyhow::bail!(
+                    "Failed to write database '{}': '{}' is a directory",
+                    database.display(),
+                    path.display()
+                );
+            }
+        }
+
         let old = |ext: &str| self.dir.path().join("old").with_extension(ext);
         let mut moved_aside = Vec::new();
         let mut placed = Vec::new();
         let mut result = Ok(());
-        for ext in ["sg4", "sn4", "si4"] {
+        for ext in replaced {
             let to = database.with_extension(ext);
             if to.symlink_metadata().is_ok() {
                 result = std::fs::rename(&to, old(ext));
@@ -587,21 +595,60 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let existing = temp.path().join("db");
         write_database(&existing, "old");
+        std::fs::write(existing.with_extension("stc"), "old stc").unwrap();
         let missing = temp.path().join("missing");
 
-        assert!(incomplete_staging(&existing).finish(&existing).is_err());
-        assert!(incomplete_staging(&missing).finish(&missing).is_err());
+        assert!(incomplete_staging(&existing)
+            .finish(&existing, &["stc"])
+            .is_err());
+        assert!(incomplete_staging(&missing)
+            .finish(&missing, &["stc"])
+            .is_err());
 
         let old = ["old si4", "old sn4", "old sg4"].map(|s| Some(s.to_owned()));
         assert_eq!(read_database(&existing), old);
+        let stc = std::fs::read_to_string(existing.with_extension("stc")).unwrap();
+        assert_eq!(stc, "old stc");
         assert_eq!(read_database(&missing), [None, None, None]);
-        assert_eq!(file_names(temp.path()), ["db.sg4", "db.si4", "db.sn4"]);
+        assert_eq!(
+            file_names(temp.path()),
+            ["db.sg4", "db.si4", "db.sn4", "db.stc"]
+        );
 
         let staging = Staging::new(&existing).unwrap();
         write_database(&staging.database(), "new");
-        staging.finish(&existing).unwrap();
+        staging.finish(&existing, &["stc"]).unwrap();
         let new = ["new si4", "new sn4", "new sg4"].map(|s| Some(s.to_owned()));
         assert_eq!(read_database(&existing), new);
+        assert_eq!(file_names(temp.path()), ["db.sg4", "db.si4", "db.sn4"]);
+    }
+
+    #[test]
+    fn staging_refuses_to_replace_a_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let target = temp.path().join("db");
+        for ext in ["si4", "sg4", "stc"] {
+            write_database(&target, "old");
+            let dir = target.with_extension(ext);
+            std::fs::remove_file(&dir).ok();
+            std::fs::create_dir(&dir).unwrap();
+            std::fs::write(dir.join("keep.txt"), "keep").unwrap();
+
+            let staging = Staging::new(&target).unwrap();
+            write_database(&staging.database(), "new");
+            let err = staging.finish(&target, &["stc"]).unwrap_err();
+            assert!(err.to_string().contains("is a directory"), "{ext}: {err}");
+
+            let kept = std::fs::read_to_string(dir.join("keep.txt")).unwrap();
+            assert_eq!(kept, "keep", "{ext}");
+            // Nothing was moved.
+            for other in DATABASE_EXTENSIONS.iter().filter(|&&other| other != ext) {
+                let contents = std::fs::read_to_string(target.with_extension(other)).unwrap();
+                assert_eq!(contents, format!("old {other}"), "{ext}");
+            }
+            std::fs::remove_dir_all(&dir).unwrap();
+        }
+        // No staging directory is left.
         assert_eq!(file_names(temp.path()), ["db.sg4", "db.si4", "db.sn4"]);
     }
 }
