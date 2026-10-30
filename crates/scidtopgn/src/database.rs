@@ -17,6 +17,7 @@ use crate::namebase::{NameBase, NameType, NewIds};
 use crate::nfile::NFile;
 use crate::position::{fen, ScidPosition};
 use crate::replace::NewFiles;
+use crate::search::{self, HeaderSearch};
 use crate::twins::{self, TwinOptions};
 use crate::Date;
 use shakmaty::{Board, Position, Role};
@@ -766,6 +767,58 @@ impl Database {
         }
         deleted.sort_unstable();
         Ok(deleted)
+    }
+
+    /// Returns the games that meet every criterion of `search`, counting
+    /// from 0, in order, as SCID vs. PC's header search (`sc_search
+    /// header`) selects them. [`HeaderSearch`] describes each criterion.
+    ///
+    /// Only the index and the names are read, never a game's record. As in
+    /// SCID, a game whose index entry gives it no record never matches, and
+    /// logically deleted games match unless
+    /// [`HeaderFlags::deleted`](crate::HeaderFlags::deleted) excludes them.
+    /// The game length, side to move, and promotion, comment, variation, and
+    /// annotation flags come from the index. Version 0.1.0 of this crate
+    /// stored them as 0 for each game it added.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NameNotFound`] for a game whose index entry refers
+    /// to a name the name file lacks, if that name is one the search
+    /// compares.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use scidtopgn::{parse_single_game, Database, GameResult, HeaderSearch};
+    ///
+    /// # let dir = tempfile::tempdir()?;
+    /// # let path = dir.path().join("games");
+    /// # let mut db = Database::create(&path)?;
+    /// for pgn in [
+    ///     "[White \"Carlsen, Magnus\"]\n[Black \"Anand\"]\n[Result \"1-0\"]\n\n1. e4 e5 1-0",
+    ///     "[White \"Anand\"]\n[Black \"Carlsen, Magnus\"]\n[Result \"0-1\"]\n\n1. d4 d5 0-1",
+    /// ] {
+    ///     db.add_game(&parse_single_game(pgn)?)?;
+    /// }
+    ///
+    /// let wins_as_white = HeaderSearch {
+    ///     white: Some("carlsen".into()),
+    ///     results: vec![GameResult::White],
+    ///     ..HeaderSearch::default()
+    /// };
+    /// assert_eq!(db.search_header(&wins_as_white)?, [0]);
+    ///
+    /// // With colors ignored, the wins as Black match too.
+    /// let wins = HeaderSearch {
+    ///     ignore_colors: true,
+    ///     ..wins_as_white
+    /// };
+    /// assert_eq!(db.search_header(&wins)?, [0, 1]);
+    /// # Ok::<(), scidtopgn::Error>(())
+    /// ```
+    pub fn search_header(&self, search: &HeaderSearch) -> Result<Vec<u32>> {
+        search::search(&self.index, self.nfile.namebase(), search)
     }
 
     fn set_delete_flag(&mut self, game_num: u32, deleted: bool) -> Result<()> {
