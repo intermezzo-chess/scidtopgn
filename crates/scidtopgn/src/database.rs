@@ -427,8 +427,9 @@ impl Database {
     /// Returns [`Error::GameTooLarge`] if the game's record is longer than
     /// 131,071 bytes, the most the index can record,
     /// [`Error::TagTooLong`] if a tag's value is longer than 255 bytes,
-    /// [`Error::IndexFull`] or [`Error::NameBaseFull`] if the database can't
-    /// hold another game or name, [`Error::InvalidMove`] or
+    /// [`Error::IndexFull`], [`Error::NameBaseFull`], or
+    /// [`Error::GameFileFull`] if the database can't hold another game,
+    /// name, or record, [`Error::InvalidMove`] or
     /// [`Error::InvalidFen`] if the game's moves or starting position can't
     /// be stored, [`Error::ReadOnly`] if the database was opened with
     /// [`open_read_only`](Self::open_read_only), and [`Error::Io`] if the

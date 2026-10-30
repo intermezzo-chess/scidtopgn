@@ -194,6 +194,11 @@ pub enum Error {
         max: usize,
     },
 
+    /// A game record added to a game file that already reaches past the
+    /// largest offset an index entry can store, just under 4 GiB.
+    #[error("The game file is full: a SCID game file holds at most 4 GiB of games")]
+    GameFileFull,
+
     /// A tag whose value is too long to store in a game record.
     #[error("Tag {name} has a value {length} bytes long; at most {max} bytes fit")]
     TagTooLong {
