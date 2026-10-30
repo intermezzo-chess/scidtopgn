@@ -8,7 +8,9 @@
 
 use std::path::{Path, PathBuf};
 
-use scidtopgn::{parse_single_game, Database, DeleteTwin, Error, Index, IndexEntry, TwinOptions};
+use scidtopgn::{
+    parse_single_game, Database, DeleteTwin, Error, Game, Index, IndexEntry, TwinOptions,
+};
 use tempfile::TempDir;
 
 /// The number of games in `twins`.
@@ -229,20 +231,84 @@ fn test_copies_ratings_as_scid_does() {
     }
 }
 
-#[test]
-fn test_copies_the_kind_of_rating() {
-    let dir = TempDir::new().unwrap();
-    let options = TwinOptions {
+/// White's and Black's ratings of game `game_num`, each with its kind.
+fn ratings_of(db: &Database, game_num: u32) -> [(u16, u8); 2] {
+    let entry = db.get_entry(game_num).unwrap();
+    [
+        (entry.get_white_elo(), entry.get_white_rating_type()),
+        (entry.get_black_elo(), entry.get_black_rating_type()),
+    ]
+}
+
+/// Sets the ratings of game `game_num` of the database at `path`, each with
+/// its kind.
+fn set_ratings(
+    path: &Path,
+    game_num: u32,
+    [(white, white_kind), (black, black_kind)]: [(u16, u8); 2],
+) {
+    let si4 = path.with_extension("si4");
+    let mut index = Index::open(&si4).unwrap();
+    let entry = index.get_entry_mut(game_num).unwrap();
+    entry.set_white_elo(white);
+    entry.set_white_rating_type(white_kind);
+    entry.set_black_elo(black);
+    entry.set_black_rating_type(black_kind);
+    index
+        .flush(&mut std::fs::File::create(&si4).unwrap())
+        .unwrap();
+}
+
+fn copying_ratings() -> TwinOptions {
+    TwinOptions {
         copy_ratings: true,
         ..gui()
+    }
+}
+
+#[test]
+fn test_copies_ratings_with_their_kinds() {
+    let dir = TempDir::new().unwrap();
+    let path = written_moves(dir.path(), &[SHORT, LONG]);
+    set_ratings(&path, 0, [(2500, 3), (2400, 5)]);
+
+    let mut db = Database::open(&path).unwrap();
+    assert_eq!(db.delete_twins(&copying_ratings()).unwrap(), [0]);
+    assert_eq!(ratings_of(&db, 1), [(2500, 3), (2400, 5)]);
+    db.close().unwrap();
+    let db = Database::open_read_only(&path).unwrap();
+    assert_eq!(ratings_of(&db, 1), [(2500, 3), (2400, 5)]);
+}
+
+#[test]
+fn test_keeps_the_ratings_of_the_kept_game() {
+    let dir = TempDir::new().unwrap();
+    let path = written_moves(dir.path(), &[SHORT, LONG]);
+    set_ratings(&path, 0, [(2500, 3), (2400, 5)]);
+    set_ratings(&path, 1, [(2600, 2), (2300, 4)]);
+
+    let mut db = Database::open(&path).unwrap();
+    assert_eq!(db.delete_twins(&copying_ratings()).unwrap(), [0]);
+    assert_eq!(ratings_of(&db, 1), [(2600, 2), (2300, 4)]);
+}
+
+#[test]
+fn test_copies_white_rating_to_white_when_colors_are_swapped() {
+    let dir = TempDir::new().unwrap();
+    let games = [
+        game("Anand", "Carlsen", SHORT),
+        game("Carlsen", "Anand", LONG),
+    ];
+    let path = written(dir.path(), &games);
+    set_ratings(&path, 0, [(2500, 3), (2400, 5)]);
+
+    let options = TwinOptions {
+        colors: false,
+        ..copying_ratings()
     };
-    let (_, db) = delete_twins_in_copy(dir.path(), &options);
-    let deleted = db.get_entry(25).unwrap();
-    let kept = db.get_entry(26).unwrap();
-    assert_eq!(
-        kept.get_white_rating_type(),
-        deleted.get_white_rating_type()
-    );
+    let mut db = Database::open(&path).unwrap();
+    assert_eq!(db.delete_twins(&options).unwrap(), [0]);
+    assert_eq!(ratings_of(&db, 1), [(2500, 3), (2400, 5)]);
 }
 
 /// `entry` as the index file stores it, without its delete flag.
@@ -339,11 +405,36 @@ fn test_unreadable_record_changes_nothing() {
 }
 
 /// A game with `moves` between `white` and `black`.
-fn game(white: &str, black: &str, moves: &str) -> scidtopgn::Game {
+fn game(white: &str, black: &str, moves: &str) -> Game {
     parse_single_game(&format!(
-        "[White \"{white}\"]\n[Black \"{black}\"]\n[Site \"Oslo\"]\n[Round \"1\"]\n\n{moves} *"
+        "[Event \"Rapid\"]\n[Site \"Oslo\"]\n[Date \"2020.01.01\"]\n[Round \"1\"]\n\
+         [White \"{white}\"]\n[Black \"{black}\"]\n\n{moves} *"
     ))
     .unwrap()
+}
+
+/// Writes a database of `games` in `dir` and returns its path.
+fn written(dir: &Path, games: &[Game]) -> PathBuf {
+    let path = dir.join("games");
+    let mut db = Database::create(&path).unwrap();
+    for game in games {
+        db.add_game(game).unwrap();
+    }
+    db.close().unwrap();
+    path
+}
+
+/// Writes a database of games between Anand and Carlsen with each of
+/// `moves`, and returns its path.
+fn written_moves(dir: &Path, moves: &[&str]) -> PathBuf {
+    let games: Vec<Game> = moves.iter().map(|m| game("Anand", "Carlsen", m)).collect();
+    written(dir, &games)
+}
+
+/// The games `delete_twins` deletes from the database at `path` with
+/// `options`, leaving its files as they are.
+fn deleted_by(path: &Path, options: &TwinOptions) -> Vec<u32> {
+    Database::open(path).unwrap().delete_twins(options).unwrap()
 }
 
 #[test]
@@ -504,4 +595,168 @@ fn test_compares_moves_after_an_illegal_move_scid_can_decode() {
     let bad = &[(0, 8, BLOCKED_ROOK), (1, 8, BLOCKED_ROOK)];
     let path = with_moves_replaced(dir.path(), KNIGHTS, MORE_KNIGHTS, bad);
     assert_eq!(twins_and_readable(path), (vec![0], [false, false]));
+}
+
+#[test]
+fn test_compares_moves_that_differ_after_an_illegal_move_scid_can_decode() {
+    // Black's knight goes to c6 instead of f6 after the shared rook move.
+    let dir = TempDir::new().unwrap();
+    let bad = &[(0, 8, BLOCKED_ROOK), (1, 8, BLOCKED_ROOK), (1, 9, 0x28)];
+    let path = with_moves_replaced(dir.path(), KNIGHTS, MORE_KNIGHTS, bad);
+    assert_eq!(twins_and_readable(path), (vec![], [false, false]));
+}
+
+/// `full_moves` moves of White's and Black's kingside knights going out and
+/// back, as numbered movetext.
+fn knight_moves(full_moves: usize) -> String {
+    (1..=full_moves)
+        .map(|n| match n % 2 {
+            1 => format!("{n}. Nf3 Nf6 "),
+            _ => format!("{n}. Ng1 Ng8 "),
+        })
+        .collect()
+}
+
+#[test]
+fn test_home_pawns_must_match_after_the_moves_compared() {
+    // The games' first 120 half-moves are the same, but not their pawn moves
+    // after them.
+    let dir = TempDir::new().unwrap();
+    let knights = knight_moves(60);
+    let e4 = format!("{knights}61. e4 e5");
+    let d4 = format!("{knights}61. d4 d5");
+    let path = written_moves(dir.path(), &[&e4, &d4]);
+    assert_eq!(deleted_by(&path, &gui()), []);
+    let options = TwinOptions {
+        moves: false,
+        ..gui()
+    };
+    assert_eq!(deleted_by(&path, &options), [0]);
+}
+
+#[test]
+fn test_compares_the_120th_half_move() {
+    let dir = TempDir::new().unwrap();
+    let knights = knight_moves(59);
+    let back = format!("{knights}60. Ng1 Ng8");
+    let forward = format!("{knights}60. Ng1 Ne4");
+    let path = written_moves(dir.path(), &[&back, &forward]);
+    assert_eq!(deleted_by(&path, &gui()), []);
+}
+
+#[test]
+fn test_placeholders_have_at_most_two_half_moves() {
+    let options = TwinOptions {
+        skip_short: false,
+        ..gui()
+    };
+    for (placeholder, expected) in [
+        ("1. d4", vec![0]),
+        ("1. d4 d5", vec![0]),
+        ("1. d4 d5 2. Nf3", vec![]),
+    ] {
+        let dir = TempDir::new().unwrap();
+        let path = written_moves(dir.path(), &[placeholder, SHORT]);
+        assert_eq!(deleted_by(&path, &options), expected, "{placeholder}");
+    }
+}
+
+#[test]
+fn test_skip_short_leaves_out_games_of_nine_half_moves() {
+    let dir = TempDir::new().unwrap();
+    let nine = "1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O";
+    let path = written_moves(dir.path(), &[nine, SHORT]);
+    assert_eq!(deleted_by(&path, &gui()), []);
+    let options = TwinOptions {
+        skip_short: false,
+        ..gui()
+    };
+    assert_eq!(deleted_by(&path, &options), [0]);
+}
+
+#[test]
+fn test_compares_promotions() {
+    let dir = TempDir::new().unwrap();
+    let start = "[Event \"Rapid\"]\n[White \"Anand\"]\n[Black \"Carlsen\"]\n\
+        [SetUp \"1\"]\n[FEN \"4k3/P7/8/8/8/8/8/4K3 w - - 0 1\"]\n\n";
+    let games = ["Q", "R"].map(|piece| {
+        parse_single_game(&format!("{start}1. Kf2 Kf7 2. Ke3 Ke6 3. a8={piece} *")).unwrap()
+    });
+    let path = written(dir.path(), &games);
+    let options = TwinOptions {
+        skip_short: false,
+        ..gui()
+    };
+    assert_eq!(deleted_by(&path, &options), []);
+}
+
+#[test]
+fn test_skips_nags_and_variations_in_the_main_line() {
+    // NAG 14 is also the byte that ends a variation.
+    let differs = "1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Bd6 6. Re1 b5";
+    let options = TwinOptions {
+        comments: false,
+        variations: false,
+        ..gui()
+    };
+    for annotation in [" $14", " (3. Bc4 Bc5)", " (3. Bc4 (3. Nc3 Nf6) 3... Bc5)"] {
+        let annotated = SHORT.replace("3. Bb5", &format!("3. Bb5{annotation}"));
+        for (other, expected) in [(LONG, vec![0]), (differs, vec![])] {
+            let dir = TempDir::new().unwrap();
+            let path = written_moves(dir.path(), &[&annotated, other]);
+            assert_eq!(
+                deleted_by(&path, &options),
+                expected,
+                "{annotation}, {other}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_player_prefixes_match_when_scids_hashes_do() {
+    // As signed bytes, 0x63 0xC3 and 0x62 0x43 add to the same hash.
+    let dir = TempDir::new().unwrap();
+    let games = ["AbcÀ", "AbbC"].map(|white| game(white, "Black", SHORT));
+    let path = written(dir.path(), &games);
+    let options = TwinOptions {
+        players: false,
+        ..gui()
+    };
+    assert_eq!(deleted_by(&path, &options), [0]);
+}
+
+/// Asserts that a game with `moves` is the twin of a copy, and not of
+/// `different`, which differs only in its last half-move.
+fn assert_compared_to_the_end(moves: &str, different: &str) {
+    for (other, expected) in [(moves, vec![0]), (different, vec![])] {
+        let dir = TempDir::new().unwrap();
+        let path = written_moves(dir.path(), &[moves, other]);
+        assert_eq!(deleted_by(&path, &gui()), expected, "{other}");
+    }
+}
+
+#[test]
+fn test_compares_moves_after_a_diagonal_queen_move() {
+    assert_compared_to_the_end(
+        "1. e4 e5 2. Qh5 Nc6 3. Bc4 Nf6 4. Qf3 d6 5. Ne2 Be7",
+        "1. e4 e5 2. Qh5 Nc6 3. Bc4 Nf6 4. Qf3 d6 5. Ne2 Bd7",
+    );
+}
+
+#[test]
+fn test_compares_moves_of_pieces_renumbered_by_captures() {
+    // Each capture gives the captured piece's number to its side's h-pawn.
+    assert_compared_to_the_end(
+        "1. e4 d5 2. exd5 Qxd5 3. Nc3 Qd8 4. h3 h6 5. Nf3 h5",
+        "1. e4 d5 2. exd5 Qxd5 3. Nc3 Qd8 4. h3 h6 5. Nf3 Nf6",
+    );
+}
+
+#[test]
+fn test_compares_moves_after_null_moves() {
+    assert_compared_to_the_end(
+        "1. Nf3 Nf6 2. -- -- 3. Ng1 Ng8 4. Nf3 Nf6 5. Ng1 Ng8",
+        "1. Nf3 Nf6 2. -- -- 3. Ng1 Ng8 4. Nf3 Nf6 5. Ng1 Nh5",
+    );
 }
