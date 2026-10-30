@@ -716,9 +716,10 @@ impl Database {
     /// Returns [`Error::ReadOnly`] if the database was opened with
     /// [`open_read_only`](Self::open_read_only), and [`Error::Game`] for a
     /// game whose record can't be read from the game file, while comparing
-    /// its moves. After an error, nothing has changed. A record that can be
-    /// read but whose moves can't be decoded is compared as SCID compares
-    /// it, up to the move that can't be decoded.
+    /// its moves. After an error, nothing has changed. Moves are decoded as
+    /// SCID's twin search decodes them, without checking that they are
+    /// legal, and a record whose moves can't be decoded is compared up to
+    /// the move that can't be.
     ///
     /// # Examples
     ///

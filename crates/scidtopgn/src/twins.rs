@@ -4,7 +4,7 @@
 
 use std::cmp::Reverse;
 
-use shakmaty::{Position, Role, Square};
+use shakmaty::{ByColor, Color, Piece, Position, Role};
 
 use crate::bytebuf::ByteBuffer;
 use crate::error::{Error, Result};
@@ -12,8 +12,8 @@ use crate::game::Game;
 use crate::gfile::GFile;
 use crate::index::{Index, IndexEntry, HPSIG_SIZE};
 use crate::mov::{
-    decode_move, destination, GameMove, ENCODE_COMMENT, ENCODE_END_GAME, ENCODE_END_MARKER,
-    ENCODE_NAG, ENCODE_START_MARKER,
+    ENCODE_COMMENT, ENCODE_END_GAME, ENCODE_END_MARKER, ENCODE_NAG, ENCODE_START_MARKER,
+    KING_SQDIFF, KNIGHT_SQDIFF, PAWN_PROMO, PAWN_SQDIFF,
 };
 use crate::namebase::{NameBase, NameType};
 use crate::position::ScidPosition;
@@ -384,14 +384,14 @@ fn read_record(gfile: &mut GFile, (game, entry): (u32, &IndexEntry)) -> Result<B
 
 /// A move as SCID compares moves: its from-square, its to-square (the
 /// king's for castling, and the king's own square for a null move), and its
-/// promotion.
-type MoveSquares = (Square, Square, Option<Role>);
+/// promotion. Squares count from a1 to h8, as in SCID and shakmaty.
+type MoveSquares = (usize, usize, Option<Role>);
 
 /// Reads the main line of a game record one move at a time, as SCID's
 /// `Game::DecodeNextMove` does.
 struct MainLine {
     buf: ByteBuffer,
-    position: ScidPosition,
+    board: Board,
 }
 
 impl MainLine {
@@ -401,7 +401,10 @@ impl MainLine {
         let mut game = Game::new();
         game.decode_start(&mut buf).ok()?;
         let position = game.initial_position().ok()?;
-        Some(MainLine { buf, position })
+        Some(MainLine {
+            buf,
+            board: Board::new(&position),
+        })
     }
 
     /// Returns the next move of the main line, skipping NAGs, comments, and
@@ -417,17 +420,8 @@ impl MainLine {
                 ENCODE_START_MARKER => self.skip_variation()?,
                 ENCODE_END_MARKER | ENCODE_END_GAME => return None,
                 byte => {
-                    let mv = decode_move(&mut self.buf, &self.position, byte).ok()?;
-                    let chess = self.position.chess();
-                    let color = chess.turn();
-                    let squares = match mv {
-                        GameMove::Move(m) => (m.from()?, destination(m, color), m.promotion()),
-                        GameMove::Null => {
-                            let king = chess.board().king_of(color)?;
-                            (king, king, None)
-                        }
-                    };
-                    self.position.play(mv).ok()?;
+                    let squares = self.board.decode(&mut self.buf, byte)?;
+                    self.board.play(squares)?;
                     return Some(squares);
                 }
             }
@@ -448,6 +442,163 @@ impl MainLine {
                 ENCODE_END_GAME => return None,
                 _ => {}
             }
+        }
+        Some(())
+    }
+}
+
+/// The pieces and SCID's numbering of them, as SCID's `decodeMove` and
+/// `Position::DoSimpleMove` read and change them while the twin search
+/// compares moves. Like SCID, it doesn't check that a move is legal, so a
+/// game is compared past an illegal move SCID can decode.
+///
+/// Where SCID would read a square off the board, or the number of a piece
+/// that isn't there, its result is undefined, and the move ends the game
+/// instead.
+struct Board {
+    pieces: [Option<Piece>; 64],
+    /// Each side's pieces' squares, by number.
+    squares: ByColor<[usize; 16]>,
+    /// The number of pieces each side has.
+    counts: ByColor<usize>,
+    /// The number of the piece on each square.
+    numbers: [usize; 64],
+    turn: Color,
+}
+
+impl Board {
+    fn new(position: &ScidPosition) -> Self {
+        let chess = position.chess();
+        let list = position.pieces();
+        let mut board = Board {
+            pieces: [None; 64],
+            squares: ByColor::default(),
+            counts: ByColor::default(),
+            numbers: [0; 64],
+            turn: chess.turn(),
+        };
+        for (square, piece) in chess.board() {
+            board.pieces[square.to_usize()] = Some(piece);
+        }
+        for color in Color::ALL {
+            let count = list.count(color);
+            for number in 0..count {
+                if let Some(square) = list.square(color, number) {
+                    board.squares.get_mut(color)[usize::from(number)] = square.to_usize();
+                    board.numbers[square.to_usize()] = usize::from(number);
+                }
+            }
+            *board.counts.get_mut(color) = usize::from(count);
+        }
+        board
+    }
+
+    /// Decodes the move whose first byte, `byte`, was just read from `buf`,
+    /// as SCID's `decodeMove` does.
+    fn decode(&self, buf: &mut ByteBuffer, byte: u8) -> Option<MoveSquares> {
+        let number = usize::from(byte >> 4);
+        if number >= *self.counts.get(self.turn) {
+            return None;
+        }
+        let from = self.squares.get(self.turn)[number];
+        let piece = self.pieces[from]?;
+        let value = byte & 15;
+        let index = usize::from(value);
+        let (from_i, value_i) = (from as i32, i32::from(value));
+        let (file, rank) = (from_i % 8, from_i / 8);
+        let mut promotion = None;
+        let to = match piece.role {
+            Role::Pawn => {
+                promotion = PAWN_PROMO[index];
+                match self.turn {
+                    Color::White => from_i + PAWN_SQDIFF[index],
+                    Color::Black => from_i - PAWN_SQDIFF[index],
+                }
+            }
+            Role::Knight => from_i + KNIGHT_SQDIFF.get(index).filter(|_| index > 0)?,
+            Role::Rook if value >= 8 => file + 8 * (value_i - 8),
+            Role::Rook => value_i + 8 * rank,
+            Role::Bishop => {
+                let file_diff = (value_i & 7) - file;
+                if value >= 8 {
+                    from_i - 7 * file_diff
+                } else {
+                    from_i + 9 * file_diff
+                }
+            }
+            // A king move of 0 is a null move.
+            Role::King => from_i + KING_SQDIFF.get(index)?,
+            Role::Queen if value >= 8 => file + 8 * (value_i - 8),
+            Role::Queen if value_i != file => value_i + 8 * rank,
+            Role::Queen => match buf.get_byte().ok()? {
+                diagonal @ 64..=127 => i32::from(diagonal) - 64,
+                _ => return None,
+            },
+        };
+        let to = usize::try_from(to).ok().filter(|&to| to < 64)?;
+        Some((from, to, promotion))
+    }
+
+    /// Plays `(from, to, promotion)`, a move [`decode`](Self::decode)
+    /// returned, as SCID's `Position::DoSimpleMove` does.
+    fn play(&mut self, (from, to, promotion): MoveSquares) -> Option<()> {
+        let turn = self.turn;
+        let enemy = !turn;
+        let piece = self.pieces[from]?;
+        let number = self.numbers[from];
+        self.turn = enemy;
+        if from == to && piece.role == Role::King {
+            return Some(());
+        }
+
+        // SCID takes a pawn that changes file without capturing to capture
+        // en passant, whatever is on the square behind.
+        let mut captured = to;
+        if piece.role == Role::Pawn && self.pieces[to].is_none() && from % 8 != to % 8 {
+            captured = match turn {
+                Color::White => to.checked_sub(8)?,
+                Color::Black => Some(to + 8).filter(|&sq| sq < 64)?,
+            };
+            self.pieces[captured]?;
+        }
+        if self.pieces[captured].is_some() {
+            // The enemy's last piece takes the captured piece's number, even
+            // if the captured piece is the mover's own.
+            let captured_number = self.numbers[captured];
+            let count = self.counts.get_mut(enemy);
+            *count = count.checked_sub(1)?;
+            let last = self.squares.get(enemy)[*count];
+            self.numbers[last] = captured_number;
+            self.squares.get_mut(enemy)[captured_number] = last;
+            self.pieces[captured] = None;
+        }
+
+        let moved = match promotion {
+            Some(role) => Piece { color: turn, role },
+            None => piece,
+        };
+        self.squares.get_mut(turn)[number] = to;
+        self.numbers[to] = number;
+        self.pieces[from] = None;
+        self.pieces[to] = Some(moved);
+
+        // SCID castles any king move from the e-file to the c- or g-file,
+        // putting a rook beside it.
+        if piece.role == Role::King && from % 8 == 4 && matches!(to % 8, 2 | 6) {
+            let (rook_from, rook_to) = if to % 8 == 2 {
+                (to - 2, to + 1)
+            } else {
+                (to + 1, to - 1)
+            };
+            self.pieces[rook_from]?;
+            let rook_number = self.numbers[rook_from];
+            self.numbers[rook_to] = rook_number;
+            self.squares.get_mut(turn)[rook_number] = rook_to;
+            self.pieces[rook_from] = None;
+            self.pieces[rook_to] = Some(Piece {
+                color: turn,
+                role: Role::Rook,
+            });
         }
         Some(())
     }

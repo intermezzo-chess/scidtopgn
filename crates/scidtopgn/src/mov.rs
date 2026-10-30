@@ -56,10 +56,10 @@ pub fn parse_move_byte(byte: u8) -> (u8, u8) {
     (byte >> 4, byte & 0x0F)
 }
 
-const KING_SQDIFF: [i32; 11] = [0, -9, -8, -7, -1, 1, 7, 8, 9, -2, 2];
-const KNIGHT_SQDIFF: [i32; 9] = [0, -17, -15, -10, -6, 6, 10, 15, 17];
-const PAWN_SQDIFF: [i32; 16] = [7, 8, 9, 7, 8, 9, 7, 8, 9, 7, 8, 9, 7, 8, 9, 16];
-const PAWN_PROMO: [Option<Role>; 16] = [
+pub(crate) const KING_SQDIFF: [i32; 11] = [0, -9, -8, -7, -1, 1, 7, 8, 9, -2, 2];
+pub(crate) const KNIGHT_SQDIFF: [i32; 9] = [0, -17, -15, -10, -6, 6, 10, 15, 17];
+pub(crate) const PAWN_SQDIFF: [i32; 16] = [7, 8, 9, 7, 8, 9, 7, 8, 9, 7, 8, 9, 7, 8, 9, 16];
+pub(crate) const PAWN_PROMO: [Option<Role>; 16] = [
     None,
     None,
     None,
@@ -87,7 +87,7 @@ const KNIGHT_DIFF_TO_VAL: [u8; 35] = [
 
 /// The square SCID records as a move's destination: the king's destination
 /// for castling.
-pub(crate) fn destination(m: Move, color: Color) -> Square {
+fn destination(m: Move, color: Color) -> Square {
     match m.castling_side() {
         Some(side) => side.king_to(color),
         None => m.to(),
