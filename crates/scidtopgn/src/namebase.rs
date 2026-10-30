@@ -172,6 +172,13 @@ impl NameBase {
         self.num_names[ntype.as_usize()]
     }
 
+    /// Returns one more than the highest ID of a name of kind `ntype`, or 0
+    /// if there is none. IDs can have gaps, so this can be more than
+    /// [`count`](Self::count).
+    pub(crate) fn id_bound(&self, ntype: NameType) -> u32 {
+        self.by_id[ntype.as_usize()].len() as u32
+    }
+
     /// Returns the kind and text of each name that
     /// [`read_sn4`](Self::read_sn4) read from bytes that weren't valid UTF-8,
     /// in the order the file stores them. A [`Database`](crate::Database)

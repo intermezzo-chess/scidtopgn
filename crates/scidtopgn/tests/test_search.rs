@@ -883,3 +883,71 @@ fn selects_every_game_by_default_up_to_999_half_moves() {
         );
     }
 }
+
+#[test]
+fn accepts_any_rating_difference_bounds() {
+    let db = Database::open_read_only(data_path("search")).unwrap();
+    for ignore_colors in [false, true] {
+        for (wide, narrow) in [
+            (i32::MIN..=0, -4000..=0),
+            (0..=i32::MAX, 0..=4000),
+            (i32::MIN..=i32::MAX, -4000..=4000),
+        ] {
+            let search = |elo_diff| HeaderSearch {
+                elo_diff,
+                ignore_colors,
+                ..HeaderSearch::default()
+            };
+            assert_eq!(
+                selected(&db, &search(wide.clone())),
+                selected(&db, &search(narrow.clone())),
+                "{wide:?} {ignore_colors}"
+            );
+        }
+    }
+}
+
+#[test]
+fn finds_names_and_ratings_past_a_gap_in_the_ids() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("gap");
+    let mut db = Database::create(&path).unwrap();
+    for pgn in [
+        "[White \"A\"]\n[Black \"B\"]\n[BlackElo \"2800\"]\n\n1. e4 *\n",
+        "[White \"A\"]\n[Black \"B\"]\n\n1. d4 *\n",
+    ] {
+        db.add_game(&scidtopgn::parse_single_game(pgn).unwrap())
+            .unwrap();
+    }
+    db.close().unwrap();
+
+    // Give B the player ID 2, so that no name has ID 1. The name file
+    // starts with 36 bytes of header, then A's 5 bytes; B's ID is next.
+    let sn4_path = path.with_extension("sn4");
+    let mut sn4 = std::fs::read(&sn4_path).unwrap();
+    assert_eq!(sn4[36..41], [0, 0, 2, 1, b'A']);
+    assert_eq!(sn4[41..43], [0, 1]);
+    sn4[42] = 2;
+    std::fs::write(&sn4_path, sn4).unwrap();
+    let si4_path = path.with_extension("si4");
+    let mut index = scidtopgn::Index::open(&si4_path).unwrap();
+    for game in 0..2 {
+        index.get_entry_mut(game).unwrap().set_black(2);
+    }
+    index
+        .flush(&mut std::fs::File::create(&si4_path).unwrap())
+        .unwrap();
+
+    let db = Database::open_read_only(&path).unwrap();
+    let by_black = HeaderSearch {
+        black: Some("B".into()),
+        ..HeaderSearch::default()
+    };
+    assert_eq!(db.search_header(&by_black).unwrap(), [0, 1]);
+    // The unrated game takes B's rating from the other.
+    let rated = HeaderSearch {
+        black_elo: 2500..=4000,
+        ..HeaderSearch::default()
+    };
+    assert_eq!(db.search_header(&rated).unwrap(), [0, 1]);
+}

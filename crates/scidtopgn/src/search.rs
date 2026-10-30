@@ -271,9 +271,11 @@ pub(crate) fn search(index: &Index, names: &NameBase, search: &HeaderSearch) -> 
     for result in &search.results {
         results[usize::from(result.to_byte())] = true;
     }
+    // Ratings are compared as `i64`, so that negating any `i32` bound to
+    // swap colors can't overflow.
     let (diff_min, diff_max) = {
         let (a, b) = (*search.elo_diff.start(), *search.elo_diff.end());
-        (a.min(b), a.max(b))
+        (i64::from(a.min(b)), i64::from(a.max(b)))
     };
     let to_move = match search.to_move {
         None => [true, true],
@@ -332,14 +334,14 @@ fn game_range((first, last): (i64, i64), num_games: u32) -> (u64, u64) {
     (first.min(last), first.max(last))
 }
 
-fn u16_range(range: &RangeInclusive<u16>) -> (i32, i32) {
-    (i32::from(*range.start()), i32::from(*range.end()))
+fn u16_range(range: &RangeInclusive<u16>) -> (i64, i64) {
+    (i64::from(*range.start()), i64::from(*range.end()))
 }
 
 /// Each player's highest rating in any game of `index`, by player ID, as
 /// SCID's `recalcFlagCounts` collects them.
 fn highest_elo(index: &Index, names: &NameBase) -> Vec<u16> {
-    let mut highest = vec![0u16; names.count(NameType::Player) as usize];
+    let mut highest = vec![0u16; names.id_bound(NameType::Player) as usize];
     for entry in index.entries() {
         for (id, elo) in [
             (entry.get_white(), entry.get_white_elo()),
@@ -369,7 +371,7 @@ impl NameMatches {
             .strip_prefix('"')
             .and_then(|rest| rest.strip_suffix('"'))
             .map(|pattern| pattern.chars().collect::<Vec<_>>());
-        let matches = (0..names.count(name_type))
+        let matches = (0..names.id_bound(name_type))
             .map(|id| {
                 let name = names.get_name(name_type, id)?;
                 Some(match &pattern {
@@ -400,8 +402,8 @@ impl NameMatches {
 struct Sides<'a> {
     names: [Option<&'a NameMatches>; 2],
     results: [bool; 4],
-    elo: [(i32, i32); 2],
-    elo_diff: (i32, i32),
+    elo: [(i64, i64); 2],
+    elo_diff: (i64, i64),
     to_move: [bool; 2],
 }
 
@@ -460,7 +462,7 @@ impl Criteria<'_> {
             return Ok(false);
         }
 
-        let elo = |id: u32, elo: u16| -> i32 {
+        let elo = |id: u32, elo: u16| -> i64 {
             match elo {
                 0 => self.highest_elo.get(id as usize).copied().unwrap_or(0),
                 elo => elo,
@@ -469,7 +471,7 @@ impl Criteria<'_> {
         };
         let white_elo = elo(entry.get_white(), entry.get_white_elo());
         let black_elo = elo(entry.get_black(), entry.get_black_elo());
-        let in_range = |value: i32, (min, max): (i32, i32)| (min..=max).contains(&value);
+        let in_range = |value: i64, (min, max): (i64, i64)| (min..=max).contains(&value);
         if !in_range(white_elo, sides.elo[0])
             || !in_range(black_elo, sides.elo[1])
             || !in_range(white_elo - black_elo, sides.elo_diff)
