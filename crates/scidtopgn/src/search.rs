@@ -154,6 +154,12 @@ impl HeaderFlags {
 /// Names are compared as they are read, as UTF-8, including names converted
 /// from Windows-1252.
 ///
+/// In a pattern, a character is a Unicode character, as in the Tcl 8.6.13
+/// that SCID vs. PC 4.27 for macOS bundles, and in Tcl 9. So `?` matches an
+/// emoji such as `🏆`. SCID built with Tcl 8.5 differs for characters above
+/// U+FFFF, such as emoji: it treats each of their four UTF-8 bytes as a
+/// character, so there `????` matches `🏆` and `?` doesn't.
+///
 /// # Examples
 ///
 /// ```
@@ -651,6 +657,10 @@ mod tests {
         assert!(!matches("Carlsen", "carlsen"));
         assert!(matches("Anand, Viswanathan", "Anand, ?iswanathan"));
         assert!(matches("Müller", "M?ller"));
+        // A character above U+FFFF is one character, as in Tcl 8.6.13 and 9.
+        assert!(matches("Rapid 🏆", "Rapid ?"));
+        assert!(!matches("Rapid 🏆", "Rapid ????"));
+        assert!(matches("Rapid 🏆", "Rapid [🏆]"));
         assert!(matches("Carlsen", "*sen"));
         assert!(matches("Carlsen", "C**l*n"));
         assert!(!matches("Carlsen", "*x*"));

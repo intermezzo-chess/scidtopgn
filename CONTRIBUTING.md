@@ -101,7 +101,10 @@ The flags are already set, and setting a flag again changes nothing, so
 running the script leaves the database unchanged.
 `tcscid` is built from `scidvspc/` like `pgnscid`, with `make tcscid`, on a
 platform whose `char` is signed, such as x86 or Apple arm64, as SCID's name hash
-depends on it.
+depends on it. Built on macOS, it links the system's Tcl 8.5.9, while SCID vs.
+PC 4.27 for macOS bundles Tcl 8.6.13. The two differ in how a search pattern
+counts characters above U+FFFF, such as emoji, so `search.pgn` has none, and
+the header search follows Tcl 8.6, as `HeaderSearch` documents.
 `notation.pgn` has one game per case in
 [docs/PGN_IMPORT.md](docs/PGN_IMPORT.md). `.gitignore` excludes `*.si4`, `*.sn4`, and `*.sg4` everywhere, so new
 fixtures must be added with `git add -f`.

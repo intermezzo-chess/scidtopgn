@@ -72,7 +72,7 @@ A range is `FROM..TO`, and either end can be left out, as in `2500..` or `..1999
 
 | Argument | Value | Description |
 |----------|-------|-------------|
-| `--white`, `--black`, `--event`, `--site`, `--round` | text | The name contains the text, ignoring ASCII case and every space, so `carl sen` matches `Carlsen, Magnus`. Text that ends with a space matches nothing, as in SCID. In double quotes, such as `'"Carlsen*"'`, the whole name must match the text as a pattern, with case: `*` matches any characters, `?` one character, `[a-z]` one of a set, and `\` makes the next character literal |
+| `--white`, `--black`, `--event`, `--site`, `--round` | text | The name contains the text, ignoring ASCII case and every space, so `carl sen` matches `Carlsen, Magnus`. Text that ends with a space matches nothing, as in SCID. In double quotes, such as `'"Carlsen*"'`, the whole name must match the text as a pattern, with case: `*` matches any characters, `?` one character, `[a-z]` one of a set, and `\` makes the next character literal. A character is a Unicode character, as in the Tcl 8.6.13 bundled with SCID vs. PC 4.27 for macOS, so `?` matches an emoji. SCID built with Tcl 8.5 counts each byte of an emoji as a character |
 | `--date` | `FROM..TO` | Dates are `YYYY`, `YYYY.MM`, or `YYYY.MM.DD`. A shorter end date means the end of that year or month, so `2023..2023` is all of 2023. Unknown parts of a game's date come first: `2023.??.??` is before `2023.01.01` |
 | `--result` | list | Results separated by commas: `1-0`, `1/2-1/2`, `0-1`, and `*` |
 | `--white-elo`, `--black-elo` | `MIN..MAX` | A player's rating, up to 4000. A player without one in a game counts with their highest rating in any game of the database, deleted or not, or 0, as in SCID |
