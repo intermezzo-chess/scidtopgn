@@ -65,7 +65,8 @@
 //! A game record is decoded into a [`Game`] by [`game`], using SCID's move
 //! encoding from [`mov`] and the piece numbering in [`position`].
 //! [`bytebuf`] reads and writes the record's bytes, and [`date`] SCID's packed
-//! dates. Chess rules come from [`shakmaty`], which is re-exported. [`pgn`]
+//! dates. [`twins`] chooses the twin games [`Database::delete_twins`]
+//! deletes. Chess rules come from [`shakmaty`], which is re-exported. [`pgn`]
 //! reads PGN, and [`error`] defines the errors.
 //!
 //! Games are numbered from 0 in this API and from 1 in error messages. The
@@ -89,6 +90,7 @@ pub mod nfile;
 pub mod pgn;
 pub mod position;
 mod replace;
+pub mod twins;
 
 pub use bytebuf::ByteBuffer;
 pub use common::GameResult;
@@ -117,6 +119,7 @@ pub use pgn::{parse_pgn, parse_single_game, PgnParser, PgnWarning, PgnWarningKin
 pub use position::{PieceList, ScidPosition};
 /// The chess library that provides the rules, positions, and moves.
 pub use shakmaty;
+pub use twins::{DeleteTwin, TwinOptions};
 
 /// This crate's version, such as `0.1.0`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

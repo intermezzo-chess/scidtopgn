@@ -87,7 +87,7 @@ const KNIGHT_DIFF_TO_VAL: [u8; 35] = [
 
 /// The square SCID records as a move's destination: the king's destination
 /// for castling.
-fn destination(m: Move, color: Color) -> Square {
+pub(crate) fn destination(m: Move, color: Color) -> Square {
     match m.castling_side() {
         Some(side) => side.king_to(color),
         None => m.to(),

@@ -2,7 +2,7 @@
 //! `.sn4` file.
 
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::io::{Read, Write};
 
@@ -115,6 +115,9 @@ pub struct NameBase {
     timestamp: u32,
     /// The names read from bytes that weren't valid UTF-8, by kind.
     converted: Vec<(NameType, String)>,
+    /// The bytes the name file stores for each name read from other bytes
+    /// than its own, by kind and ID.
+    stored: [HashMap<u32, Vec<u8>>; NUM_NAME_TYPES],
 }
 
 impl Default for NameBase {
@@ -138,6 +141,7 @@ impl NameBase {
             max_frequency: [0; NUM_NAME_TYPES],
             timestamp: 0,
             converted: Vec::new(),
+            stored: Default::default(),
         }
     }
 
@@ -150,7 +154,7 @@ impl NameBase {
             self.max_frequency[i] = 0;
         }
         self.timestamp = 0;
-        self.converted.clear();
+        self.clear_converted();
     }
 
     /// Sets the timestamp written to the file's header.
@@ -179,10 +183,23 @@ impl NameBase {
         &self.converted
     }
 
-    /// Empties the list of [`converted_names`](Self::converted_names), once
-    /// the names have been written as UTF-8.
+    /// Empties the list of [`converted_names`](Self::converted_names), and
+    /// forgets the bytes names were read from, once the names have been
+    /// written as UTF-8.
     pub(crate) fn clear_converted(&mut self) {
         self.converted.clear();
+        self.stored.iter_mut().for_each(HashMap::clear);
+    }
+
+    /// Returns the bytes the name file stores for the name with ID `id`, or
+    /// `None` if there is no such name. They differ from the name's UTF-8
+    /// when it was read from bytes that weren't valid UTF-8, or had
+    /// characters that reading it removed, until the names are written.
+    pub(crate) fn stored_bytes(&self, ntype: NameType, id: u32) -> Option<&[u8]> {
+        match self.stored[ntype.as_usize()].get(&id) {
+            Some(bytes) => Some(bytes),
+            None => self.get_name(ntype, id).map(str::as_bytes),
+        }
     }
 
     /// Returns the highest frequency of any name of kind `ntype`.
@@ -219,6 +236,7 @@ impl NameBase {
             name: name.to_string(),
             frequency: 0,
         };
+        self.stored[idx].remove(&id);
 
         self.trees[idx].insert(name.to_string(), id);
 
@@ -570,6 +588,9 @@ impl NameBase {
                 let clean_name = stored_name(name.trim()).trim_end().to_string();
                 if converted {
                     self.converted.push((ntype, clean_name.clone()));
+                }
+                if name_bytes != clean_name.as_bytes() {
+                    self.stored[ntype.as_usize()].insert(id, name_bytes.clone());
                 }
 
                 let entry = NameEntry {
