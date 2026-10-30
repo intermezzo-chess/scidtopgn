@@ -2422,18 +2422,24 @@ fn copy_fixture(dir: &Path, name: &str) -> PathBuf {
 #[test]
 fn test_cli_merge_copies_every_game_in_order() {
     let temp = TempDir::new().expect("Failed to create temp dir");
+    let one = copy_fixture(temp.path(), "one");
+    // `one` is given twice, and its games are copied twice.
     let sources = [
         copy_with_deleted(temp.path(), "five", &[1, 3]),
-        copy_fixture(temp.path(), "one"),
+        one.clone(),
         copy_fixture(temp.path(), "annotated"),
         copy_fixture(temp.path(), "latin1"),
-        copy_fixture(temp.path(), "one"),
+        one,
     ];
     let before: Vec<_> = sources.iter().map(|db| database_bytes(db)).collect();
     let expected: String = sources.iter().map(|db| export_both_ways(db)).collect();
     // The files can't be opened for writing, so merge passes only if it
-    // opens them read-only.
-    let _read_only: Vec<_> = sources.iter().map(|db| ReadOnlyFiles::new(db)).collect();
+    // opens them read-only. Each database is made read-only once, so that
+    // dropping the guards makes every file writable again.
+    let _read_only: Vec<_> = sources[..4]
+        .iter()
+        .map(|db| ReadOnlyFiles::new(db))
+        .collect();
 
     let merged = temp.path().join("merged");
     let mut args: Vec<&std::ffi::OsStr> = sources.iter().map(|db| db.as_os_str()).collect();
