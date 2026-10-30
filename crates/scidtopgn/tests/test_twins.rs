@@ -409,3 +409,64 @@ fn test_player_prefixes_compare_names_as_stored() {
     db.flush().unwrap();
     assert_eq!(db.delete_twins(&options).unwrap(), [0]);
 }
+
+/// Ten half-moves of knight moves, and a game that repeats them and goes on.
+const KNIGHTS: &str = "1. Nf3 Nf6 2. Ng1 Ng8 3. Nf3 Nf6 4. Ng1 Ng8 5. Nf3 Nf6";
+const MORE_KNIGHTS: &str = "1. Nf3 Nf6 2. Ng1 Ng8 3. Nf3 Nf6 4. Ng1 Ng8 5. Nf3 Nf6 6. Ng1 Ng8";
+
+/// Writes a database of two games between the same players, with `shorter`
+/// and `longer` moves, and replaces half-move `half_move` of game `bad`,
+/// counting from 0, with a king move off the board. Returns its path.
+fn with_bad_move(dir: &Path, shorter: &str, longer: &str, bad: u32, half_move: usize) -> PathBuf {
+    let path = dir.join("games");
+    let mut db = Database::create(&path).unwrap();
+    db.add_game(&game("Anand", "Carlsen", shorter)).unwrap();
+    db.add_game(&game("Anand", "Carlsen", longer)).unwrap();
+    db.close().unwrap();
+
+    let db = Database::open_read_only(&path).unwrap();
+    let offset = db.get_entry(bad).unwrap().get_offset() as usize;
+    let sg4 = path.with_extension("sg4");
+    let mut records = std::fs::read(&sg4).unwrap();
+    // The record has no tags and starts from the standard position, so its
+    // moves start at its third byte, one byte each.
+    assert_eq!(records[offset..offset + 2], [0, 0]);
+    let at = offset + 2 + half_move;
+    assert_ne!(records[at], 0x0F, "the half-move is in the game");
+    records[at] = 0x01;
+    std::fs::write(&sg4, records).unwrap();
+    path
+}
+
+#[test]
+fn test_compares_the_shorter_game_up_to_a_move_that_cant_be_decoded() {
+    // The shorter game differs at its ninth half-move, which can't be
+    // decoded, so only the first 8 are compared.
+    let differs = "1. Nf3 Nf6 2. Ng1 Ng8 3. Nf3 Nf6 4. Ng1 Ng8 5. Nc3 Nc6";
+    let dir = TempDir::new().unwrap();
+    let mut db = Database::create(dir.path().join("intact")).unwrap();
+    db.add_game(&game("Anand", "Carlsen", differs)).unwrap();
+    db.add_game(&game("Anand", "Carlsen", MORE_KNIGHTS))
+        .unwrap();
+    assert_eq!(db.delete_twins(&gui()).unwrap(), []);
+
+    let path = with_bad_move(dir.path(), differs, MORE_KNIGHTS, 0, 8);
+    let mut db = Database::open(path).unwrap();
+    assert!(db.get_game(0).is_err());
+    assert_eq!(db.delete_twins(&gui()).unwrap(), [0]);
+}
+
+#[test]
+fn test_longer_game_with_a_move_that_cant_be_decoded_is_no_twin() {
+    let dir = TempDir::new().unwrap();
+    let mut db = Database::create(dir.path().join("intact")).unwrap();
+    db.add_game(&game("Anand", "Carlsen", KNIGHTS)).unwrap();
+    db.add_game(&game("Anand", "Carlsen", MORE_KNIGHTS))
+        .unwrap();
+    assert_eq!(db.delete_twins(&gui()).unwrap(), [0]);
+
+    let path = with_bad_move(dir.path(), KNIGHTS, MORE_KNIGHTS, 1, 3);
+    let mut db = Database::open(path).unwrap();
+    assert!(db.get_game(1).is_err());
+    assert_eq!(db.delete_twins(&gui()).unwrap(), []);
+}
