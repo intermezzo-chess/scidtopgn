@@ -351,9 +351,9 @@ impl GFile {
     /// Returns [`Error::GameTooLarge`] if the record is longer than
     /// 131,071 bytes, the most the index can record,
     /// [`Error::GameFileFull`] if it would start past the largest offset the
-    /// index can record, [`Error::FileNotOpen`] if the file is closed, [`Error::ReadOnly`] if
-    /// it is open only for reading, and [`Error::Io`] if a full block can't
-    /// be written.
+    /// index can record, [`Error::FileNotOpen`] if the file is closed,
+    /// [`Error::ReadOnly`] if it is open only for reading, and [`Error::Io`]
+    /// if a full block can't be written.
     pub fn add_game(&mut self, buf: &ByteBuffer) -> Result<u32> {
         if self.handle.is_none() {
             return Err(Error::FileNotOpen);
