@@ -43,6 +43,7 @@ scidtopgn /path/to/database              # stdout
 scidtopgn /path/to/database -o out.pgn   # to file
 scidtopgn /path/to/database --count      # just tell me how many games are stored
 scidtopgn /path/to/database --games 10-20  # only games 10 to 20
+scidtopgn /path/to/database --white carlsen --eco B20..B99  # only games that match a search
 scidtopgn export /path/to/database       # explicit subcommand, same thing
 ```
 
@@ -56,12 +57,41 @@ Export skips games that SCID has logically deleted. `--count` counts every store
 |----------|-------|----------|---------|-------------|
 | `database` | - | Yes | - | Path to SCID database (without file extension) |
 | `--output` | `-o` | No | stdout | Output file path |
-| `--count` | - | No | - | Print the number of stored games, including logically deleted games, and exit |
-| `--games` | - | No | all | Export only these games, such as `10-20` or `1-5,8`. Can't be combined with `--count` |
+| `--count` | - | No | - | Print the number of stored games, including logically deleted games, and exit. With [search options](#search-games-by-their-header), the number of games that match |
+| `--games` | - | No | all | Export only these games, such as `10-20` or `1-5,8`. With search options, a game must also match them. Can't be combined with `--count` |
 | `--overwrite` | - | No | - | Overwrite the output file if it already exists |
 | `--verbose` | `-v` | No | - | Show progress at each 10% of the games, and a summary |
 | `--quiet` | `-q` | No | - | Write nothing to stderr, not even errors. Can be combined with `--verbose` only together with `--log` |
 | `--log` | - | No | - | Also append warnings and errors to this file, and with `--verbose` progress and a summary. See [Log file](#log-file) |
+
+#### Search games by their header
+
+The search options export only the games that match every option given, as SCID vs. PC's header search (`sc_search header`) selects them. They read only the index and name files, not the games. Combined with `--games`, a game must match both. Logically deleted games are still skipped, but `--count` counts them, as SCID does, unless `--flag deleted=no` is given. Like SCID, a search never matches a game longer than 999 half-moves unless `--length` allows it.
+
+A range is `FROM..TO`, and either end can be left out, as in `2500..` or `..1999`. A single value, such as `--eco C42`, is both ends.
+
+| Argument | Value | Description |
+|----------|-------|-------------|
+| `--white`, `--black`, `--event`, `--site`, `--round` | text | The name contains the text, ignoring ASCII case and every space, so `carl sen` matches `Carlsen, Magnus`. Text that ends with a space matches nothing, as in SCID. In double quotes, such as `'"Carlsen*"'`, the whole name must match the text as a pattern, with case: `*` matches any characters, `?` one character, `[a-z]` one of a set, and `\` makes the next character literal |
+| `--date` | `FROM..TO` | Dates are `YYYY`, `YYYY.MM`, or `YYYY.MM.DD`. A shorter end date means the end of that year or month, so `2023..2023` is all of 2023. Unknown parts of a game's date come first: `2023.??.??` is before `2023.01.01` |
+| `--result` | list | Results separated by commas: `1-0`, `1/2-1/2`, `0-1`, and `*` |
+| `--white-elo`, `--black-elo` | `MIN..MAX` | A player's rating, up to 4000. A player without one in a game counts with their highest rating in any game of the database, deleted or not, or 0, as in SCID |
+| `--elo-diff` | `MIN..MAX` | White's rating minus Black's, such as `-100..100` |
+| `--eco` | `FROM..TO` | ECO codes such as `B20` or SCID's extended `B20a1`. The end includes its extensions, so `B07` means up to `B07z4`. Games with no ECO code match too, as in SCID |
+| `--eco-missing` | `include`, `exclude` | Whether games with no ECO code match. Default: `include` |
+| `--length` | `MIN..MAX` | Half-moves in the main line. SCID stores at most 1,023, and a longer game's count modulo 1,024. Default: `0..999` |
+| `--to-move` | `white`, `black` | The side to move at the end of the game, from whether the number of half-moves is even or odd, as SCID decides it. A game from a position with Black to move counts the other way round |
+| `--ignore-colors` | - | A game also matches with White and Black swapped: their names, ratings, and wins, the side to move, and the sign of the rating difference |
+| `--flag` | `FLAG=yes`, `FLAG=no` | A game has the flag, or doesn't. Can be given once per flag. Flags: `non-standard-start`, `promotions`, `underpromotions`, `comments`, `variations`, `annotations`, `deleted`, `white-opening`, `black-opening`, `middlegame`, `endgame`, `novelty`, `pawn-structure`, `tactics`, `kingside`, `queenside`, `brilliancy`, `blunder`, `user`, and `custom1` to `custom6`. Promotions count only in the main line |
+
+```bash
+scidtopgn mydb --white '"Carlsen, M*"' --result 1-0 --ignore-colors  # Carlsen's wins
+scidtopgn mydb --date 2020.. --white-elo 2700.. --black-elo 2700..   # top games since 2020
+scidtopgn mydb --eco C42 --eco-missing exclude --flag comments=yes   # annotated Petroffs
+scidtopgn mydb --flag deleted=yes --count                            # how many games are deleted
+```
+
+Databases written by scidtopgn 0.1.0 store a length of 0, and no promotion, comment, variation, or annotation flags, for each game it added, so those options treat such games as empty until they are written again.
 
 ### Import (PGN → SCID)
 
@@ -204,7 +234,7 @@ let game = db.get_game(0)?;
 println!("{} vs {}", game.white, game.black);
 ```
 
-`update_game()` replaces a game and keeps its number. `delete_game()` marks a game as logically deleted, as SCID does, and `undelete_game()` reverses it; the game's record and number stay until the database is compacted. `compact_games()` removes deleted games and replaced records and renumbers the games that are left, and `compact_names()` removes names that no game uses, as SCID's Compact commands do. `copy_game()` copies a game from another database as stored, without decoding it, as `merge` does. `delete_twins()` finds twin games, such as copies imported twice, and marks the copies SCID vs. PC's Delete Twin Games command would delete as logically deleted. `TwinOptions` selects what twins have in common and which twin to delete; its defaults are those of SCID's Delete Twin Games window. Writing a database stores its names as UTF-8 and merges names that read the same, as described in [Names that aren't UTF-8](#names-that-arent-utf-8); `NameBase::converted_names()` lists the names that weren't UTF-8 when read. `games()` and `get_game()` include games that SCID has logically deleted, unlike the CLI's export. The [API documentation](https://docs.rs/scidtopgn) shows how to skip them and covers the rest of the library. To build it locally, run `cargo doc -p scidtopgn --open`.
+`update_game()` replaces a game and keeps its number. `delete_game()` marks a game as logically deleted, as SCID does, and `undelete_game()` reverses it; the game's record and number stay until the database is compacted. `compact_games()` removes deleted games and replaced records and renumbers the games that are left, and `compact_names()` removes names that no game uses, as SCID's Compact commands do. `copy_game()` copies a game from another database as stored, without decoding it, as `merge` does. `delete_twins()` finds twin games, such as copies imported twice, and marks the copies SCID vs. PC's Delete Twin Games command would delete as logically deleted. `TwinOptions` selects what twins have in common and which twin to delete; its defaults are those of SCID's Delete Twin Games window. `search_header()` returns the games that match a `HeaderSearch`, as SCID vs. PC's header search selects them, reading only the index and names; its defaults are those of SCID's search window. Writing a database stores its names as UTF-8 and merges names that read the same, as described in [Names that aren't UTF-8](#names-that-arent-utf-8); `NameBase::converted_names()` lists the names that weren't UTF-8 when read. `games()` and `get_game()` include games that SCID has logically deleted, unlike the CLI's export. The [API documentation](https://docs.rs/scidtopgn) shows how to skip them and covers the rest of the library. To build it locally, run `cargo doc -p scidtopgn --open`.
 
 ## Building & testing
 
