@@ -109,15 +109,39 @@ Years of active games: 2022-2022
 
 Total games counts every stored game, and Active games those export writes. The name counts are the names stored in the database's name file, which can include names used only by deleted games. The years come from active games with a known date, or are `unknown`. `info` reads only the index and name files, so it works even when some games are damaged. It accepts `--quiet` and `--log`.
 
+### Validate a database
+
+```bash
+scidtopgn validate /path/to/database
+```
+
+```text
+Warning: SCID game 2: Damaged game data at byte 85: invalid move byte 0xc2 (e2f3 is illegal) in rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1
+Warning: SCID game 5 (deleted): Game data at byte 710, 166 bytes long, is past the end of the game file
+5 games checked, 2 damaged
+```
+
+`validate` reads every stored game, including the logically deleted games that export skips, and reports each one it can't read as a warning, with its number counting from 1 and what is wrong. It doesn't stop at the first damaged game, as export does, and it doesn't change the database. A final line gives the number of games checked and the number damaged.
+
+The report is written to stderr and, with `--log`, to the log, so `--quiet` hides it. `validate` writes nothing to stdout. Its exit status is:
+
+| Status | Meaning |
+|--------|---------|
+| 0 | Every game was read, and none is damaged |
+| 1 | Every game was read, and at least one is damaged |
+| 2 | The check couldn't finish, for example because the database couldn't be opened or the log couldn't be written |
+
+`validate` checks only that each game's record can be read. It doesn't check that the index agrees with the game, for example on its result or ECO code, and it doesn't repair anything.
+
 ### Names that aren't UTF-8
 
-Older versions of SCID, and the C++ reference converter, store the player, event, site, and round names of a Latin-1 or Windows-1252 PGN file as they are, so their name files can hold names that aren't valid UTF-8. Export, append, and `info` read the bytes of such a name that aren't valid UTF-8 as Windows-1252, as import reads PGN, and print a warning for each name, such as `read player name "Müller, Hans" that isn't UTF-8 as Windows-1252`.
+Older versions of SCID, and the C++ reference converter, store the player, event, site, and round names of a Latin-1 or Windows-1252 PGN file as they are, so their name files can hold names that aren't valid UTF-8. Export, append, `info`, and `validate` read the bytes of such a name that aren't valid UTF-8 as Windows-1252, as import reads PGN, and print a warning for each name, such as `read player name "Müller, Hans" that isn't UTF-8 as Windows-1252`.
 
-**Appending to such a database rewrites its names as UTF-8**, as SCID vs. PC stores the names of PGN it imports. If a name was stored both ways, for example `Müller, Hans` once as Latin-1 and once as UTF-8, the two become one name, and the names get new IDs, because SCID can't open a name file that holds the same name twice. Every game keeps its names. Export and `info` don't change the database.
+**Appending to such a database rewrites its names as UTF-8**, as SCID vs. PC stores the names of PGN it imports. If a name was stored both ways, for example `Müller, Hans` once as Latin-1 and once as UTF-8, the two become one name, and the names get new IDs, because SCID can't open a name file that holds the same name twice. Every game keeps its names. Export, `info`, and `validate` don't change the database.
 
 ### Quiet mode
 
-With `--quiet`, a command writes nothing to stderr: no warnings, progress, or error messages. Only the exit status shows whether it failed. Its results are still written, such as PGN, the `--count` line, and `info`'s output. Mistakes in the arguments themselves, such as an unknown option, are still reported.
+With `--quiet`, a command writes nothing to stderr: no warnings, progress, or error messages. Only the exit status shows whether it failed. Its results are still written, such as PGN, the `--count` line, and `info`'s output. `validate` writes its report to stderr, so `--quiet` hides it. Mistakes in the arguments themselves, such as an unknown option, are still reported.
 
 ### Log file
 

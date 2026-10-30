@@ -9,16 +9,18 @@ use std::process::ExitCode;
 
 use anyhow::{Context, Result};
 
-use args::{Cli, Command, ExportArgs, ImportArgs, InfoArgs};
+use args::{Cli, Command, ExportArgs, ImportArgs, InfoArgs, ValidateArgs};
 use report::{Log, Progress, Reporter};
-use scidtopgn::{Database, Index, NFile, NameBase, NameType, PgnParser};
+use scidtopgn::{Database, Error, Index, NFile, NameBase, NameType, PgnParser};
 
 fn main() -> ExitCode {
     let cli = Cli::parse_args();
     let quiet = cli.quiet;
     let Some(command) = cli.into_command() else {
         if !quiet {
-            eprintln!("Error: Specify a database or use a subcommand (export/import/info)");
+            eprintln!(
+                "Error: Specify a database or use a subcommand (export/import/info/validate)"
+            );
         }
         return ExitCode::FAILURE;
     };
@@ -32,7 +34,7 @@ fn main() -> ExitCode {
                 if !command.quiet() {
                     eprintln!("Error: {err:?}");
                 }
-                return ExitCode::FAILURE;
+                return command.failure();
             }
         },
         None => None,
@@ -42,18 +44,19 @@ fn main() -> ExitCode {
     reporter.start(&args::describe_words(&args));
 
     let result = match &command {
-        Command::Export(args) => export_command(args, &reporter),
-        Command::Import(args) => import_command(args, &reporter),
-        Command::Info(args) => info_command(args, &reporter),
+        Command::Export(args) => export_command(args, &reporter).map(|()| ExitCode::SUCCESS),
+        Command::Import(args) => import_command(args, &reporter).map(|()| ExitCode::SUCCESS),
+        Command::Info(args) => info_command(args, &reporter).map(|()| ExitCode::SUCCESS),
+        Command::Validate(args) => validate_command(args, &reporter),
     };
-    if let Err(err) = &result {
-        reporter.error(err);
-    }
-    // A log missing messages fails the run, so it doesn't pass unnoticed.
-    if result.is_err() || reporter.log_failed() {
-        ExitCode::FAILURE
-    } else {
-        ExitCode::SUCCESS
+    match result {
+        // A log missing messages fails the run, so it doesn't pass unnoticed.
+        Ok(_) if reporter.log_failed() => command.failure(),
+        Ok(status) => status,
+        Err(err) => {
+            reporter.error(&err);
+            command.failure()
+        }
     }
 }
 
@@ -74,6 +77,7 @@ fn command_files(command: &Command) -> Vec<PathBuf> {
             files.extend(database(&args.output));
         }
         Command::Info(args) => files.extend(database(&args.database)),
+        Command::Validate(args) => files.extend(database(&args.database)),
     }
     files
 }
@@ -345,4 +349,39 @@ fn info_command(args: &InfoArgs, reporter: &Reporter) -> Result<()> {
     }
     out.flush()?;
     Ok(())
+}
+
+/// Reads every game, including logically deleted games, and warns about
+/// each one that can't be read. Exits with 1 if any can't.
+fn validate_command(args: &ValidateArgs, reporter: &Reporter) -> Result<ExitCode> {
+    let mut db = Database::open_read_only(&args.database)
+        .with_context(|| format!("Failed to open database '{}'", args.database))?;
+    warn_converted_names(reporter, db.nfile().namebase());
+
+    let total = db.num_games();
+    let mut damaged = 0u32;
+    for i in 0..total {
+        let Err(err) = db.get_game(i) else {
+            continue;
+        };
+        damaged += 1;
+        // Name the game here, so the line can say whether it is deleted.
+        let cause = match err {
+            Error::Game { source, .. } => anyhow::Error::new(*source),
+            other => anyhow::Error::new(other),
+        };
+        let deleted = if db.get_entry(i).is_some_and(|e| e.get_delete_flag()) {
+            " (deleted)"
+        } else {
+            ""
+        };
+        reporter.warn(format_args!("SCID game {}{deleted}: {cause:#}", i + 1));
+    }
+
+    reporter.notice(format_args!("{total} games checked, {damaged} damaged"));
+    Ok(if damaged == 0 {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    })
 }

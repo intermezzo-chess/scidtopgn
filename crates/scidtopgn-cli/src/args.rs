@@ -1,5 +1,6 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use std::process::ExitCode;
 
 use clap::error::ErrorKind;
 use clap::parser::ValueSource;
@@ -266,6 +267,9 @@ pub enum Command {
     Import(ImportArgs),
     /// Show the number of games and names in a SCID database
     Info(InfoArgs),
+    /// Check that every game in a SCID database can be read, and report
+    /// each one that can't
+    Validate(ValidateArgs),
 }
 
 impl Command {
@@ -273,7 +277,7 @@ impl Command {
         match self {
             Command::Export(args) => Verbosity::new(args.verbose),
             Command::Import(args) => Verbosity::new(args.verbose),
-            Command::Info(_) => Verbosity::Normal,
+            Command::Info(_) | Command::Validate(_) => Verbosity::Normal,
         }
     }
 
@@ -283,6 +287,7 @@ impl Command {
             Command::Export(args) => args.quiet,
             Command::Import(args) => args.quiet,
             Command::Info(args) => args.quiet,
+            Command::Validate(args) => args.quiet,
         }
     }
 
@@ -292,6 +297,16 @@ impl Command {
             Command::Export(args) => args.log.as_deref(),
             Command::Import(args) => args.log.as_deref(),
             Command::Info(args) => args.log.as_deref(),
+            Command::Validate(args) => args.log.as_deref(),
+        }
+    }
+
+    /// The exit status for a run that fails. `validate` exits with 2, so
+    /// that 1 means only that it found damaged games.
+    pub fn failure(&self) -> ExitCode {
+        match self {
+            Command::Validate(_) => ExitCode::from(2),
+            _ => ExitCode::FAILURE,
         }
     }
 }
@@ -380,6 +395,18 @@ pub struct InfoArgs {
     pub log: Option<PathBuf>,
 }
 
+#[derive(Args)]
+pub struct ValidateArgs {
+    /// Database path (without extension)
+    pub database: String,
+
+    #[arg(short, long, help = QUIET_HELP)]
+    pub quiet: bool,
+
+    #[arg(long, value_name = "PATH", value_parser = log_path, help = LOG_HELP)]
+    pub log: Option<PathBuf>,
+}
+
 /// Parses `--log`, which must name a file. `-` would suggest stdout or
 /// stderr.
 fn log_path(value: &str) -> Result<PathBuf, String> {
@@ -439,6 +466,7 @@ mod tests {
                 "import", "in.pgn", "-o", "db", "-q", "-v", "--log", "run.log",
             ],
             &["info", "mydb", "--log", "run.log"],
+            &["validate", "mydb", "-q", "--log", "run.log"],
         ] {
             assert!(parse(args).is_ok(), "{args:?}");
         }
@@ -481,6 +509,10 @@ mod tests {
                 "import in.pgn -o db --quiet",
             ),
             (&["-q", "info", "mydb"], "info mydb -q"),
+            (
+                &["--log", "run.log", "validate", "mydb"],
+                "validate mydb --log run.log",
+            ),
             // The option's value has the subcommand's name.
             (&["-o", "export", "export", "mydb"], "export mydb -o export"),
             (
@@ -577,6 +609,10 @@ mod tests {
                 &["'info' has no --count option", "'info' has no --verbose option"][..],
             ),
             (
+                &["-v", "validate", "mydb"],
+                &["'validate' has no --verbose option"],
+            ),
+            (
                 &["-o", "x", "import", "in.pgn", "-o", "db"],
                 &["--output is also given after 'import'"],
             ),
@@ -593,7 +629,7 @@ mod tests {
             for problem in problems {
                 assert!(message.contains(&format!("\n  - {problem}\n")), "{message}");
             }
-            let name = args.iter().find(|arg| ["export", "import", "info"].contains(arg)).unwrap();
+            let name = args.iter().find(|arg| ["export", "import", "info", "validate"].contains(arg)).unwrap();
             assert!(message.contains(&format!("Run 'scidtopgn {name} --help'")), "{message}");
             assert_eq!(suggestion(args), None, "{message}");
         }
