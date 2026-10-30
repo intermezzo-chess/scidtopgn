@@ -350,9 +350,10 @@ impl GFile {
     ///
     /// Returns [`Error::GameTooLarge`] if the record is longer than
     /// 131,071 bytes, the most the index can record,
-    /// [`Error::FileNotOpen`] if the file is closed, [`Error::ReadOnly`] if
-    /// it is open only for reading, and [`Error::Io`] if a full block can't
-    /// be written.
+    /// [`Error::GameFileFull`] if it would start past the largest offset the
+    /// index can record, [`Error::FileNotOpen`] if the file is closed,
+    /// [`Error::ReadOnly`] if it is open only for reading, and [`Error::Io`]
+    /// if a full block can't be written.
     pub fn add_game(&mut self, buf: &ByteBuffer) -> Result<u32> {
         if self.handle.is_none() {
             return Err(Error::FileNotOpen);
@@ -368,6 +369,17 @@ impl GFile {
                 length: data_len,
                 max: MAX_GAME_LENGTH,
             });
+        }
+
+        // The index stores a record's offset in 32 bits, so a record can't
+        // start past it. The offset doesn't depend on the current block.
+        let offset = if self.num_blocks > 0 && self.last_block_size + data_len <= GF_BLOCKSIZE {
+            u64::from(self.num_blocks - 1) * GF_BLOCKSIZE as u64 + self.last_block_size as u64
+        } else {
+            u64::from(self.num_blocks) * GF_BLOCKSIZE as u64
+        };
+        if offset > u64::from(u32::MAX) {
+            return Err(Error::GameFileFull);
         }
 
         if self.num_blocks == 0 {
@@ -753,5 +765,53 @@ mod tests {
             assert_eq!(&read, record, "{offset}");
         }
         assert_eq!(gf.read_game_data(3 * block + 10, 5).unwrap(), [6; 5]);
+    }
+
+    #[test]
+    fn test_add_game_refuses_a_record_past_the_largest_offset() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut gf = GFile::create(temp_dir.path().join("test")).unwrap();
+        let block = GF_BLOCKSIZE as u32;
+        // The file seems to end 10 bytes into block 32,767, the last whose
+        // offsets fit in 32 bits, without writing 4 GiB.
+        let last_block = u32::MAX / block;
+        gf.num_blocks = last_block + 1;
+        gf.last_block_size = 10;
+        gf.current_block.block_num = last_block as i32;
+        gf.current_block.length = 10;
+
+        let offset = last_block * block + 10;
+        assert_eq!(gf.add_game_data(&[1; 5]).unwrap(), offset);
+        assert!(matches!(
+            gf.add_game_data(&vec![2; MAX_GAME_LENGTH]),
+            Err(Error::GameFileFull)
+        ));
+        // The failed record changed nothing, so a smaller one still fits.
+        assert_eq!(gf.add_game_data(&[3; 5]).unwrap(), offset + 5);
+        assert_eq!(
+            gf.read_game_data(offset, 10).unwrap(),
+            [[1; 5], [3; 5]].concat()
+        );
+
+        // Don't write the block 4 GiB into the file.
+        gf.current_block.dirty = false;
+    }
+
+    #[test]
+    fn test_add_game_accepts_a_record_at_the_largest_offset() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut gf = GFile::create(temp_dir.path().join("test")).unwrap();
+        // The file seems to end one byte before the end of block 32,767.
+        let last_block = u32::MAX / GF_BLOCKSIZE as u32;
+        gf.num_blocks = last_block + 1;
+        gf.last_block_size = GF_BLOCKSIZE - 1;
+        gf.current_block.block_num = last_block as i32;
+        gf.current_block.length = GF_BLOCKSIZE - 1;
+
+        let at_max = gf.add_game_data(&[1]);
+        // Don't write the block 4 GiB into the file.
+        gf.current_block.dirty = false;
+        assert_eq!(at_max.unwrap(), u32::MAX);
+        assert!(matches!(gf.add_game_data(&[2]), Err(Error::GameFileFull)));
     }
 }
