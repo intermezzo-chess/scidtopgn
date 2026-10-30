@@ -9,7 +9,7 @@ use std::process::ExitCode;
 
 use anyhow::{Context, Result};
 
-use args::{Cli, Command, ExportArgs, ImportArgs, InfoArgs, ValidateArgs};
+use args::{Cli, Command, ExportArgs, ImportArgs, InfoArgs, MergeArgs, ValidateArgs};
 use report::{Log, Progress, Reporter};
 use scidtopgn::{Database, Error, Index, NFile, NameBase, NameType, PgnParser};
 
@@ -19,7 +19,7 @@ fn main() -> ExitCode {
     let Some(command) = cli.into_command() else {
         if !quiet {
             eprintln!(
-                "Error: Specify a database or use a subcommand (export/import/info/validate)"
+                "Error: Specify a database or use a subcommand (export/import/info/validate/merge)"
             );
         }
         return ExitCode::FAILURE;
@@ -48,6 +48,7 @@ fn main() -> ExitCode {
         Command::Import(args) => import_command(args, &reporter).map(|()| ExitCode::SUCCESS),
         Command::Info(args) => info_command(args, &reporter).map(|()| ExitCode::SUCCESS),
         Command::Validate(args) => validate_command(args, &reporter),
+        Command::Merge(args) => merge_command(args, &reporter).map(|()| ExitCode::SUCCESS),
     };
     match result {
         // A log missing messages fails the run, so it doesn't pass unnoticed.
@@ -62,8 +63,7 @@ fn main() -> ExitCode {
 
 /// The files `command` reads or writes, which can't also be its log.
 fn command_files(command: &Command) -> Vec<PathBuf> {
-    let database =
-        |path: &str| ["si4", "sn4", "sg4"].map(|ext| Path::new(path).with_extension(ext));
+    let database = |path: &str| DATABASE_EXTENSIONS.map(|ext| Path::new(path).with_extension(ext));
     let mut files = Vec::new();
     match command {
         Command::Export(args) => {
@@ -78,6 +78,12 @@ fn command_files(command: &Command) -> Vec<PathBuf> {
         }
         Command::Info(args) => files.extend(database(&args.database)),
         Command::Validate(args) => files.extend(database(&args.database)),
+        Command::Merge(args) => {
+            for source in &args.databases {
+                files.extend(database(source));
+            }
+            files.extend(database(&args.output));
+        }
     }
     files
 }
@@ -253,6 +259,110 @@ fn import_command(args: &ImportArgs, reporter: &Reporter) -> Result<()> {
     Ok(())
 }
 
+/// The extensions of a database's index, name, and game files.
+const DATABASE_EXTENSIONS: [&str; 3] = ["si4", "sn4", "sg4"];
+
+/// Copies every game of the source databases, in order, to a new database,
+/// which replaces the output database only once it is complete.
+fn merge_command(args: &MergeArgs, reporter: &Reporter) -> Result<()> {
+    let target = Path::new(&args.output);
+    let target_files = DATABASE_EXTENSIONS.map(|ext| target.with_extension(ext));
+    for source in &args.databases {
+        let is_source = DATABASE_EXTENSIONS
+            .iter()
+            .zip(&target_files)
+            .any(|(ext, file)| same_file(file, &Path::new(source).with_extension(ext)));
+        if is_source {
+            anyhow::bail!(
+                "The output database '{}' is also a source, '{}'",
+                args.output,
+                source
+            );
+        }
+    }
+    if target_files
+        .iter()
+        .any(|file| file.symlink_metadata().is_ok())
+    {
+        if !args.overwrite {
+            anyhow::bail!(
+                "Output database '{}' exists. Use --overwrite to replace.",
+                args.output
+            );
+        }
+        reporter.info(format_args!(
+            "Overwriting existing database: {}",
+            args.output
+        ));
+    }
+
+    // Declared after `staging`, so that the database is closed before its
+    // directory is removed.
+    let staging = Staging::new(target)?;
+    let mut db = Database::create(staging.database())
+        .with_context(|| format!("Failed to create database '{}'", args.output))?;
+    for source_path in &args.databases {
+        let mut source = Database::open_read_only(source_path)
+            .with_context(|| format!("Failed to open database '{source_path}'"))?;
+        warn_converted_names(reporter, source.nfile().namebase());
+
+        let count = source.num_games();
+        reporter.info(format_args!("Copying {count} games from {source_path}"));
+        let mut progress = Progress::new(reporter, count.into());
+        for i in 0..count {
+            db.copy_game(&mut source, i)
+                .map_err(|err| match err {
+                    // Name the game below, with its database.
+                    Error::Game { source, .. } => anyhow::Error::new(*source),
+                    other => anyhow::Error::new(other),
+                })
+                .with_context(|| {
+                    format!("Failed to copy SCID game {} of '{source_path}'", i + 1)
+                })?;
+            progress.advance();
+        }
+    }
+
+    let total = db.num_games();
+    db.close()
+        .with_context(|| format!("Failed to write database '{}'", args.output))?;
+    // SCID's tree cache would be out of date, as `scmerge` removes it.
+    let stc = target.with_extension("stc");
+    match std::fs::remove_file(&stc) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+            return Err(e).with_context(|| format!("Failed to remove '{}'", stc.display()));
+        }
+        _ => {}
+    }
+    staging.finish(target)?;
+
+    reporter.notice(format_args!(
+        "Done. {} games merged from {} databases into {}.",
+        total,
+        args.databases.len(),
+        args.output
+    ));
+    Ok(())
+}
+
+/// Whether `a` and `b` name the same file. A file that can't be read is the
+/// same as none.
+#[cfg(unix)]
+fn same_file(a: &Path, b: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    match (a.metadata(), b.metadata()) {
+        (Ok(a), Ok(b)) => a.dev() == b.dev() && a.ino() == b.ino(),
+        _ => false,
+    }
+}
+
+/// Whether `a` and `b` name the same file. A file that can't be read is the
+/// same as none.
+#[cfg(not(unix))]
+fn same_file(a: &Path, b: &Path) -> bool {
+    same_file::is_same_file(a, b).unwrap_or(false)
+}
+
 /// A directory beside a database being created, which holds its files until
 /// [`finish`](Self::finish) moves them into place. Dropping it removes it
 /// and anything still in it.
@@ -269,7 +379,7 @@ impl Staging {
             _ => Path::new("."),
         };
         let dir = tempfile::Builder::new()
-            .prefix(".scidtopgn-import-")
+            .prefix(".scidtopgn-new-")
             .tempdir_in(parent)
             .with_context(|| {
                 format!(
@@ -287,13 +397,62 @@ impl Staging {
 
     /// Moves the database's files onto `database`, replacing any there. The
     /// index goes last, as `Database::flush` writes it last.
+    ///
+    /// The files already at `database` are moved into the directory first.
+    /// If a file can't be moved, they are put back and the new files placed
+    /// so far are removed, so that `database` is as it was. If that fails
+    /// too, the directory is kept, so that no file of the old database is
+    /// lost.
     fn finish(self, database: &Path) -> Result<()> {
+        let old = |ext: &str| self.dir.path().join("old").with_extension(ext);
+        let mut moved_aside = Vec::new();
+        let mut placed = Vec::new();
+        let mut result = Ok(());
         for ext in ["sg4", "sn4", "si4"] {
             let to = database.with_extension(ext);
-            std::fs::rename(self.database().with_extension(ext), &to)
-                .with_context(|| format!("Failed to write '{}'", to.display()))?;
+            if to.symlink_metadata().is_ok() {
+                result = std::fs::rename(&to, old(ext));
+                if result.is_err() {
+                    break;
+                }
+                moved_aside.push(ext);
+            }
         }
-        Ok(())
+        if result.is_ok() {
+            for ext in ["sg4", "sn4", "si4"] {
+                result = std::fs::rename(
+                    self.database().with_extension(ext),
+                    database.with_extension(ext),
+                );
+                if result.is_err() {
+                    break;
+                }
+                placed.push(ext);
+            }
+        }
+        let Err(err) = result else {
+            return Ok(());
+        };
+
+        let mut restored = true;
+        for ext in placed {
+            if !moved_aside.contains(&ext) {
+                restored &= std::fs::remove_file(database.with_extension(ext)).is_ok();
+            }
+        }
+        for ext in moved_aside {
+            restored &= std::fs::rename(old(ext), database.with_extension(ext)).is_ok();
+        }
+        let mut err = anyhow::Error::new(err)
+            .context(format!("Failed to write database '{}'", database.display()));
+        if !restored {
+            let kept = self.dir.keep();
+            err = err.context(format!(
+                "The database couldn't be put back; its files are in '{}'",
+                kept.display()
+            ));
+        }
+        Err(err)
     }
 }
 
@@ -384,4 +543,64 @@ fn validate_command(args: &ValidateArgs, reporter: &Reporter) -> Result<ExitCode
     } else {
         ExitCode::FAILURE
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Writes files at `path` that name `contents` and their extension.
+    fn write_database(path: &Path, contents: &str) {
+        for ext in DATABASE_EXTENSIONS {
+            std::fs::write(path.with_extension(ext), format!("{contents} {ext}")).unwrap();
+        }
+    }
+
+    fn read_database(path: &Path) -> Vec<Option<String>> {
+        DATABASE_EXTENSIONS
+            .iter()
+            .map(|ext| std::fs::read_to_string(path.with_extension(ext)).ok())
+            .collect()
+    }
+
+    /// A staged database whose index is missing, so that moving it into
+    /// place fails after the other files are moved.
+    fn incomplete_staging(target: &Path) -> Staging {
+        let staging = Staging::new(target).unwrap();
+        write_database(&staging.database(), "new");
+        std::fs::remove_file(staging.database().with_extension("si4")).unwrap();
+        staging
+    }
+
+    fn file_names(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn staging_leaves_the_target_as_it_was_if_a_file_cant_be_moved() {
+        let temp = tempfile::tempdir().unwrap();
+        let existing = temp.path().join("db");
+        write_database(&existing, "old");
+        let missing = temp.path().join("missing");
+
+        assert!(incomplete_staging(&existing).finish(&existing).is_err());
+        assert!(incomplete_staging(&missing).finish(&missing).is_err());
+
+        let old = ["old si4", "old sn4", "old sg4"].map(|s| Some(s.to_owned()));
+        assert_eq!(read_database(&existing), old);
+        assert_eq!(read_database(&missing), [None, None, None]);
+        assert_eq!(file_names(temp.path()), ["db.sg4", "db.si4", "db.sn4"]);
+
+        let staging = Staging::new(&existing).unwrap();
+        write_database(&staging.database(), "new");
+        staging.finish(&existing).unwrap();
+        let new = ["new si4", "new sn4", "new sg4"].map(|s| Some(s.to_owned()));
+        assert_eq!(read_database(&existing), new);
+        assert_eq!(file_names(temp.path()), ["db.sg4", "db.si4", "db.sn4"]);
+    }
 }

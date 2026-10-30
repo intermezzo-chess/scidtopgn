@@ -270,6 +270,9 @@ pub enum Command {
     /// Check that every game in a SCID database can be read, and report
     /// each one that can't
     Validate(ValidateArgs),
+    /// Copy the games of SCID databases, deleted ones too, into a new
+    /// database without converting them
+    Merge(MergeArgs),
 }
 
 impl Command {
@@ -277,6 +280,7 @@ impl Command {
         match self {
             Command::Export(args) => Verbosity::new(args.verbose),
             Command::Import(args) => Verbosity::new(args.verbose),
+            Command::Merge(args) => Verbosity::new(args.verbose),
             Command::Info(_) | Command::Validate(_) => Verbosity::Normal,
         }
     }
@@ -288,6 +292,7 @@ impl Command {
             Command::Import(args) => args.quiet,
             Command::Info(args) => args.quiet,
             Command::Validate(args) => args.quiet,
+            Command::Merge(args) => args.quiet,
         }
     }
 
@@ -298,6 +303,7 @@ impl Command {
             Command::Import(args) => args.log.as_deref(),
             Command::Info(args) => args.log.as_deref(),
             Command::Validate(args) => args.log.as_deref(),
+            Command::Merge(args) => args.log.as_deref(),
         }
     }
 
@@ -407,6 +413,39 @@ pub struct ValidateArgs {
     pub log: Option<PathBuf>,
 }
 
+#[derive(Args)]
+pub struct MergeArgs {
+    /// Source database paths (without extension), in the order to copy
+    /// their games
+    #[arg(required = true)]
+    pub databases: Vec<String>,
+
+    /// Output database path (without extension)
+    #[arg(short, long)]
+    pub output: String,
+
+    /// Replace the output database if it exists
+    #[arg(long)]
+    pub overwrite: bool,
+
+    /// Verbose output
+    #[arg(short, long)]
+    pub verbose: bool,
+
+    #[arg(short, long, help = QUIET_HELP)]
+    pub quiet: bool,
+
+    // --quiet and --verbose together only make sense with a log.
+    #[arg(
+        long,
+        value_name = "PATH",
+        value_parser = log_path,
+        required_if_eq_all = [("quiet", "true"), ("verbose", "true")],
+        help = LOG_HELP
+    )]
+    pub log: Option<PathBuf>,
+}
+
 /// Parses `--log`, which must name a file. `-` would suggest stdout or
 /// stderr.
 fn log_path(value: &str) -> Result<PathBuf, String> {
@@ -467,6 +506,8 @@ mod tests {
             ],
             &["info", "mydb", "--log", "run.log"],
             &["validate", "mydb", "-q", "--log", "run.log"],
+            &["merge", "db1", "db2", "-o", "merged", "--overwrite"],
+            &["merge", "db1", "-o", "merged", "-qv", "--log", "run.log"],
         ] {
             assert!(parse(args).is_ok(), "{args:?}");
         }
@@ -478,10 +519,19 @@ mod tests {
             &["mydb", "-q", "-v"][..],
             &["export", "mydb", "-qv"],
             &["import", "in.pgn", "-o", "db", "--quiet", "--verbose"],
+            &["merge", "db1", "-o", "merged", "-qv"],
         ] {
             let err = parse(args).err().expect("should be rejected");
             assert_eq!(err.kind(), ErrorKind::MissingRequiredArgument, "{err}");
             assert!(err.to_string().contains("--log <PATH>"), "{err}");
+        }
+    }
+
+    #[test]
+    fn merge_requires_a_source_and_an_output() {
+        for args in [&["merge", "-o", "merged"][..], &["merge", "db1"]] {
+            let err = parse(args).err().expect("should be rejected");
+            assert_eq!(err.kind(), ErrorKind::MissingRequiredArgument, "{err}");
         }
     }
 
@@ -509,6 +559,10 @@ mod tests {
                 "import in.pgn -o db --quiet",
             ),
             (&["-q", "info", "mydb"], "info mydb -q"),
+            (
+                &["-v", "merge", "db1", "db2", "-o", "merged"],
+                "merge db1 db2 -o merged -v",
+            ),
             (
                 &["--log", "run.log", "validate", "mydb"],
                 "validate mydb --log run.log",
@@ -629,7 +683,7 @@ mod tests {
             for problem in problems {
                 assert!(message.contains(&format!("\n  - {problem}\n")), "{message}");
             }
-            let name = args.iter().find(|arg| ["export", "import", "info", "validate"].contains(arg)).unwrap();
+            let name = args.iter().find(|arg| ["export", "import", "info", "validate", "merge"].contains(arg)).unwrap();
             assert!(message.contains(&format!("Run 'scidtopgn {name} --help'")), "{message}");
             assert_eq!(suggestion(args), None, "{message}");
         }

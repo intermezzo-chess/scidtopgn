@@ -133,11 +133,33 @@ The report is written to stderr and, with `--log`, to the log, so `--quiet` hide
 
 `validate` checks only that each game's record can be read. It doesn't check that the index agrees with the game, for example on its result or ECO code, and it doesn't repair anything.
 
+### Merge databases
+
+```bash
+scidtopgn merge db1 db2 db3 -o merged               # create merged
+scidtopgn merge db1 db2 -o merged --overwrite       # replace merged
+```
+
+`merge` copies every game of the source databases into a new database, in the order the sources are given and each source's games in order, as SCID's `scmerge` does. It copies each game as stored, without converting it to PGN and back, so the merged games are the same as the sources' games, and logically deleted games are copied and stay deleted. Only the names are rewritten: the new database holds each name its games use, stored as UTF-8, with frequencies that count its games. Like `scmerge`, it gives the new database no description and no custom flag names.
+
+The sources aren't changed, and can be read-only. If the output database exists, `merge` refuses unless you pass `--overwrite`, and an output database that is also a source is always an error. The new database is written beside the output path and moved into place only once it is complete, so if a source can't be opened or read, or the games don't fit in one SCID database, `merge` leaves no database behind and an existing one unchanged. Replacing a database also removes its SCID tree cache (`.stc`), which would be out of date.
+
+#### Merge arguments
+
+| Argument | Short | Required | Default | Description |
+|----------|-------|----------|---------|-------------|
+| `databases` | - | Yes | - | One or more source database paths (without file extension) |
+| `--output` | `-o` | Yes | - | Output database path (without file extension) |
+| `--overwrite` | - | No | - | Replace the output database if it exists |
+| `--verbose` | `-v` | No | - | Show progress at each 10% of each source's games |
+| `--quiet` | `-q` | No | - | Write nothing to stderr, not even errors or the summary. Can be combined with `--verbose` only together with `--log` |
+| `--log` | - | No | - | Also append warnings, errors, and the summary to this file, and with `--verbose` progress. See [Log file](#log-file) |
+
 ### Names that aren't UTF-8
 
-Older versions of SCID, and the C++ reference converter, store the player, event, site, and round names of a Latin-1 or Windows-1252 PGN file as they are, so their name files can hold names that aren't valid UTF-8. Export, append, `info`, and `validate` read the bytes of such a name that aren't valid UTF-8 as Windows-1252, as import reads PGN, and print a warning for each name, such as `read player name "Müller, Hans" that isn't UTF-8 as Windows-1252`.
+Older versions of SCID, and the C++ reference converter, store the player, event, site, and round names of a Latin-1 or Windows-1252 PGN file as they are, so their name files can hold names that aren't valid UTF-8. Export, append, `info`, `validate`, and `merge` read the bytes of such a name that aren't valid UTF-8 as Windows-1252, as import reads PGN, and print a warning for each name, such as `read player name "Müller, Hans" that isn't UTF-8 as Windows-1252`.
 
-**Appending to such a database rewrites its names as UTF-8**, as SCID vs. PC stores the names of PGN it imports. If a name was stored both ways, for example `Müller, Hans` once as Latin-1 and once as UTF-8, the two become one name, and the names get new IDs, because SCID can't open a name file that holds the same name twice. Every game keeps its names. Export, `info`, and `validate` don't change the database.
+**Appending to such a database rewrites its names as UTF-8**, as SCID vs. PC stores the names of PGN it imports. If a name was stored both ways, for example `Müller, Hans` once as Latin-1 and once as UTF-8, the two become one name, and the names get new IDs, because SCID can't open a name file that holds the same name twice. Every game keeps its names. Export, `info`, and `validate` don't change the database, and `merge` doesn't change its sources.
 
 ### Quiet mode
 
@@ -182,7 +204,7 @@ let game = db.get_game(0)?;
 println!("{} vs {}", game.white, game.black);
 ```
 
-`update_game()` replaces a game and keeps its number. `delete_game()` marks a game as logically deleted, as SCID does, and `undelete_game()` reverses it; the game's record and number stay until the database is compacted. `compact_games()` removes deleted games and replaced records and renumbers the games that are left, and `compact_names()` removes names that no game uses, as SCID's Compact commands do. Writing a database stores its names as UTF-8 and merges names that read the same, as described in [Names that aren't UTF-8](#names-that-arent-utf-8); `NameBase::converted_names()` lists the names that weren't UTF-8 when read. `games()` and `get_game()` include games that SCID has logically deleted, unlike the CLI's export. The [API documentation](https://docs.rs/scidtopgn) shows how to skip them and covers the rest of the library. To build it locally, run `cargo doc -p scidtopgn --open`.
+`update_game()` replaces a game and keeps its number. `delete_game()` marks a game as logically deleted, as SCID does, and `undelete_game()` reverses it; the game's record and number stay until the database is compacted. `compact_games()` removes deleted games and replaced records and renumbers the games that are left, and `compact_names()` removes names that no game uses, as SCID's Compact commands do. `copy_game()` copies a game from another database as stored, without decoding it, as `merge` does. Writing a database stores its names as UTF-8 and merges names that read the same, as described in [Names that aren't UTF-8](#names-that-arent-utf-8); `NameBase::converted_names()` lists the names that weren't UTF-8 when read. `games()` and `get_game()` include games that SCID has logically deleted, unlike the CLI's export. The [API documentation](https://docs.rs/scidtopgn) shows how to skip them and covers the rest of the library. To build it locally, run `cargo doc -p scidtopgn --open`.
 
 ## Building & testing
 

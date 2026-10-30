@@ -1105,7 +1105,8 @@ fn test_cli_without_arguments() {
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("Specify a database or use a subcommand (export/import/info/validate)"),
+        stderr
+            .contains("Specify a database or use a subcommand (export/import/info/validate/merge)"),
         "{stderr}"
     );
 }
@@ -2169,6 +2170,8 @@ fn test_cli_rejects_a_log_that_is_a_file_of_the_command() {
         &["import", "input.pgn", "-o", "five", "--log", "input.pgn"],
         &["import", "input.pgn", "-o", "five", "--log", "five.si4"],
         &["import", "input.pgn", "-o", "new", "--log", "new.sg4"],
+        &["merge", "five", "-o", "new", "--log", "./five.si4"],
+        &["merge", "five", "-o", "new", "--log", "new.sn4"],
     ] {
         let output = cli()
             .current_dir(dir)
@@ -2394,4 +2397,219 @@ fn test_cli_rejects_a_new_log_named_like_a_command_file_in_another_case() {
         assert!(!temp.path().join(created).exists(), "{args:?}");
     }
     assert!(!temp.path().join("db.si4").exists());
+}
+
+/// Runs `merge` with `args`, and returns its exit status and stderr. It
+/// never writes to stdout.
+fn merge(args: &[&std::ffi::OsStr]) -> (Option<i32>, String) {
+    let output = cli()
+        .arg("merge")
+        .args(args)
+        .output()
+        .expect("Failed to run CLI");
+    assert!(output.stdout.is_empty(), "{output:?}");
+    (
+        output.status.code(),
+        String::from_utf8(output.stderr).expect("stderr should be UTF-8"),
+    )
+}
+
+/// Copies the fixture `name` into `dir`.
+fn copy_fixture(dir: &Path, name: &str) -> PathBuf {
+    copy_with_deleted(dir, name, &[])
+}
+
+#[test]
+fn test_cli_merge_copies_every_game_in_order() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let sources = [
+        copy_with_deleted(temp.path(), "five", &[1, 3]),
+        copy_fixture(temp.path(), "one"),
+        copy_fixture(temp.path(), "annotated"),
+        copy_fixture(temp.path(), "latin1"),
+        copy_fixture(temp.path(), "one"),
+    ];
+    let before: Vec<_> = sources.iter().map(|db| database_bytes(db)).collect();
+    let expected: String = sources.iter().map(|db| export_both_ways(db)).collect();
+    // The files can't be opened for writing, so merge passes only if it
+    // opens them read-only.
+    let _read_only: Vec<_> = sources.iter().map(|db| ReadOnlyFiles::new(db)).collect();
+
+    let merged = temp.path().join("merged");
+    let mut args: Vec<&std::ffi::OsStr> = sources.iter().map(|db| db.as_os_str()).collect();
+    args.extend(["-o".as_ref(), merged.as_os_str()]);
+    let (status, stderr) = merge(&args);
+    assert_eq!(status, Some(0), "{stderr}");
+    let latin1 = "Warning: read player name \"Müller, Hans\" that isn't UTF-8 as Windows-1252\n";
+    assert!(stderr.starts_with(latin1), "{stderr}");
+    assert!(
+        stderr.ends_with(&format!(
+            "Done. 11 games merged from 5 databases into {}.\n",
+            merged.display()
+        )),
+        "{stderr}"
+    );
+
+    assert_eq!(export_both_ways(&merged), expected);
+    let db = scidtopgn::Database::open(&merged).expect("Failed to open database");
+    let deleted: Vec<u32> = (0..db.num_games())
+        .filter(|&n| db.get_entry(n).unwrap().get_delete_flag())
+        .collect();
+    assert_eq!(deleted, [1, 3]);
+    // The names are stored as UTF-8, so exporting doesn't warn.
+    assert!(db.nfile().namebase().converted_names().is_empty());
+    for (db, before) in sources.iter().zip(&before) {
+        assert_eq!(&database_bytes(db), before);
+    }
+    assert_eq!(
+        file_names(temp.path())
+            .iter()
+            .filter(|name| name.starts_with("merged"))
+            .count(),
+        3
+    );
+}
+
+#[test]
+fn test_cli_merge_replaces_an_existing_database_only_with_overwrite() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let five = copy_fixture(temp.path(), "five");
+    let target = temp.path().join("target");
+    let args = [five.as_os_str(), "-o".as_ref(), target.as_os_str()];
+
+    // Any of the database's files makes it exist.
+    for ext in ["si4", "sn4", "sg4"] {
+        let file = target.with_extension(ext);
+        std::fs::write(&file, "keep").expect("Failed to write file");
+        let (status, stderr) = merge(&args);
+        assert_eq!(status, Some(1), "{ext}: {stderr}");
+        assert!(
+            stderr.contains("exists. Use --overwrite to replace."),
+            "{stderr}"
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "keep");
+        std::fs::remove_file(&file).unwrap();
+    }
+
+    let (status, stderr) = merge(&args);
+    assert_eq!(status, Some(0), "{stderr}");
+    let before = database_bytes(&target);
+    let (status, stderr) = merge(&args);
+    assert_eq!(status, Some(1), "{stderr}");
+    assert_eq!(database_bytes(&target), before);
+
+    // SCID's tree cache of the old database is removed.
+    let stc = target.with_extension("stc");
+    std::fs::write(&stc, "stale").expect("Failed to write tree cache");
+    let one = get_workspace_root().join("tests/data/one");
+    let (status, stderr) = merge(&[
+        one.as_os_str(),
+        "-o".as_ref(),
+        target.as_os_str(),
+        "--overwrite".as_ref(),
+        "--quiet".as_ref(),
+    ]);
+    assert_eq!((status, stderr.as_str()), (Some(0), ""));
+    assert!(!stc.exists());
+    assert_eq!(export_both_ways(&target), export_both_ways(&one));
+    assert_eq!(
+        file_names(temp.path()),
+        [
+            "five.sg4",
+            "five.si4",
+            "five.sn4",
+            "target.sg4",
+            "target.si4",
+            "target.sn4"
+        ]
+    );
+}
+
+#[test]
+fn test_cli_merge_refuses_a_target_that_is_a_source() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let five = copy_fixture(temp.path(), "five");
+    copy_fixture(temp.path(), "one");
+    let before = database_bytes(&five);
+    let mut targets = vec!["five", "./five", "tmp/../five"];
+    #[cfg(unix)]
+    {
+        for ext in ["si4", "sn4", "sg4"] {
+            std::os::unix::fs::symlink(
+                five.with_extension(ext),
+                temp.path().join("link").with_extension(ext),
+            )
+            .expect("Failed to make symlink");
+        }
+        targets.push("link");
+    }
+    std::fs::create_dir(temp.path().join("tmp")).unwrap();
+    let names = file_names(temp.path());
+
+    for target in targets {
+        let output = cli()
+            .current_dir(temp.path())
+            .args(["merge", "one", "five", "-o", target, "--overwrite"])
+            .output()
+            .expect("Failed to run CLI");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{target}: {stderr}");
+        assert!(
+            stderr.contains(&format!(
+                "The output database '{target}' is also a source, 'five'"
+            )),
+            "{stderr}"
+        );
+        assert_eq!(database_bytes(&five), before);
+        assert_eq!(file_names(temp.path()), names);
+    }
+}
+
+#[test]
+fn test_cli_merge_failures_leave_no_database_behind() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let five = copy_fixture(temp.path(), "five");
+    let damaged = copy_fixture(temp.path(), "one");
+    let si4 = damaged.with_extension("si4");
+    let mut index = scidtopgn::Index::open(&si4).expect("Failed to open index");
+    index.get_entry_mut(0).unwrap().set_round(999);
+    index
+        .flush(&mut std::fs::File::create(&si4).unwrap())
+        .expect("Failed to write index");
+    let missing = temp.path().join("missing");
+    let existing = temp.path().join("existing");
+    std::fs::copy(five.with_extension("si4"), existing.with_extension("si4")).unwrap();
+    let names = file_names(temp.path());
+
+    for (source, cause) in [
+        (&missing, "Failed to open database"),
+        (&damaged, "Failed to copy SCID game 1 of"),
+    ] {
+        for (target, overwrite) in [
+            (temp.path().join("new"), None),
+            (existing.clone(), Some("--overwrite")),
+        ] {
+            let mut args = vec![
+                five.as_os_str(),
+                source.as_os_str(),
+                "-o".as_ref(),
+                target.as_os_str(),
+            ];
+            args.extend(overwrite.map(std::ffi::OsStr::new));
+            let (status, stderr) = merge(&args);
+            assert_eq!(status, Some(1), "{stderr}");
+            assert!(stderr.contains(cause), "{stderr}");
+            assert_eq!(file_names(temp.path()), names, "{stderr}");
+        }
+    }
+    let (_, stderr) = merge(&[
+        damaged.as_os_str(),
+        "-o".as_ref(),
+        temp.path().join("new").as_os_str(),
+    ]);
+    assert!(stderr.contains("No round name has ID 999"), "{stderr}");
+    assert_eq!(
+        std::fs::read(existing.with_extension("si4")).unwrap(),
+        std::fs::read(five.with_extension("si4")).unwrap()
+    );
 }
