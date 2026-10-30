@@ -17,6 +17,7 @@ use crate::namebase::{NameBase, NameType, NewIds};
 use crate::nfile::NFile;
 use crate::position::{fen, ScidPosition};
 use crate::replace::NewFiles;
+use crate::twins::{self, TwinOptions};
 use crate::Date;
 use shakmaty::{Board, Position, Role};
 
@@ -684,6 +685,87 @@ impl Database {
     /// [`open_read_only`](Self::open_read_only).
     pub fn undelete_game(&mut self, game_num: u32) -> Result<()> {
         self.set_delete_flag(game_num, false)
+    }
+
+    /// Finds twin games, copies of a game, and marks the copies SCID vs. PC
+    /// would delete as logically deleted, as its Delete Twin Games command
+    /// (`sc_base duplicates`) does. Returns the numbers of the games it
+    /// deleted, counting from 0, in order. The changes are written to the
+    /// files by [`flush`](Self::flush) or [`close`](Self::close), and
+    /// [`compact_games`](Self::compact_games) removes the deleted games.
+    ///
+    /// Two games that aren't deleted are twins if they match in every way
+    /// `options` selects. A game of at most 2 half-moves is also the twin of
+    /// a game that matches it otherwise and has the same year, site, and
+    /// round, as SCID takes it to hold the place of the full game, if the
+    /// higher-numbered of the two games has a White and an event other than
+    /// `?`. Of each pair of twins, the one [`TwinOptions::delete`] chooses
+    /// is deleted. Pairs are compared in SCID's order, and a game deleted
+    /// earlier doesn't match later, so of three or more twins the same games
+    /// are kept as in SCID.
+    ///
+    /// Only delete flags change, and ratings if
+    /// [`TwinOptions::copy_ratings`] is set. Records, names, and game numbers
+    /// stay the same. As in SCID, the half-move counts, home pawn lists, and
+    /// comment and variation counts come from the index. Version 0.1.0 of
+    /// this crate stored them as 0, so each game it added counts as having
+    /// no moves, as SCID also counts it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::ReadOnly`] if the database was opened with
+    /// [`open_read_only`](Self::open_read_only), and [`Error::Game`] for a
+    /// game whose record can't be read from the game file, while comparing
+    /// its moves. After an error, nothing has changed. Moves are decoded as
+    /// SCID's twin search decodes them, without checking that they are
+    /// legal, and a record whose moves can't be decoded is compared up to
+    /// the move that can't be.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use scidtopgn::{parse_single_game, Database, TwinOptions};
+    ///
+    /// # let dir = tempfile::tempdir()?;
+    /// # let path = dir.path().join("games");
+    /// # let mut db = Database::create(&path)?;
+    /// let short = "[White \"Anand\"]\n[Black \"Carlsen\"]\n\n\
+    ///     1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 *";
+    /// let long = "[White \"Anand\"]\n[Black \"Carlsen\"]\n\n\
+    ///     1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 *";
+    /// db.add_game(&parse_single_game(long)?)?;
+    /// db.add_game(&parse_single_game(short)?)?;
+    ///
+    /// assert_eq!(db.delete_twins(&TwinOptions::default())?, [1]);
+    /// db.compact_games()?;
+    /// assert_eq!(db.num_games(), 1);
+    /// # Ok::<(), scidtopgn::Error>(())
+    /// ```
+    pub fn delete_twins(&mut self, options: &TwinOptions) -> Result<Vec<u32>> {
+        self.check_writable()?;
+        let changed = twins::find(&self.index, self.nfile.namebase(), &mut self.gfile, options)?;
+
+        let mut deleted = Vec::new();
+        for game in changed {
+            let entry = self
+                .index
+                .get_entry_mut(game.game)
+                .expect("twins are games of the index");
+            if game.deleted {
+                entry.set_delete_flag(true);
+                deleted.push(game.game);
+            }
+            if game.ratings_copied {
+                let [(white, white_type), (black, black_type)] = game.ratings;
+                entry.set_white_elo(white);
+                entry.set_white_rating_type(white_type);
+                entry.set_black_elo(black);
+                entry.set_black_rating_type(black_type);
+            }
+            self.modified = true;
+        }
+        deleted.sort_unstable();
+        Ok(deleted)
     }
 
     fn set_delete_flag(&mut self, game_num: u32, deleted: bool) -> Result<()> {
