@@ -468,6 +468,101 @@ impl Database {
         Ok(game_num)
     }
 
+    /// Copies game `game_num` of `source`, counting from 0, to the end of
+    /// this database without decoding it, as SCID's `scmerge` does, and
+    /// returns its number here. The game is written to the files by
+    /// [`flush`](Self::flush) or [`close`](Self::close).
+    ///
+    /// The game's record and index entry are copied as stored. Only the
+    /// entry's name IDs, which refer to this database's names, and the
+    /// record's offset change, so a logically deleted game stays deleted.
+    /// The game's names are added to this database's names if they are
+    /// missing, and counted. `source` may be opened with
+    /// [`open_read_only`](Self::open_read_only).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::GameNotFound`] if `source` has no such game, and
+    /// [`Error::Game`] for the game if its entry refers to a name that
+    /// `source`'s name file doesn't have or its record can't be read from
+    /// `source`'s game file. Returns [`Error::IndexFull`],
+    /// [`Error::NameBaseFull`], or [`Error::GameFileFull`] if this database
+    /// can't hold another game, name, or record, [`Error::ReadOnly`] if it
+    /// was opened with [`open_read_only`](Self::open_read_only), and
+    /// [`Error::Io`] if its game file can't be written. After an error, the
+    /// index and the name frequencies are unchanged, though a new name or
+    /// the record may stay in the files unused.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use scidtopgn::{parse_single_game, Database};
+    ///
+    /// let dir = tempfile::tempdir()?;
+    /// let mut source = Database::create(dir.path().join("source"))?;
+    /// source.add_game(&parse_single_game("[White \"Anand\"]\n\n1. e4 e5 *")?)?;
+    /// source.delete_game(0)?;
+    ///
+    /// let mut db = Database::create(dir.path().join("games"))?;
+    /// assert_eq!(db.copy_game(&mut source, 0)?, 0);
+    /// assert!(db.get_entry(0).unwrap().get_delete_flag());
+    /// assert_eq!(db.get_game(0)?.white, "Anand");
+    /// # Ok::<(), scidtopgn::Error>(())
+    /// ```
+    pub fn copy_game(&mut self, source: &mut Database, game_num: u32) -> Result<u32> {
+        self.check_writable()?;
+        let mut entry = source
+            .index
+            .get_entry(game_num)
+            .ok_or(Error::GameNotFound {
+                number: u64::from(game_num) + 1,
+            })?
+            .clone();
+
+        // Read everything from `source` before changing this database.
+        let mut names = Vec::with_capacity(5);
+        for (name_type, id) in name_ids(&entry) {
+            let name = source
+                .nfile
+                .namebase()
+                .get_name(name_type, id)
+                .ok_or(Error::NameNotFound { name_type, id })
+                .map_err(|e| in_game(game_num, e))?;
+            names.push((name_type, name.to_owned()));
+        }
+        let record = source
+            .gfile
+            .read_game_data(entry.get_offset(), entry.get_length())
+            .map_err(|e| in_game(game_num, e))?;
+
+        let nb = self.nfile.namebase_mut();
+        let ids = names
+            .iter()
+            .map(|(name_type, name)| nb.add_name(*name_type, name))
+            .collect::<Result<Vec<_>>>()?;
+        entry.set_white(ids[0]);
+        entry.set_black(ids[1]);
+        entry.set_event(ids[2]);
+        entry.set_site(ids[3]);
+        entry.set_round(ids[4]);
+        entry.set_offset(self.gfile.add_game_data(&record)?);
+
+        let game_num = self.index.add_entry(entry)?;
+        let entry = self
+            .index
+            .get_entry(game_num)
+            .expect("the entry was just added");
+        count_names(
+            self.nfile.namebase_mut(),
+            entry,
+            NameBase::increment_frequency,
+        );
+
+        self.modified = true;
+
+        Ok(game_num)
+    }
+
     /// Replaces game `game_num`, counting from 0, with `game`. The game
     /// keeps its number, and the change is written to the files by
     /// [`flush`](Self::flush) or [`close`](Self::close).
@@ -1479,6 +1574,9 @@ mod tests {
 
         assert!(full(db.update_game(0, &game("B", "new"))));
         assert!(full(db.add_game(&game("B", "new")).map(|_| ())));
+        let mut source = Database::create(temp.path().join("source")).unwrap();
+        source.add_game(&game("B", "new")).unwrap();
+        assert!(full(db.copy_game(&mut source, 0).map(|_| ())));
 
         let mut before = Vec::new();
         entry.write(&mut before).unwrap();

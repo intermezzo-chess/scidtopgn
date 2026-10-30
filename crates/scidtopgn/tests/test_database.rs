@@ -1364,3 +1364,148 @@ fn test_read_only_open_needs_no_write_permission() {
 
     assert_eq!(database_bytes(&path), before);
 }
+
+/// Copies the fixture `name` into `dir`, so it can be opened for writing.
+fn copy_fixture(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
+    let src = get_test_data_path(name);
+    let dst = dir.join(name);
+    for ext in ["si4", "sn4", "sg4"] {
+        std::fs::copy(src.with_extension(ext), dst.with_extension(ext)).unwrap();
+    }
+    dst
+}
+
+/// The five names `entry` refers to in `db`.
+fn entry_names(db: &Database, entry: &scidtopgn::IndexEntry) -> [String; 5] {
+    let nb = db.nfile().namebase();
+    [
+        (NameType::Player, entry.get_white()),
+        (NameType::Player, entry.get_black()),
+        (NameType::Event, entry.get_event()),
+        (NameType::Site, entry.get_site()),
+        (NameType::Round, entry.get_round()),
+    ]
+    .map(|(ntype, id)| nb.get_name(ntype, id).unwrap().to_owned())
+}
+
+#[test]
+fn test_copy_game_copies_the_record_and_entry_as_stored() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let five = five_with_deleted(temp.path(), &[1, 3]);
+    let one = copy_fixture(temp.path(), "one");
+    let sources = [five, one.clone(), one];
+    let before: Vec<_> = sources.iter().map(|path| database_bytes(path)).collect();
+
+    let path = temp.path().join("merged");
+    let mut db = Database::create(&path).unwrap();
+    let mut copied = Vec::new();
+    for source_path in &sources {
+        let mut source = Database::open_read_only(source_path).unwrap();
+        for n in 0..source.num_games() {
+            assert_eq!(db.copy_game(&mut source, n).unwrap(), copied.len() as u32);
+            copied.push((source_path, n));
+        }
+    }
+    db.close().unwrap();
+    for (source_path, before) in sources.iter().zip(&before) {
+        assert_eq!(&database_bytes(source_path), before);
+    }
+
+    let db = Database::open(&path).unwrap();
+    assert_eq!(db.num_games(), 7);
+    assert_eq!(
+        delete_flags(&db),
+        [false, true, false, true, false, false, false]
+    );
+    for (n, &(source_path, m)) in (0u32..).zip(&copied) {
+        let source = Database::open_read_only(source_path).unwrap();
+        let (entry, source_entry) = (db.get_entry(n).unwrap(), source.get_entry(m).unwrap());
+        assert_eq!(record(&path, n), record(source_path, m), "game {n}");
+        assert_eq!(entry_names(&db, entry), entry_names(&source, source_entry));
+
+        // Only the name IDs and the offset change.
+        let mut expected = source_entry.clone();
+        expected.set_white(entry.get_white());
+        expected.set_black(entry.get_black());
+        expected.set_event(entry.get_event());
+        expected.set_site(entry.get_site());
+        expected.set_round(entry.get_round());
+        expected.set_offset(entry.get_offset());
+        let mut expected_bytes = Vec::new();
+        expected.write(&mut expected_bytes).unwrap();
+        assert_eq!(entry_bytes(&db, n), expected_bytes, "game {n}");
+    }
+
+    // Every name is used, and its frequency counts the games that use it,
+    // deleted or not.
+    let mut uses = std::collections::HashMap::new();
+    for n in 0..db.num_games() {
+        let entry = db.get_entry(n).unwrap();
+        for (ntype, id) in [
+            (NameType::Player, entry.get_white()),
+            (NameType::Player, entry.get_black()),
+            (NameType::Event, entry.get_event()),
+            (NameType::Site, entry.get_site()),
+            (NameType::Round, entry.get_round()),
+        ] {
+            *uses.entry((ntype.as_usize(), id)).or_insert(0u32) += 1;
+        }
+    }
+    let ntypes = [
+        NameType::Player,
+        NameType::Event,
+        NameType::Site,
+        NameType::Round,
+    ];
+    for (ntype, names) in ntypes.iter().zip(all_names(&db)) {
+        for (id, name, frequency) in names {
+            assert_eq!(
+                Some(&frequency),
+                uses.get(&(ntype.as_usize(), id)),
+                "{ntype} {name}"
+            );
+        }
+    }
+    let name_count: usize = all_names(&db).iter().map(Vec::len).sum();
+    assert_eq!(name_count, uses.len());
+}
+
+#[test]
+fn test_copy_game_errors_leave_the_database_unchanged() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let damaged = copy_fixture(temp.path(), "five");
+    let si4 = damaged.with_extension("si4");
+    let mut index = Index::open(&si4).unwrap();
+    index.get_entry_mut(0).unwrap().set_round(999);
+    index.get_entry_mut(1).unwrap().set_offset(u32::MAX - 10);
+    index
+        .flush(&mut std::fs::File::create(&si4).unwrap())
+        .unwrap();
+    let mut source = Database::open_read_only(&damaged).unwrap();
+
+    let path = temp.path().join("merged");
+    let mut db = Database::create(&path).unwrap();
+    let names = all_names(&db);
+    for (game_num, expected) in [(0, "No round name has ID 999"), (1, "past the end")] {
+        let err = db.copy_game(&mut source, game_num).unwrap_err();
+        let Error::Game { number, source } = &err else {
+            panic!("game {game_num}: {err:?}");
+        };
+        assert_eq!(*number, u64::from(game_num) + 1);
+        assert!(source.to_string().contains(expected), "{source}");
+    }
+    assert!(matches!(
+        db.copy_game(&mut source, 5),
+        Err(Error::GameNotFound { number: 6 })
+    ));
+    assert_eq!(db.num_games(), 0);
+    assert_eq!(all_names(&db), names);
+
+    // Game 3 is undamaged.
+    assert_eq!(db.copy_game(&mut source, 2).unwrap(), 0);
+    db.close().unwrap();
+
+    let mut read_only = Database::open_read_only(&path).unwrap();
+    assert!(is_read_only(read_only.copy_game(&mut source, 2)));
+    assert_eq!(read_only.num_games(), 1);
+}
