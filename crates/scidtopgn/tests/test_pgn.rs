@@ -1349,6 +1349,9 @@ fn test_a_result_inside_a_variation_is_skipped() {
     ] {
         let game = parse_movetext(movetext);
         assert_eq!(sans(&game).join(" "), main_line, "{movetext}");
+        let variation = node(&game, "e4").var_child.expect("a variation");
+        let first = game.moves[variation].next.expect("a move");
+        assert_eq!(game.moves[first].san, "d4", "{movetext}");
         assert_eq!(game.result, result, "{movetext}");
         let expected: Vec<_> = results.into_iter().map(skipped).collect();
         assert_eq!(warning_kinds(&game), expected, "{movetext}");
