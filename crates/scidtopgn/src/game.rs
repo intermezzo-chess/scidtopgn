@@ -712,7 +712,8 @@ impl Game {
 
     /// Writes the game as PGN: its tags, then its moves with their
     /// variations, NAGs, and comments in lines of up to 80 characters, then
-    /// the result on a line of its own.
+    /// the result on a line of its own. `"` and `\` in tag values are
+    /// escaped as `\"` and `\\`.
     ///
     /// # Examples
     ///
@@ -740,41 +741,41 @@ impl Game {
     pub fn to_pgn(&self) -> String {
         let mut pgn = String::new();
 
-        pgn.push_str(&format!("[Event \"{}\"]\n", self.event));
-        pgn.push_str(&format!("[Site \"{}\"]\n", self.site));
-        pgn.push_str(&format!("[Date \"{}\"]\n", self.date));
-        pgn.push_str(&format!("[Round \"{}\"]\n", self.round));
-        pgn.push_str(&format!("[White \"{}\"]\n", self.white));
-        pgn.push_str(&format!("[Black \"{}\"]\n", self.black));
-        pgn.push_str(&format!("[Result \"{}\"]\n", self.result));
+        pgn.push_str(&tag_pair("Event", &self.event));
+        pgn.push_str(&tag_pair("Site", &self.site));
+        pgn.push_str(&tag_pair("Date", self.date));
+        pgn.push_str(&tag_pair("Round", &self.round));
+        pgn.push_str(&tag_pair("White", &self.white));
+        pgn.push_str(&tag_pair("Black", &self.black));
+        pgn.push_str(&tag_pair("Result", self.result));
 
         if let Some(ref title) = self.find_tag("WhiteTitle") {
-            pgn.push_str(&format!("[WhiteTitle \"{}\"]\n", title));
+            pgn.push_str(&tag_pair("WhiteTitle", title));
         }
         if let Some(ref title) = self.find_tag("BlackTitle") {
-            pgn.push_str(&format!("[BlackTitle \"{}\"]\n", title));
+            pgn.push_str(&tag_pair("BlackTitle", title));
         }
 
         if let Some(elo) = self.white_elo {
-            pgn.push_str(&format!("[WhiteElo \"{}\"]\n", elo));
+            pgn.push_str(&tag_pair("WhiteElo", elo));
         }
         if let Some(elo) = self.black_elo {
-            pgn.push_str(&format!("[BlackElo \"{}\"]\n", elo));
+            pgn.push_str(&tag_pair("BlackElo", elo));
         }
 
         if let Some(ref eco) = self.eco {
-            pgn.push_str(&format!("[ECO \"{}\"]\n", eco));
+            pgn.push_str(&tag_pair("ECO", eco));
         }
 
         if let Some(ref opening) = self.find_tag("Opening") {
-            pgn.push_str(&format!("[Opening \"{}\"]\n", opening));
+            pgn.push_str(&tag_pair("Opening", opening));
         }
         if let Some(ref variation) = self.find_tag("Variation") {
-            pgn.push_str(&format!("[Variation \"{}\"]\n", variation));
+            pgn.push_str(&tag_pair("Variation", variation));
         }
 
         if let Some(event_date) = self.event_date {
-            pgn.push_str(&format!("[EventDate \"{}\"]\n", event_date));
+            pgn.push_str(&tag_pair("EventDate", event_date));
         }
 
         let excluded_tags = [
@@ -792,13 +793,13 @@ impl Game {
 
         for tag in &self.tags {
             if !excluded_tags.contains(&tag.name.as_str()) {
-                pgn.push_str(&format!("[{} \"{}\"]\n", tag.name, tag.value));
+                pgn.push_str(&tag_pair(&tag.name, &tag.value));
             }
         }
 
         if let Some(ref start) = self.start_position {
             pgn.push_str("[SetUp \"1\"]\n");
-            pgn.push_str(&format!("[FEN \"{}\"]\n", fen(start)));
+            pgn.push_str(&tag_pair("FEN", fen(start)));
         }
 
         pgn.push('\n');
@@ -903,6 +904,14 @@ impl Game {
             idx = node.next;
         }
     }
+}
+
+/// A tag pair on its own line, with `"` and `\` in the value escaped as the
+/// PGN standard requires. SCID doesn't read these escapes: it reads `\\` as
+/// two backslashes and ends the value at `\"`.
+fn tag_pair(name: &str, value: impl std::fmt::Display) -> String {
+    let value = value.to_string().replace('\\', "\\\\").replace('"', "\\\"");
+    format!("[{name} \"{value}\"]\n")
 }
 
 /// The symbol PGN export writes for `nag`, or `""` if it is written as

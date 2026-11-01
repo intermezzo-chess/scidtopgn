@@ -17,6 +17,7 @@ The case numbers match [#37](https://github.com/intermezzo-chess/scidtopgn/issue
 - [Annotation symbols](#annotation-symbols)
 - [Results and the start position](#results-and-the-start-position)
 - [Text before and between games](#text-before-and-between-games)
+- [Comments, tag values, results in variations, and stray brackets](#comments-tag-values-results-in-variations-and-stray-brackets)
 - [Known differences outside these cases](#known-differences-outside-these-cases)
 - [Export and round trips](#export-and-round-trips)
 - [How SCID's behavior was checked](#how-scids-behavior-was-checked)
@@ -33,6 +34,9 @@ The case numbers match [#37](https://github.com/intermezzo-chess/scidtopgn/issue
 - **#22c** `e4--+` and `e4->` are read with the symbol written, $21 and $41. SCID reads `e4--+` as $19 and fails at `e4->`.
 - **#23** `e4~` is read with its annotation, `$13`. SCID fails at the move.
 - **#28** A game whose moves don't end with a result is imported with a warning, with the `Result` tag's result, or `*` without one. SCID skips it.
+- A result inside a variation is skipped with a warning, and the whole game is imported. SCID ends the game at the result and reads the rest of the moves as text before the next game ([#60](https://github.com/intermezzo-chess/scidtopgn/issues/60)).
+- `\"` and `\\` in a tag value are read as `"` and `\`, as the PGN standard specifies. SCID ends the value at its first `"`, and keeps `\\` as two backslashes (#60).
+- A move right after a stray `]`, as in `]Bc5`, is read. SCID drops it (#60).
 
 `scidtopgn` rejects or changes input where SCID guesses or produces a corrupt game:
 
@@ -55,6 +59,7 @@ PGN export:
 
 - **#34** Each NAG is exported as the symbol SCID writes when both SCID and `scidtopgn` read it back as the same NAG, and as `$n` otherwise. SCID writes some NAGs as symbols it can't read back, such as `→` for $40.
 - **#38** Variations, NAGs, and comments are exported where SCID exports them, in the PGN standard's export format, such as `1. e4 ! (1. d4)`. SCID writes `1.e4! ( 1.d4 )`.
+- `"` and `\` in tag values are exported as `\"` and `\\`, as the PGN standard specifies. SCID imports such a game, but reads `\\` as two backslashes and ends the value at `\"` (#60).
 
 Text before and between games ([#41](https://github.com/intermezzo-chess/scidtopgn/issues/41)):
 
@@ -89,7 +94,8 @@ A game that fails to parse is reported by its error only, without its warnings.
 
 | Warning | When | Case |
 | --- | --- | --- |
-| `skipped unknown text "zz"` | Text in the moves that isn't a move, an annotation symbol, or a result, such as `zz`, `Diagram`, `B` on its own, or `nf3`. Also text after the annotation symbols attached to a move, as in `e4!x`. | #12, #25 |
+| `skipped unknown text "zz"` | Text in the moves that isn't a move, an annotation symbol, or a result, such as `zz`, `Diagram`, `B` on its own, or `nf3`. Also text after the annotation symbols attached to a move, as in `e4!x`, and each `}` or `]` outside a comment. | #12, #25, #60 |
+| `skipped result "1-0" inside a variation` | A result inside a variation, at any depth. The game goes on. | #60 |
 | `"O-O" castles without the castling right` | Castling after the king or rook has moved and returned, or when the `FEN` gives no castling right. | #16 |
 | `read "O-O" as O-O-O because only queenside castling is legal` | `O-O` when only queenside castling is legal. | #20 |
 | `dropped castling rights "KQkq" from the FEN because they don't fit the position` | Castling rights in the `FEN` without the king or rook on its original square. | #31 |
@@ -288,6 +294,35 @@ Lines inside the text, including blank lines, are joined by line breaks. Text th
 
 **A `[` after a result or a comment on the same line.** *What changes:* it is text, so `1-0 [Event "B"]` doesn't start a game, and `1-0 [Round 2 notes]` isn't reported as a failed game. *Why:* `scidtopgn` starts a game only at a tag line, as it does where a game without a result ends and where it resumes after a failed game. Before #41, `scidtopgn` read the `[` as a tag, as SCID does.
 
+## Comments, tag values, results in variations, and stray brackets
+
+These cases were added by [#60](https://github.com/intermezzo-chess/scidtopgn/issues/60).
+
+| Case | Example | SCID | scidtopgn | Comparison |
+| --- | --- | --- | --- | --- |
+| Whitespace in a comment | `{  line one⏎   line two  }` | `line one line two` | `line one line two` | Same |
+| `\"` in a tag value | `[Event "a \"b\" c"]` | `a \` | `a "b" c` | **Differs** |
+| `\\` in a tag value | `[Site "x\\y"]` | `x\\y` | `x\y` | **Differs** |
+| `\` before another character in a tag value | `[Site "C:\games"]` | `C:\games` | `C:\games` | Same |
+| A tag value that ends with `\"` | `[Annotator "a \"]` | `a \` | Skips the game and reports `Unterminated string` | **Differs** |
+| A result inside a variation | `1. e4 (1. d4 1-0) 1... e5 2. Nf3 *` | Ends the game with `1. e4 (1. d4) 1-0`, without saying that the result was inside a variation. `) 1... e5 2. Nf3 *` becomes the comment before the next game's first move. | Skips `1-0` with a warning, and imports `1. e4 (1. d4) e5 2. Nf3 *` | **Differs** |
+| A result inside a variation that isn't closed | `1. e4 (1. d4 1-0` followed by `[Event ...]` | Keeps `1. e4 (1. d4) 1-0` | Skips the game and reports `Unexpected '['` | **Differs** |
+| A `}` outside a comment | `1. e4 } e5` | Skips it and logs `"}" seen outside a comment`, once per game | Skips it, with a warning for each | Same |
+| A `]` in the moves | `1. e4 ] e5` | Skips it and logs `Unexpected symbol: ]` | Skips it with a warning | Same |
+| A move right after a `]` | `]Bc5` | Drops the move and logs `Unexpected symbol: ]Bc5` | Skips the `]` with a warning, and plays `Bc5` | **Differs** |
+
+In a comment, each run of whitespace, including line breaks, becomes one space, and whitespace at the ends is dropped, as in SCID. Whitespace means what C's `isspace` matches: space, tab, line feed, carriage return, vertical tab, and form feed. Other characters, such as a no-break space, are kept. A comment of only whitespace is empty, as `{}` is. This applies to comments in the moves and after the tags, not to [text before a game](#text-before-and-between-games), which keeps its line breaks. Before #60, `scidtopgn` kept a comment's whitespace as written.
+
+**`\"` and `\\` in a tag value.** *What changes:* `\"` is read as `"`, so the value doesn't end there, and `\\` is read as one backslash. *Why:* these are the PGN standard's escapes, and other PGN programs write them. SCID ends the value at its first `"`, so it cuts off `a "b" c` after `a \`. A `\` before any other character is kept, as in SCID, so a value such as `C:\games`, written without escapes, reads the same in both. Before #60, `scidtopgn` dropped that `\`.
+
+**A tag value that ends with `\"`.** *What changes:* a game that SCID imports is skipped and reported. *Why:* under the PGN standard, `\"` doesn't end the value, so the value has no end. `scidtopgn` doesn't guess where it ends.
+
+**A result inside a variation.** *What changes:* the game is imported in full, with the result after the main line, and a warning names the skipped result. *Why:* SCID ends the game at the first result at any depth. It drops the rest of the main line and keeps it as text before the next game, so both games change. A result can't end a variation, so skipping it loses nothing. Before #60, `scidtopgn` skipped the game with `Unterminated variation`.
+
+**A result inside a variation that isn't closed.** *What changes:* the game is skipped and reported. *Why:* skipping the result leaves the variation open, so the game fails at the next game's tags as any unclosed variation does.
+
+**A move right after a `]`.** *What changes:* the move is played instead of dropped. *Why:* SCID reads the `]` and the text after it as one unknown symbol. `scidtopgn` reads a `]` on its own, as it reads a `}`, so the move after it is read either way.
+
 ## Known differences outside these cases
 
 #37 doesn't change these. Each was checked against SCID's sources in `scid-cpp/scid` and `scidtopgn` as of #37.
@@ -298,7 +333,6 @@ Lines inside the text, including blank lines, are joined by line breaks. Text th
 | Rating tags | `[WhiteUSCF "2400"]` | Uses the rating as the player's rating, with its type, such as USCF | Keeps it as an ordinary tag, with no rating in the index |
 | `Result` tag with more text | `[Result "1-0 (time)"]` | Reads `1-0` | Reads it as `*`. The result after the moves is used, with a warning only when that result isn't `*` (#27d). |
 | Text that isn't UTF-8 | A Latin-1 `é` in a tag | Stores the bytes unchanged | Reads each byte that isn't valid UTF-8 as Windows-1252, stores UTF-8, and warns (#42). Valid UTF-8 is unchanged, even on the same line, so a name written in Latin-1 and in UTF-8 is stored once. Latin-1 bytes that happen to be valid UTF-8, such as `Ã©`, are read as UTF-8, without a warning. The five bytes Windows-1252 leaves undefined are read as the control characters U+0081, U+008D, U+008F, U+0090, and U+009D. |
-| A `}` outside a comment | `1. e4 } e5` | Skips it and logs `"}" seen outside a comment` | Skips it, without a warning |
 
 ## Export and round trips
 
@@ -306,6 +340,8 @@ The cases above compare how a game is imported and stored. Exporting the stored 
 
 - **A NAG before the first move** of the game or of a variation is dropped on import, as in SCID. See [Where annotations attach](#general-differences).
 - **The en passant square** of a `FEN` is exported only when an en passant capture is legal (#31c).
+
+Tag values are exported with `"` written as `\"` and `\` as `\\`, as the PGN standard specifies, so `scidtopgn` reads them back unchanged. SCID imports the exported game, with all its moves, but reads these escapes as written: `[Site "C:\\games"]` comes back from SCID as `C:\\games`, and `[Event "a \"b\" c"]` as `a \`. Before #60, `scidtopgn` wrote tag values without escapes, so it couldn't read back a value with `"`, and read `\` in one as an escape.
 
 The moves themselves are exported as canonical SAN, so `ed` comes back as `exd5` and `0-0` as `O-O`. This is a change in notation, not a loss. The movetext follows the PGN standard's export format: a space after each move number, no space inside a variation's parentheses, and a move number before a Black move that starts a variation or follows a comment or a variation.
 
@@ -359,7 +395,7 @@ c++ -std=c++17 -Wno-register -w -Iscid-cpp/scid \
 
 `scid-cpp/CMakeLists.txt` names `scid-cpp/scid/src/main.cpp` as the converter's source, but the file is `scid-cpp/src/main.cpp`. These commands call the compiler directly instead. To build the reference converter itself, for example to write a test database such as `tests/data/castling`, use the same command with `-Iscid-cpp/src scid-cpp/src/main.cpp` in place of `pgn_probe.cpp`. Then run it as `<converter> <database> <pgn-file>`.
 
-To compare with `scidtopgn`, run `cargo test -p scidtopgn --test test_pgn test_notation_fixture`, which checks every game in `tests/data/notation.pgn`. To check another file, run `scidtopgn import <file> -o <database>`, which prints each warning and skipped game. The cases in [Known differences outside these cases](#known-differences-outside-these-cases) were checked the same way, with the example inputs shown. So were the cases in [Text before and between games](#text-before-and-between-games). `pgn_probe` joins the lines of its output with spaces, so where the text's line breaks and spaces matter, SCID's stored comment was printed with `Game::GetMoveComment` instead.
+To compare with `scidtopgn`, run `cargo test -p scidtopgn --test test_pgn test_notation_fixture`, which checks every game in `tests/data/notation.pgn`. To check another file, run `scidtopgn import <file> -o <database>`, which prints each warning and skipped game. The cases in [Known differences outside these cases](#known-differences-outside-these-cases) were checked the same way, with the example inputs shown. So were the cases in [Text before and between games](#text-before-and-between-games), and in [Comments, tag values, results in variations, and stray brackets](#comments-tag-values-results-in-variations-and-stray-brackets), where `pgn_probe` was also run on `scidtopgn`'s export of games with escaped tag values. `pgn_probe` joins the lines of its output with spaces, so where the text's line breaks and spaces matter, SCID's stored comment was printed with `Game::GetMoveComment` instead.
 
 <details>
 <summary>SCID's output for <code>tests/data/notation.pgn</code></summary>
@@ -486,6 +522,7 @@ game 74: ERROR (SCID skips this game) | [Event "28b no result at the end of the 
 - **`tests/data/castling`** was written by the reference converter from `tests/data/castling.pgn`. `crates/scidtopgn/tests/test_interop.rs` checks that `scidtopgn` reads it (#17) and writes the same moves for `castling.pgn`. `position.rs` and `mov.rs` test castling without the castling right on its own.
 - **`tests/data/annotated`** was written by the reference converter from `tests/data/annotated.pgn`, which has NAGs and comments in the main line and in variations. `test_interop.rs` checks that `scidtopgn` reads and exports it with each annotation where SCID stores it, and writes the same moves and annotations for `annotated.pgn` (#38).
 - **`crates/scidtopgn/tests/test_variations.rs`** checks where annotations attach in variations nested six levels deep, after PGN import and after round trips through SCID, and checks both variation limits from PGN and from SCID ([issue 4](https://github.com/intermezzo-chess/scidtopgn/issues/4)).
+- **`test_comment_whitespace_is_single_spaced`**, **`test_tag_value_escapes`**, **`test_tag_values_with_quotes_and_backslashes_round_trip`**, **`test_a_result_inside_a_variation_is_skipped`**, and **`test_stray_closing_brackets_give_warnings`** in `test_pgn.rs` check the cases added by #60.
 - **`test_every_nag_survives_export_and_import`** in `crates/scidtopgn/src/game.rs` exports and imports each NAG from 1 to 255 (#34).
 - **`test_cli_import_prints_warnings_and_keeps_the_game`** in `crates/scidtopgn-cli/tests/integration.rs` checks how the CLI prints warnings in both `--on-error` modes (#33).
 - **The pre-game text tests in `test_pgn.rs`**, such as `test_text_before_a_game_is_its_first_comment`, check each case in [Text before and between games](#text-before-and-between-games). **`test_cli_import_keeps_text_before_games`** in `crates/scidtopgn-cli/tests/integration.rs` checks that the CLI numbers the games correctly in both `--on-error` modes, and that the text is stored and exported as each game's first comment (#41).
