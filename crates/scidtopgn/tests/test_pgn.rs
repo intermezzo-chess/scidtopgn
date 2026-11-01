@@ -1243,6 +1243,152 @@ fn test_bracket_inside_moves_fails_the_game() {
 }
 
 #[test]
+fn test_comment_whitespace_is_single_spaced() {
+    // As in SCID, each run of whitespace in a comment is one space, and the
+    // ends are trimmed, before the first move, after a move, and in a
+    // variation. A no-break space isn't whitespace to SCID, so it is kept.
+    let movetext = "{ Intro\n  text } 1. e4 {  line one\n   line two  } \
+                    ({\tOr\r\n} 1. d4 {x\u{a0} \x0b\x0c y}) e5 {a}  {\n b } *";
+    for pgn in [
+        pgn_game("", movetext),
+        pgn_game("", movetext).replace('\n', "\r\n"),
+    ] {
+        let game = parse_single_game(&pgn).unwrap();
+        let start = game.first_move.unwrap();
+        assert_eq!(game.moves[start].comment.as_deref(), Some("Intro text"));
+        assert_eq!(
+            node(&game, "e4").comment.as_deref(),
+            Some("line one line two")
+        );
+        assert_eq!(variation_comment(&game, "e4"), Some("Or"));
+        assert_eq!(node(&game, "d4").comment.as_deref(), Some("x\u{a0} y"));
+        assert_eq!(node(&game, "e5").comment.as_deref(), Some("a b"));
+    }
+
+    // A comment of only whitespace is empty, as `{}` is.
+    for movetext in ["1. e4 { \n\t } *", "1. e4 {} *"] {
+        assert_eq!(
+            node(&parse_movetext(movetext), "e4").comment.as_deref(),
+            Some(""),
+            "{movetext:?}"
+        );
+    }
+}
+
+#[test]
+fn test_tag_value_escapes() {
+    // `\"` and `\\` are escapes, as in the PGN standard. SCID ends a value
+    // at its first `"` and reads `\` as written. A `\` before any other
+    // character is kept, as in SCID.
+    let tags = "[Site \"a \\\"b\\\" c\"]\n[Round \"x\\\\y\"]\n\
+                [White \"C:\\games\\x\"]\n[Black \"a\\\\\"]";
+    let game = parse_single_game(&pgn_game(tags, "1. e4 *")).unwrap();
+    assert_eq!(game.site, "a \"b\" c");
+    assert_eq!(game.round, "x\\y");
+    assert_eq!(game.white, "C:\\games\\x");
+    assert_eq!(game.black, "a\\");
+    assert!(game.warnings.is_empty(), "{:?}", game.warnings);
+
+    // `\"` doesn't end the value, so a value ending in `\"` has no end,
+    // where SCID reads `a \`.
+    let pgn = pgn_game("[Annotator \"a \\\"]", "1. e4 *");
+    assert_eq!(
+        failure(&parse_single_game(&pgn).unwrap_err()),
+        "error: Parse error at line 2: Unterminated string"
+    );
+}
+
+#[test]
+fn test_tag_values_with_quotes_and_backslashes_round_trip() {
+    let tags = "[Site \"a \\\"b\\\" c\"]\n[White \"C:\\games\"]\n\
+                [Black \"\\\"\\\\\"]\n[Annotator \"x\\\\\"]";
+    let game = parse_single_game(&pgn_game(tags, "1. e4 *")).unwrap();
+    let exported = game.to_pgn();
+    for line in [
+        "[Site \"a \\\"b\\\" c\"]",
+        "[White \"C:\\\\games\"]",
+        "[Black \"\\\"\\\\\"]",
+        "[Annotator \"x\\\\\"]",
+    ] {
+        assert!(exported.contains(line), "{line} in {exported}");
+    }
+
+    let reimported = parse_single_game(&exported).unwrap();
+    assert_eq!(reimported.site, "a \"b\" c");
+    assert_eq!(reimported.white, "C:\\games");
+    assert_eq!(reimported.black, "\"\\");
+    assert_eq!(reimported.find_tag("Annotator").unwrap(), "x\\");
+    assert_eq!(reimported.to_pgn(), exported);
+}
+
+#[test]
+fn test_a_result_inside_a_variation_is_skipped() {
+    // SCID ends the game at the result, drops the rest of the main line,
+    // and reads it as text before the next game. The result is skipped
+    // instead, with a warning, and the whole game is kept.
+    let skipped = |result| PgnWarningKind::ResultInVariation { result };
+    for (movetext, results, main_line, result) in [
+        (
+            "1. e4 (1. d4 1-0) 1... e5 2. Nf3 *",
+            vec![GameResult::White],
+            "e4 e5 Nf3",
+            GameResult::None,
+        ),
+        (
+            "1. e4 (1. d4 *) e5 0-1",
+            vec![GameResult::None],
+            "e4 e5",
+            GameResult::Black,
+        ),
+        (
+            "1. e4 (1. d4 (1. c4 0:1) 1... d5 1/2) e5 1-0",
+            vec![GameResult::Black, GameResult::Draw],
+            "e4 e5",
+            GameResult::White,
+        ),
+    ] {
+        let game = parse_movetext(movetext);
+        assert_eq!(sans(&game).join(" "), main_line, "{movetext}");
+        let variation = node(&game, "e4").var_child.expect("a variation");
+        let first = game.moves[variation].next.expect("a move");
+        assert_eq!(game.moves[first].san, "d4", "{movetext}");
+        assert_eq!(game.result, result, "{movetext}");
+        let expected: Vec<_> = results.into_iter().map(skipped).collect();
+        assert_eq!(warning_kinds(&game), expected, "{movetext}");
+    }
+
+    let game = parse_movetext("1. e4 (1. d4 d5\n2. c4 1-0) e5 *");
+    assert_eq!(game.warnings[0].line, 5);
+    assert_eq!(
+        game.warnings[0].kind.to_string(),
+        "skipped result \"1-0\" inside a variation"
+    );
+
+    // A variation that isn't closed still fails at the next game's tags,
+    // where SCID keeps `1. e4 (1. d4) 1-0`.
+    let pgn = "[Event \"A\"]\n\n1. e4 (1. d4 1-0\n\n[Event \"B\"]\n\n1. c4 *\n";
+    let results: Vec<_> = PgnParser::new(pgn).collect();
+    assert_eq!(
+        failure(results[0].as_ref().unwrap_err()),
+        "error: Parse error at line 5: Unexpected '['"
+    );
+    assert_eq!(results[1].as_ref().unwrap().event, "B");
+}
+
+#[test]
+fn test_stray_closing_brackets_give_warnings() {
+    // SCID warns about a `}` once per game and about each `]`, and drops a
+    // move attached after a `]`. Each gives a warning here, and the move
+    // after it is read.
+    let game = parse_movetext("1. e4 } e5 ] 2. Nf3 }Nc6 3. Bc4 ]Bc5 (3... Nf6 }) *");
+    assert_eq!(sans(&game), ["e4", "e5", "Nf3", "Nc6", "Bc4", "Bc5"]);
+    let unknown = |text: &str| PgnWarningKind::UnknownText {
+        text: text.to_string(),
+    };
+    assert_eq!(warning_kinds(&game), ["}", "]", "}", "]", "}"].map(unknown));
+}
+
+#[test]
 fn test_line_comments_between_tags_are_skipped() {
     for comment in ["% escape {", "; comment {"] {
         let pgn = format!("[Event \"A\"]\n{comment}\n[Site \"S\"]\n\n1. e4 *\n");

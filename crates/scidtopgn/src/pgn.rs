@@ -113,6 +113,12 @@ pub enum PgnWarningKind {
     /// bytes are read as Windows-1252. Given once per game, on the first
     /// line with such bytes.
     NotUtf8,
+    /// A result inside a variation. It is skipped, and the game goes on.
+    /// SCID ends the game there instead.
+    ResultInVariation {
+        /// The result skipped.
+        result: GameResult,
+    },
 }
 
 /// Describes the problem in a phrase, such as `skipped unknown text "zz"`.
@@ -156,6 +162,9 @@ impl fmt::Display for PgnWarningKind {
                 "dropped tag {name:?} because its value is {length} bytes, more than {MAX_TAG_VALUE_LEN}"
             ),
             Self::NotUtf8 => write!(f, "read text that isn't UTF-8 as Windows-1252"),
+            Self::ResultInVariation { result } => {
+                write!(f, "skipped result \"{result}\" inside a variation")
+            }
         }
     }
 }
@@ -490,7 +499,9 @@ impl PgnParser {
         }
     }
 
-    /// Reads a tag value, which must end on its line.
+    /// Reads a tag value, which must end on its line. `\"` and `\\` are
+    /// escapes, as in the PGN standard. A `\` before any other character is
+    /// kept, as SCID keeps it.
     fn read_string(&mut self) -> Result<String> {
         self.skip_whitespace();
         if self.peek() != Some('"') {
@@ -507,11 +518,11 @@ impl PgnParser {
             match c {
                 '"' => return Ok(result),
                 '\\' => match self.peek() {
-                    Some(escaped) if escaped != '\n' => {
+                    Some(escaped @ ('"' | '\\')) => {
                         result.push(escaped);
                         self.advance();
                     }
-                    _ => break,
+                    _ => result.push(c),
                 },
                 _ => result.push(c),
             }
@@ -751,11 +762,17 @@ impl PgnParser {
                 }
                 '*' => {
                     self.advance();
+                    let result = GameResult::None;
                     if depth > 0 {
-                        return Err(self.error("Unterminated variation"));
+                        self.warn(
+                            game,
+                            self.line,
+                            PgnWarningKind::ResultInVariation { result },
+                        );
+                        continue;
                     }
                     return Ok(LineEnd::Result {
-                        result: GameResult::None,
+                        result,
                         line: self.line,
                     });
                 }
@@ -795,19 +812,26 @@ impl PgnParser {
                 '[' => {
                     return Err(self.error("Unexpected '['"));
                 }
-                // A stray closing brace or bracket.
+                // A stray closing brace or bracket. SCID warns about them
+                // too. Text after it is read on its own.
                 '}' | ']' => {
+                    let line = self.line;
                     self.advance();
+                    let text = c.to_string();
+                    self.warn(game, line, PgnWarningKind::UnknownText { text });
                 }
                 _ => {
                     let line = self.line;
                     let token = self.read_token();
 
                     match classify_token(&token) {
+                        // SCID ends the game at a result inside a variation,
+                        // and reads the rest of the moves as text before the
+                        // next game. Skipping it keeps the whole game.
+                        MoveToken::Result(result) if depth > 0 => {
+                            self.warn(game, line, PgnWarningKind::ResultInVariation { result });
+                        }
                         MoveToken::Result(result) => {
-                            if depth > 0 {
-                                return Err(self.error("Unterminated variation"));
-                            }
                             return Ok(LineEnd::Result { result, line });
                         }
                         MoveToken::Ignored => {}
@@ -876,7 +900,9 @@ impl PgnParser {
         let mut comment = String::new();
         while let Some(c) = self.advance() {
             if c == '}' {
-                return Ok(comment);
+                // Like SCID, line breaks and indentation in a comment
+                // aren't kept.
+                return Ok(single_space(&comment));
             }
             comment.push(c);
         }
@@ -1002,6 +1028,17 @@ fn castling_rights_text(rooks: Bitboard) -> String {
         .chain(rooks.into_iter().filter(|square| !order.contains(square)))
         .map(letter)
         .collect()
+}
+
+/// `text` with each run of whitespace replaced by one space, and none at
+/// either end, as SCID's `strSingleSpace` gives. Whitespace is what C's
+/// `isspace` matches, so other whitespace, such as a no-break space, is
+/// kept.
+fn single_space(text: &str) -> String {
+    text.split([' ', '\t', '\n', '\x0b', '\x0c', '\r'])
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// A result after the moves. SCID also accepts `:` for `-`, and `1/2` for a
