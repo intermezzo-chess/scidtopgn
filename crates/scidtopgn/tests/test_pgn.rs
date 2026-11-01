@@ -101,7 +101,7 @@ fn test_game_roundtrip() {
 }
 
 use scidtopgn::shakmaty::{Color, Position};
-use scidtopgn::{Error, PgnParser, PgnWarningKind};
+use scidtopgn::{Error, PgnParser, PgnWarningKind, RatingType};
 
 fn pgn_game(tags: &str, movetext: &str) -> String {
     format!("[Event \"Test\"]\n{tags}\n\n{movetext}\n")
@@ -1531,4 +1531,222 @@ fn test_tag_lengths_count_the_utf8_stored() {
         name: "Annotator".to_string(),
         length: 400,
     }));
+}
+
+/// Each player's rating and its kind.
+fn ratings(game: &Game) -> [Option<(u16, RatingType)>; 2] {
+    [
+        game.white_elo.map(|elo| (elo, game.white_rating_type)),
+        game.black_elo.map(|elo| (elo, game.black_rating_type)),
+    ]
+}
+
+fn tag_names(game: &Game) -> Vec<&str> {
+    game.tags.iter().map(|tag| tag.name.as_str()).collect()
+}
+
+#[test]
+fn test_player_names_are_tidied() {
+    // As SCID's `standardPlayerName` does, as `pgn_probe` showed.
+    for (written, stored) in [
+        ("Carlsen,Magnus", "Carlsen, Magnus"),
+        ("Anand,  V", "Anand, V"),
+        (" Doe,John", "Doe, John"),
+        ("Doe ,  John  ", "Doe , John"),
+        ("Carlsen,", "Carlsen,"),
+        ("A  B,C", "A  B, C"),
+        ("Smith,\tJ\t", "Smith, \tJ"),
+        ("a,,b", "a,, b"),
+        ("", ""),
+    ] {
+        let tags = format!("[White \"{written}\"]\n[Black \"{written}\"]");
+        let game = parse_single_game(&pgn_game(&tags, "1. e4 *")).unwrap();
+        assert_eq!(game.white, stored, "{written:?}");
+        assert_eq!(game.black, stored, "{written:?}");
+    }
+
+    // Other tags aren't tidied.
+    let game = parse_single_game(&pgn_game("[Site \"Oslo,Norway \"]", "1. e4 *")).unwrap();
+    assert_eq!(game.site, "Oslo,Norway ");
+}
+
+#[test]
+fn test_rating_in_a_player_name() {
+    let elo = |rating| Some((rating, RatingType::Elo));
+    for (written, stored, rating) in [
+        ("Carlsen, Magnus (2850)", "Carlsen, Magnus", elo(2850)),
+        ("A (2850)", "A", elo(2850)),
+        ("Carlsen, (2850)", "Carlsen,", elo(2850)),
+        // SCID finds no rating in these three, because tidying the name
+        // changes its length.
+        ("Carlsen,Magnus (2850)", "Carlsen, Magnus", elo(2850)),
+        ("Anand,  V (2800)", "Anand, V", elo(2800)),
+        ("Kasparov (2851) ", "Kasparov", elo(2851)),
+        // SCID keeps the second space, as `Carlsen `.
+        ("Carlsen  (2850)", "Carlsen", elo(2850)),
+        ("B (0000)", "B", None),
+        ("Smith (GM)", "Smith (GM)", None),
+        ("(123)", "(123)", None),
+        ("X (123)", "X (123)", None),
+        ("X (12345)", "X (12345)", None),
+        ("X(2850)", "X(2850)", None),
+        (" (2850)", "(2850)", None),
+        ("X (2850)!", "X (2850)!", None),
+        ("Y (２８５０)", "Y (２８５０)", None),
+    ] {
+        let tags = format!("[White \"{written}\"]\n[Black \"{written}\"]");
+        let game = parse_single_game(&pgn_game(&tags, "1. e4 *")).unwrap();
+        assert_eq!(game.white, stored, "{written:?}");
+        assert_eq!(game.black, stored, "{written:?}");
+        assert_eq!(ratings(&game), [rating, rating], "{written:?}");
+        assert!(game.warnings.is_empty(), "{written:?}: {:?}", game.warnings);
+    }
+}
+
+#[test]
+fn test_rating_tags() {
+    // Each case's tags, White's and Black's ratings, and the tags kept as
+    // ordinary tags, as `pgn_probe` showed SCID reading them.
+    let rating = |elo, kind| Some((elo, kind));
+    for (tags, expected, ordinary) in [
+        (
+            "[WhiteUSCF \"2400\"]\n[BlackDWZ \"2100\"]",
+            [
+                rating(2400, RatingType::Uscf),
+                rating(2100, RatingType::Dwz),
+            ],
+            vec![],
+        ),
+        (
+            "[WhiteRating \"2000\"]\n[BlackRapid \"2300\"]",
+            [
+                rating(2000, RatingType::Rating),
+                rating(2300, RatingType::Rapid),
+            ],
+            vec![],
+        ),
+        (
+            "[WhiteICCF \"2500\"]\n[BlackECF \"200\"]",
+            [rating(2500, RatingType::Iccf), rating(200, RatingType::Ecf)],
+            vec![],
+        ),
+        // The first rating wins, and later ones are ordinary tags.
+        (
+            "[White \"Kasparov (2851)\"]\n[WhiteElo \"2700\"]\n\
+             [BlackUSCF \"2400\"]\n[BlackElo \"2500\"]",
+            [
+                rating(2851, RatingType::Elo),
+                rating(2400, RatingType::Uscf),
+            ],
+            vec!["WhiteElo", "BlackElo"],
+        ),
+        // A rating in the name replaces one read before it.
+        (
+            "[WhiteElo \"2700\"]\n[White \"X (2600)\"]",
+            [rating(2600, RatingType::Elo), None],
+            vec![],
+        ),
+        // A rating of 0, or with no digits, is dropped, and a later rating
+        // tag sets the rating.
+        (
+            "[WhiteDWZ \"?\"]\n[WhiteRating \"2100x\"]\n\
+             [Black \"B (0000)\"]\n[BlackRapid \"2300\"]",
+            [
+                rating(2100, RatingType::Rating),
+                rating(2300, RatingType::Rapid),
+            ],
+            vec![],
+        ),
+        // Case matters, and FIDE isn't one of SCID's kinds.
+        (
+            "[WhiteUscf \"2400\"]\n[BlackFIDE \"2400\"]\n[WhiteTitle \"GM\"]",
+            [None, None],
+            vec!["WhiteUscf", "BlackFIDE", "WhiteTitle"],
+        ),
+        // Leading whitespace and `+` are skipped. A negative value is no
+        // rating, where SCID reads it as 4,000.
+        (
+            "[WhiteElo \"-5\"]\n[BlackElo \" +2400\"]",
+            [None, rating(2400, RatingType::Elo)],
+            vec![],
+        ),
+        ("[WhiteElo \"\"]\n[BlackElo \"-\"]", [None, None], vec![]),
+    ] {
+        let game = parse_single_game(&pgn_game(tags, "1. e4 *")).unwrap();
+        assert_eq!(ratings(&game), expected, "{tags}");
+        assert_eq!(tag_names(&game), ordinary, "{tags}");
+        assert!(game.warnings.is_empty(), "{tags}: {:?}", game.warnings);
+    }
+
+    // The kind of a rating tag that sets no rating is kept, as SCID keeps
+    // it in the index.
+    let game = parse_single_game(&pgn_game("[WhiteDWZ \"?\"]", "1. e4 *")).unwrap();
+    assert_eq!(game.white_elo, None);
+    assert_eq!(game.white_rating_type, RatingType::Dwz);
+    assert!(game.tags.is_empty());
+}
+
+#[test]
+fn test_ratings_above_the_maximum() {
+    let tags = "[White \"A (4500)\"]\n[BlackICCF \"4001\"]\n[Annotator \"x\"]\n\
+                [WhiteElo \"2000\"]\n[Black \"B\"]";
+    let game = parse_single_game(&pgn_game(tags, "1. e4 *")).unwrap();
+    assert_eq!(game.white, "A");
+    assert_eq!(
+        ratings(&game),
+        [
+            Some((4000, RatingType::Elo)),
+            Some((4000, RatingType::Iccf))
+        ]
+    );
+    let too_large = |tag: &str, rating: &str| PgnWarningKind::RatingTooLarge {
+        tag: tag.to_string(),
+        rating: rating.to_string(),
+    };
+    assert_eq!(
+        warning_kinds(&game),
+        [too_large("White", "4500"), too_large("BlackICCF", "4001")]
+    );
+    assert_eq!(
+        game.warnings[1].to_string(),
+        "PGN game 1, line 3: read rating \"4001\" in tag \"BlackICCF\" as 4000, \
+         the highest rating SCID stores"
+    );
+
+    // A value too large for SCID's 32-bit number is also 4,000.
+    for value in ["4294967296", "99999999999999999999999"] {
+        let tags = format!("[WhiteElo \"{value}\"]");
+        let game = parse_single_game(&pgn_game(&tags, "1. e4 *")).unwrap();
+        assert_eq!(game.white_elo, Some(4000), "{value}");
+        assert_eq!(warning_kinds(&game), [too_large("WhiteElo", value)]);
+    }
+}
+
+#[test]
+fn test_ratings_are_exported_with_their_kind() {
+    let tags = "[WhiteUSCF \"2400\"]\n[WhiteElo \"2500\"]\n[Black \"B (2600)\"]\n\
+                [BlackElo \"2700\"]\n[BlackDWZ \"2100\"]";
+    let game = parse_single_game(&pgn_game(tags, "1. e4 *")).unwrap();
+    let exported = game.to_pgn();
+    // `BlackElo "2700"` would repeat the rating tag written for Black, so it
+    // isn't written. SCID writes both.
+    let rating_lines: Vec<&str> = exported
+        .lines()
+        .filter(|line| line.starts_with("[White") || line.starts_with("[Black"))
+        .collect();
+    assert_eq!(
+        rating_lines,
+        [
+            "[White \"?\"]",
+            "[Black \"B\"]",
+            "[WhiteUSCF \"2400\"]",
+            "[BlackElo \"2600\"]",
+            "[WhiteElo \"2500\"]",
+            "[BlackDWZ \"2100\"]",
+        ]
+    );
+
+    let reimported = parse_single_game(&exported).unwrap();
+    assert_eq!(ratings(&reimported), ratings(&game));
+    assert_eq!(reimported.to_pgn(), exported);
 }

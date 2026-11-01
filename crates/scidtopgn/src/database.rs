@@ -6,6 +6,7 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use crate::bytebuf::ByteBuffer;
+use crate::common::RatingType;
 use crate::error::{DatabaseFile, Error, Result};
 use crate::game::{Game, Marker, GAME_DECODE_ALL, MAX_TAG_VALUE_LEN};
 use crate::gfile::{FileMode, GFile};
@@ -403,6 +404,8 @@ impl Database {
         if black_elo > 0 {
             game.black_elo = Some(black_elo);
         }
+        game.white_rating_type = RatingType::from_byte(entry.get_white_rating_type());
+        game.black_rating_type = RatingType::from_byte(entry.get_black_rating_type());
 
         let eco_code = entry.get_eco_code();
         if eco_code > 0 {
@@ -887,6 +890,8 @@ impl Database {
         if let Some(elo) = game.black_elo {
             entry.set_black_elo(elo);
         }
+        entry.set_white_rating_type(game.white_rating_type.to_byte());
+        entry.set_black_rating_type(game.black_rating_type.to_byte());
 
         if let Some(ref eco) = game.eco {
             let eco_code = crate::index::eco_from_string(eco);

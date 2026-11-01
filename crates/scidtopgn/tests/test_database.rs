@@ -1588,3 +1588,36 @@ fn test_copy_game_copies_a_record_it_cant_decode() {
     target.close().unwrap();
     assert_eq!(record(&path, 0), record(&source, 0));
 }
+
+#[test]
+fn test_rating_types_are_stored_and_exported() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let path = temp.path().join("ratings");
+    let pgn = "[White \"W\"]\n[WhiteUSCF \"2400\"]\n[Black \"B\"]\n[BlackDWZ \"?\"]\n\n1. e4 *\n";
+    let game = scidtopgn::parse_single_game(pgn).unwrap();
+    let mut db = Database::create(&path).unwrap();
+    db.add_game(&game).unwrap();
+    db.close().unwrap();
+
+    let mut db = Database::open(&path).unwrap();
+    // As in SCID, the index keeps the kind of a rating tag that sets no
+    // rating.
+    let entry = db.get_entry(0).unwrap();
+    assert_eq!(
+        (entry.get_white_elo(), entry.get_white_rating_type()),
+        (2400, 4)
+    );
+    assert_eq!(
+        (entry.get_black_elo(), entry.get_black_rating_type()),
+        (0, 5)
+    );
+
+    let read = db.get_game(0).unwrap();
+    assert_eq!(read.white_elo, Some(2400));
+    assert_eq!(read.white_rating_type, scidtopgn::RatingType::Uscf);
+    assert_eq!(read.black_elo, None);
+    assert_eq!(read.black_rating_type, scidtopgn::RatingType::Dwz);
+    let exported = read.to_pgn();
+    assert!(exported.contains("[WhiteUSCF \"2400\"]\n"), "{exported}");
+    assert!(!exported.contains("DWZ"), "{exported}");
+}

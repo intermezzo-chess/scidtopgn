@@ -94,7 +94,7 @@ pub mod search;
 pub mod twins;
 
 pub use bytebuf::ByteBuffer;
-pub use common::GameResult;
+pub use common::{GameResult, RatingType};
 pub use database::{Database, GameIterator};
 pub use date::{
     date_decode_to_string, date_encode_from_string, date_get_day, date_get_month, date_get_year,

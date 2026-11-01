@@ -13,11 +13,12 @@ use std::fmt;
 
 use shakmaty::san::{San, SanError};
 use shakmaty::uci::UciMove;
-use shakmaty::{Bitboard, CastlingSide, Chess, File, Move, Position, Rank, Role, Square};
+use shakmaty::{Bitboard, CastlingSide, Chess, Color, File, Move, Position, Rank, Role, Square};
 
-use crate::common::GameResult;
+use crate::common::{GameResult, RatingType};
 use crate::error::{Error, Result};
 use crate::game::{Game, Marker, MoveNode, MAX_TAG_VALUE_LEN};
+use crate::index::MAX_ELO;
 use crate::mov::GameMove;
 use crate::position::{chess_from_fen_reporting_drops, ScidPosition};
 use crate::Date;
@@ -119,6 +120,14 @@ pub enum PgnWarningKind {
         /// The result skipped.
         result: GameResult,
     },
+    /// A rating above 4,000, the most an index entry stores, in a rating
+    /// tag or at the end of a player's name. 4,000 is used, as in SCID.
+    RatingTooLarge {
+        /// The tag's name, such as `WhiteElo` or `White`.
+        tag: String,
+        /// The rating as written.
+        rating: String,
+    },
 }
 
 /// Describes the problem in a phrase, such as `skipped unknown text "zz"`.
@@ -165,6 +174,10 @@ impl fmt::Display for PgnWarningKind {
             Self::ResultInVariation { result } => {
                 write!(f, "skipped result \"{result}\" inside a variation")
             }
+            Self::RatingTooLarge { tag, rating } => write!(
+                f,
+                "read rating {rating:?} in tag {tag:?} as {MAX_ELO}, the highest rating SCID stores"
+            ),
         }
     }
 }
@@ -593,7 +606,9 @@ impl PgnParser {
                         } else if name == "Result" {
                             result_tag = Some(parse_result(&value));
                         }
-                        apply_tag(&mut game, &name, value);
+                        if let Some(kind) = apply_tag(&mut game, &name, value) {
+                            self.warn(&mut game, line, kind);
+                        }
                     }
                 }
                 Some('%') => {
@@ -985,21 +1000,149 @@ pub(crate) fn windows_1252_char(byte: u8) -> char {
     }
 }
 
-fn apply_tag(game: &mut Game, name: &str, value: String) {
+/// Sets the game's field for a tag, or adds it as an ordinary tag, as SCID's
+/// `ExtractPgnTag` does. Returns a warning for a rating that is too large.
+fn apply_tag(game: &mut Game, name: &str, value: String) -> Option<PgnWarningKind> {
     match name {
         "Event" => game.event = value,
         "Site" => game.site = value,
         "Date" => game.date = Date::from_string(&value),
         "Round" => game.round = value,
-        "White" => game.white = value,
-        "Black" => game.black = value,
+        "White" | "Black" => {
+            let side = if name == "White" {
+                Color::White
+            } else {
+                Color::Black
+            };
+            let mut player = tidy_player_name(&value);
+            let mut warning = None;
+            if let Some((rest, digits)) = split_name_rating(&player) {
+                // Like SCID, a rating in the name replaces any rating
+                // already read, and is an Elo rating.
+                let (elo, kind) = rating_mut(game, side);
+                *kind = RatingType::Elo;
+                warning = set_rating(elo, name, digits);
+                let len = rest.trim_end_matches([' ', '\t']).len();
+                player.truncate(len);
+            }
+            match side {
+                Color::White => game.white = player,
+                Color::Black => game.black = player,
+            }
+            return warning;
+        }
         "Result" => game.result = parse_result(&value),
-        "WhiteElo" => game.white_elo = value.parse().ok(),
-        "BlackElo" => game.black_elo = value.parse().ok(),
         "ECO" => game.eco = Some(value),
         "EventDate" => game.event_date = Some(Date::from_string(&value)),
-        _ => game.add_tag(name, &value),
+        _ => {
+            if let Some((side, rating_type)) = rating_tag(name) {
+                let (elo, kind) = rating_mut(game, side);
+                // Like SCID, the first rating tag with a rating sets the
+                // player's rating. A later one is an ordinary tag.
+                if elo.is_none() {
+                    *kind = rating_type;
+                    return set_rating(elo, name, &value);
+                }
+            }
+            game.add_tag(name, &value);
+        }
     }
+    None
+}
+
+/// `name` tidied as SCID's `standardPlayerName` tidies a player's name: no
+/// spaces at the start, one space after each comma that something follows,
+/// and no spaces or tabs at the end. Other characters, including other
+/// spaces, are kept.
+fn tidy_player_name(name: &str) -> String {
+    let mut tidy = String::with_capacity(name.len() + 1);
+    let mut after_comma = false;
+    for c in name.chars() {
+        match c {
+            ',' => {
+                tidy.push(',');
+                after_comma = true;
+            }
+            ' ' if after_comma || tidy.is_empty() => {}
+            _ => {
+                if after_comma {
+                    tidy.push(' ');
+                    after_comma = false;
+                }
+                tidy.push(c);
+            }
+        }
+    }
+    tidy.truncate(tidy.trim_end_matches([' ', '\t']).len());
+    tidy
+}
+
+/// Splits a rating such as ` (2850)` from the end of a player's name, as
+/// SCID reads it: a space, `(`, four ASCII digits, and `)`, after at least
+/// one other character. Returns the name before the space, and the digits.
+fn split_name_rating(name: &str) -> Option<(&str, &str)> {
+    let bytes = name.as_bytes();
+    let n = bytes.len();
+    let is_rating = n > 7
+        && bytes[n - 7..n - 5] == *b" ("
+        && bytes[n - 5..n - 1].iter().all(u8::is_ascii_digit)
+        && bytes[n - 1] == b')';
+    // The bytes checked are ASCII, so the slices are on character
+    // boundaries.
+    is_rating.then(|| (&name[..n - 7], &name[n - 5..n - 1]))
+}
+
+/// The side and kind of a rating tag, such as `WhiteUSCF`, as SCID reads
+/// them: `White` or `Black` followed by a [`RatingType`]'s exact name.
+fn rating_tag(name: &str) -> Option<(Color, RatingType)> {
+    let (side, kind) = if let Some(kind) = name.strip_prefix("White") {
+        (Color::White, kind)
+    } else {
+        (Color::Black, name.strip_prefix("Black")?)
+    };
+    Some((side, RatingType::from_name(kind)?))
+}
+
+/// The rating and its kind of `side` in `game`.
+fn rating_mut(game: &mut Game, side: Color) -> (&mut Option<u16>, &mut RatingType) {
+    match side {
+        Color::White => (&mut game.white_elo, &mut game.white_rating_type),
+        Color::Black => (&mut game.black_elo, &mut game.black_rating_type),
+    }
+}
+
+/// Sets `elo` to the rating written as `text` in tag `tag`. A rating of 0, or
+/// with no digits, leaves no rating. One above [`MAX_ELO`] is set to
+/// [`MAX_ELO`], with a warning.
+fn set_rating(elo: &mut Option<u16>, tag: &str, text: &str) -> Option<PgnWarningKind> {
+    let rating = rating_value(text);
+    *elo = u16::try_from(rating.min(u32::from(MAX_ELO)))
+        .ok()
+        .filter(|&rating| rating != 0);
+    (rating > u32::from(MAX_ELO)).then(|| PgnWarningKind::RatingTooLarge {
+        tag: tag.to_string(),
+        rating: text.to_string(),
+    })
+}
+
+/// Reads a rating as SCID's `strGetUnsigned` does: after any whitespace and
+/// a `+`, the digits up to the first other character. Returns 0 if there are
+/// none. A value too large for a `u32` gives `u32::MAX`.
+///
+/// A negative value gives 0. SCID's `strtoul` reads one as a number above
+/// 4 billion instead, which SCID stores as 4,000.
+fn rating_value(text: &str) -> u32 {
+    let text = text.trim_start_matches([' ', '\t', '\n', '\x0b', '\x0c', '\r']);
+    if text.starts_with('-') {
+        return 0;
+    }
+    text.strip_prefix('+')
+        .unwrap_or(text)
+        .bytes()
+        .take_while(u8::is_ascii_digit)
+        .fold(0u32, |n, digit| {
+            n.saturating_mul(10).saturating_add(u32::from(digit - b'0'))
+        })
 }
 
 /// Whether a `Variant` tag names standard chess. Lichess uses
