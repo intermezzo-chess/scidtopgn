@@ -1015,21 +1015,31 @@ fn apply_tag(game: &mut Game, name: &str, value: String) -> Option<PgnWarningKin
                 Color::Black
             };
             let mut player = tidy_player_name(&value);
-            let mut warning = None;
-            if let Some((rest, digits)) = split_name_rating(&player) {
-                // Like SCID, a rating in the name replaces any rating
-                // already read, and is an Elo rating.
-                let (elo, kind) = rating_mut(game, side);
-                *kind = RatingType::Elo;
-                warning = set_rating(elo, name, digits);
-                let len = rest.trim_end_matches([' ', '\t']).len();
+            let rating = split_name_rating(&player).map(|(rest, digits)| {
+                (rest.trim_end_matches([' ', '\t']).len(), digits.to_string())
+            });
+            if let Some((len, _)) = rating {
                 player.truncate(len);
+            }
+            // Tidying can add a space after each comma, so the name is
+            // checked again against the limit every tag is read with.
+            if player.len() > MAX_TAG_VALUE_LEN {
+                return Some(PgnWarningKind::LongTagValue {
+                    name: name.to_string(),
+                    length: player.len(),
+                });
             }
             match side {
                 Color::White => game.white = player,
                 Color::Black => game.black = player,
             }
-            return warning;
+            // Like SCID, a rating in the name replaces any rating already
+            // read, and is an Elo rating.
+            return rating.and_then(|(_, digits)| {
+                let (elo, kind) = rating_mut(game, side);
+                *kind = RatingType::Elo;
+                set_rating(elo, name, &digits)
+            });
         }
         "Result" => game.result = parse_result(&value),
         "ECO" => game.eco = Some(value),
@@ -1094,7 +1104,7 @@ fn split_name_rating(name: &str) -> Option<(&str, &str)> {
 
 /// The side and kind of a rating tag, such as `WhiteUSCF`, as SCID reads
 /// them: `White` or `Black` followed by a [`RatingType`]'s exact name.
-fn rating_tag(name: &str) -> Option<(Color, RatingType)> {
+pub(crate) fn rating_tag(name: &str) -> Option<(Color, RatingType)> {
     let (side, kind) = if let Some(kind) = name.strip_prefix("White") {
         (Color::White, kind)
     } else {

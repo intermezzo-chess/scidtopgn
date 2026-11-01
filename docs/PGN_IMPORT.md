@@ -88,6 +88,7 @@ These apply to every case below.
 - **Tag and name lengths ([#53](https://github.com/intermezzo-chess/scidtopgn/issues/53), [#82](https://github.com/intermezzo-chess/scidtopgn/issues/82)).** As in SCID, a tag whose name or value is longer than 255 bytes is dropped, whatever tag it is, and the rest of the game is imported. A dropped `White`, `Black`, `Event`, `Site`, or `Round` tag leaves `?`, and a dropped duplicate leaves the earlier value. SCID logs `Error reading tag`, and `scidtopgn` warns. When the game is stored, a tag name longer than 240 bytes is cut to 240, as SCID cuts it. Lengths count the bytes of the UTF-8 that is stored, after escapes are read. Two things differ from SCID:
   - Text read as Windows-1252 (#42) takes more bytes in UTF-8, so it can pass the limit where SCID, which stores the bytes unchanged, keeps it.
   - A cut that would split a character ends before that character. SCID cuts in the middle of it.
+  - A player name is [tidied](#player-names-and-ratings), which adds a space after a comma that has none, so it is checked again once tidied and without its rating. A name over 255 bytes then is dropped in the same way. SCID writes the tidied name into its 256-byte buffer without checking its length (#43).
 
 ## Warnings
 
@@ -106,7 +107,7 @@ A game that fails to parse is reported by its error only, without its warnings.
 | `the result 0-1 after the moves replaces the Result tag 1-0` | The result after the moves differs from the `Result` tag. A tag `scidtopgn` doesn't recognize, such as `1-0 (time)`, counts as `*`, so it gives this warning only when the moves end with another result. | #27 |
 | `the moves don't end with a result, so the Result tag 1-0 is used` | The moves end at the next game's tags, or at the end of the input, without a result. | #28a, #28b |
 | `the moves don't end with a result, and there is no Result tag` | The same, in a game with no `Result` tag. The game's result is `*`. | #28c |
-| `dropped tag "Annotator" because its value is 300 bytes, more than 255` | A tag whose value is longer than 255 bytes. The tag is dropped, as in SCID. | #53 |
+| `dropped tag "Annotator" because its value is 300 bytes, more than 255` | A tag whose value is longer than 255 bytes, or a player name longer than 255 bytes once tidied and without its rating. The tag is dropped, as in SCID. | #53, #43 |
 | `dropped a tag because its name is 300 bytes, more than 255` | A tag whose name is longer than 255 bytes. The tag is dropped, as in SCID. | #53 |
 | `read rating "4500" in tag "WhiteElo" as 4000, the highest rating SCID stores` | A rating above 4,000 in a rating tag, or at the end of a player name, for which the warning names the `White` or `Black` tag. 4,000 is used, as in SCID. | #43 |
 | `read text that isn't UTF-8 as Windows-1252` | The game's text, including text before it that is kept as its first comment, has bytes that aren't valid UTF-8. Those bytes are read as Windows-1252. Given once per game, on the first line with such bytes. In the library, only `PgnParser::from_bytes` reads such input; the CLI uses it. | #42 |
@@ -339,7 +340,7 @@ A rating is read from three places, as SCID's `ExtractPgnTag` reads it:
 - **`WhiteElo` and `BlackElo`**, which are rating tags of the kind `Elo`.
 - **The end of a player name**: a space, `(`, four ASCII digits, and `)`, after at least one other character, as in `Carlsen, Magnus (2850)`. It is removed from the name, and spaces and tabs left at the end are dropped. Its kind is `Elo`.
 
-The first rating tag with a rating sets the player's rating and its kind. Later rating tags are kept as ordinary tags. A rating in a name replaces any rating read before it. A tag's value is read as SCID's `strtoul` reads it: after any whitespace and a `+`, the digits up to the first other character. A value of 0, or with no digits, such as `?`, sets no rating, and the tag is dropped. A rating above 4,000 is stored as 4,000, with a warning. The index entry stores each rating's kind, and export writes the rating with it, such as `[WhiteUSCF "2400"]`, as SCID does. An ordinary tag with the same name as an exported rating tag isn't exported.
+The first rating tag with a rating sets the player's rating and its kind. Later rating tags are kept as ordinary tags. A rating in a name replaces any rating read before it. A tag's value is read as SCID's `strtoul` reads it: after any whitespace and a `+`, the digits up to the first other character. A value of 0, or with no digits, such as `?`, sets no rating, and the tag is dropped. A rating above 4,000 is stored as 4,000, with a warning. The index entry stores each rating's kind, and export writes the rating with it, such as `[WhiteUSCF "2400"]`, as SCID does. A rating tag kept as an ordinary tag is exported too, unless reading the export back would change the player's rating with it: when it has the same name as the player's exported rating tag, or when the player has no rating.
 
 | Case | Example | SCID | scidtopgn | Comparison |
 | --- | --- | --- | --- | --- |
@@ -355,6 +356,7 @@ The first rating tag with a rating sets the player's rating and its kind. Later 
 | Rating tags SCID doesn't know | `[WhiteUscf "2400"]`, `[BlackFIDE "2400"]` | Ordinary tags | Ordinary tags | Same |
 | A second rating tag | `[BlackUSCF "2400"]` then `[BlackElo "2500"]` | USCF 2400, and `BlackElo` as an ordinary tag | The same | Same |
 | A rating tag after a rating in the name | `[White "Kasparov (2851)"]` then `[WhiteElo "2700"]` | Elo 2851, and `WhiteElo` as an ordinary tag, exported as a second `WhiteElo` | Elo 2851, and `WhiteElo` as an ordinary tag, which isn't exported | **Differs** |
+| A rating tag before `(0000)` in the name | `[WhiteUSCF "2400"]`, `[WhiteElo "2500"]`, then `[White "A (0000)"]` | No rating, and `WhiteElo` as an ordinary tag, exported, so reading the export back gives Elo 2500 | No rating, and `WhiteElo` as an ordinary tag, which isn't exported | **Differs** |
 | A rating in the name after a rating tag | `[WhiteElo "2700"]` then `[White "X (2600)"]` | Elo 2600 | Elo 2600 | Same |
 | A value with no rating | `[WhiteDWZ "?"]` then `[WhiteRating "2100"]` | Drops `WhiteDWZ`, and reads 2100 as the rating | The same | Same |
 | Text after the digits, or whitespace and `+` before them | `"2100x"`, `" +2400"` | 2100, 2400 | 2100, 2400 | Same |
@@ -368,7 +370,7 @@ The first rating tag with a rating sets the player's rating and its kind. Later 
 
 **Two spaces before a rating in a name.** *What changes:* the stored name has no space at its end. *Why:* SCID tidies the name before removing the rating, so a space before the rating is left at the end. `scidtopgn` drops it, as tidying drops any other space at the end of a name.
 
-**A rating tag after a rating in the name.** *What changes:* the later rating tag isn't exported. *Why:* SCID exports it as well as the rating, so the game has two `WhiteElo` tags, which the PGN standard doesn't allow. The tag is still stored with the game.
+**A rating tag after a rating in the name, and a rating tag before `(0000)` in the name.** *What changes:* the rating tag kept as an ordinary tag isn't exported. *Why:* SCID exports it. After a rating in the name, that gives the game two `WhiteElo` tags, which the PGN standard doesn't allow. When `(0000)` has cleared the rating, reading the export back makes the tag the player's rating. The tag is still stored with the game.
 
 **A negative rating, and a rating from 2³² to 2⁶⁴.** *What changes:* a negative rating is no rating, and a rating from 2³² to 2⁶⁴ is 4,000. *Why:* SCID reads the value with `strtoul` and keeps 32 bits of it, so a negative value wraps to a number above 4 billion, and a value from 2³² to 2⁶⁴ wraps to a smaller one. A larger value gives `strtoul`'s largest, which SCID stores as 4,000, as `scidtopgn` does. `scidtopgn` reads a negative value as no rating, and any value above 4,000 as 4,000.
 
@@ -387,7 +389,8 @@ The cases above compare how a game is imported and stored. Exporting the stored 
 
 - **A NAG before the first move** of the game or of a variation is dropped on import, as in SCID. See [Where annotations attach](#general-differences).
 - **The en passant square** of a `FEN` is exported only when an en passant capture is legal (#31c).
-- **A rating tag kept as an ordinary tag** isn't exported when it has the same name as the player's rating tag, such as a second `WhiteElo` (#43).
+- **A rating tag kept as an ordinary tag** isn't exported when it has the same name as the player's rating tag, such as a second `WhiteElo`, or when the player has no rating (#43). See [Player names and ratings](#player-names-and-ratings).
+- **A player name that still ends in a rating** once its rating is removed, such as `X (2850)` from `X (2850) (1234)`, is exported as it is. Reading it back removes ` (2850)` from the name and makes it the rating, as SCID also does with its own export (#43).
 
 Tag values are exported with `"` written as `\"` and `\` as `\\`, as the PGN standard specifies, so `scidtopgn` reads them back unchanged. SCID imports the exported game, with all its moves, but reads these escapes as written: `[Site "C:\\games"]` comes back from SCID as `C:\\games`, and `[Event "a \"b\" c"]` as `a \`. Before #60, `scidtopgn` wrote tag values without escapes, so it couldn't read back a value with `"`, and read `\` in one as an escape.
 
@@ -565,7 +568,7 @@ game 74: ERROR (SCID skips this game) | [Event "28b no result at the end of the 
 
 - **`test_notation_fixture`** in `crates/scidtopgn/tests/test_pgn.rs` checks how `scidtopgn` reads each game in `tests/data/notation.pgn`: the moves, NAGs, result, warnings, or error.
 - **`test_annotation_symbols_match_nags`** checks that each annotation symbol gives the same game as its `$n` NAG.
-- **`test_player_names_are_tidied`, `test_rating_in_a_player_name`, `test_rating_tags`, `test_ratings_above_the_maximum`, and `test_ratings_are_exported_with_their_kind`** in `test_pgn.rs` check the cases in [Player names and ratings](#player-names-and-ratings). `test_rating_types_are_stored_and_exported` in `test_database.rs` checks that the index keeps each rating's kind.
+- **`test_player_names_are_tidied`, `test_rating_in_a_player_name`, `test_rating_tags`, `test_ratings_above_the_maximum`, `test_ratings_are_exported_with_their_kind`, `test_rating_tags_that_would_change_the_rating_are_not_exported`, `test_a_name_still_ending_in_a_rating_loses_it_on_reimport`, and `test_player_names_are_limited_to_255_bytes_after_tidying`** in `test_pgn.rs` check the cases in [Player names and ratings](#player-names-and-ratings) and their export. `test_rating_types_are_stored_and_exported` in `test_database.rs` checks that the index keeps each rating's kind.
 - **The other tests in `test_pgn.rs`** check that warnings name the game and line, and that a rejected game reports only its error.
 - **Unit tests in `crates/scidtopgn/src/pgn.rs`** cover each notation, the symbol table, and how tokens are split.
 - **`tests/data/castling`** was written by the reference converter from `tests/data/castling.pgn`. `crates/scidtopgn/tests/test_interop.rs` checks that `scidtopgn` reads it (#17) and writes the same moves for `castling.pgn`. `position.rs` and `mov.rs` test castling without the castling right on its own.

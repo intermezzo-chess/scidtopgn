@@ -1753,3 +1753,75 @@ fn test_ratings_are_exported_with_their_kind() {
     assert_eq!(ratings(&reimported), ratings(&game));
     assert_eq!(reimported.to_pgn(), exported);
 }
+
+#[test]
+fn test_rating_tags_that_would_change_the_rating_are_not_exported() {
+    // `(0000)` clears the USCF rating, and `WhiteElo` came after a rating,
+    // so it is an ordinary tag. Written out, it would become White's rating
+    // when read back, so it isn't written. SCID writes it.
+    let tags = "[WhiteUSCF \"2400\"]\n[WhiteElo \"2500\"]\n[White \"A (0000)\"]\n\
+                [BlackUSCF \"2400\"]\n[BlackElo \"2500\"]";
+    let game = parse_single_game(&pgn_game(tags, "1. e4 *")).unwrap();
+    assert_eq!(ratings(&game), [None, Some((2400, RatingType::Uscf))]);
+    assert_eq!(tag_names(&game), ["WhiteElo", "BlackElo"]);
+
+    let exported = game.to_pgn();
+    assert!(!exported.contains("[WhiteElo"), "{exported}");
+    assert!(exported.contains("[BlackElo \"2500\"]\n"), "{exported}");
+    let reimported = parse_single_game(&exported).unwrap();
+    assert_eq!(ratings(&reimported), ratings(&game));
+    assert_eq!(reimported.to_pgn(), exported);
+}
+
+#[test]
+fn test_a_name_still_ending_in_a_rating_loses_it_on_reimport() {
+    // Only one rating is removed from a name, as in SCID. The rest of the
+    // name still ends in a rating, which reading the export back removes.
+    let game = parse_single_game(&pgn_game("[White \"X (2850) (1234)\"]", "1. e4 *")).unwrap();
+    assert_eq!(game.white, "X (2850)");
+    assert_eq!(ratings(&game)[0], Some((1234, RatingType::Elo)));
+
+    let reimported = parse_single_game(&game.to_pgn()).unwrap();
+    assert_eq!(reimported.white, "X");
+    assert_eq!(ratings(&reimported)[0], Some((2850, RatingType::Elo)));
+}
+
+#[test]
+fn test_player_names_are_limited_to_255_bytes_after_tidying() {
+    let long_value = |length| PgnWarningKind::LongTagValue {
+        name: "White".to_string(),
+        length,
+    };
+
+    // 255 bytes as written, 256 once tidying adds a space after the comma.
+    // The tag is dropped, as a longer tag would be, so the export can be
+    // read back.
+    let name = format!("{},B", "A".repeat(253));
+    let game = parse_single_game(&pgn_game(&format!("[White \"{name}\"]"), "1. e4 *")).unwrap();
+    assert_eq!(game.white, "?");
+    assert_eq!(warning_kinds(&game), [long_value(256)]);
+
+    // 255 bytes after tidying.
+    let name = format!("{},B", "A".repeat(252));
+    let game = parse_single_game(&pgn_game(&format!("[White \"{name}\"]"), "1. e4 *")).unwrap();
+    assert_eq!(game.white.len(), 255);
+    assert!(game.warnings.is_empty(), "{:?}", game.warnings);
+    let reimported = parse_single_game(&game.to_pgn()).unwrap();
+    assert_eq!(reimported.white, game.white);
+    assert!(reimported.warnings.is_empty(), "{:?}", reimported.warnings);
+
+    // The limit applies to the name stored, after its rating is removed.
+    let name = format!("{},B (2850)", "A".repeat(246));
+    let game = parse_single_game(&pgn_game(&format!("[White \"{name}\"]"), "1. e4 *")).unwrap();
+    assert_eq!(game.white, format!("{}, B", "A".repeat(246)));
+    assert_eq!(ratings(&game)[0], Some((2850, RatingType::Elo)));
+    assert!(game.warnings.is_empty(), "{:?}", game.warnings);
+
+    // A dropped name sets no rating, and leaves the name read before it.
+    // 254 bytes as written, and 370 once tidied without its rating.
+    let tags = format!("[White \"Kept\"]\n[White \"{}B (2850)\"]", "A,".repeat(123));
+    let game = parse_single_game(&pgn_game(&tags, "1. e4 *")).unwrap();
+    assert_eq!(game.white, "Kept");
+    assert_eq!(game.white_elo, None);
+    assert_eq!(warning_kinds(&game), [long_value(370)]);
+}

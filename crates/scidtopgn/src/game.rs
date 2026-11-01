@@ -806,14 +806,17 @@ impl Game {
         ];
 
         // A rating tag kept as an ordinary tag, such as a `WhiteElo` after
-        // `WhiteUSCF`, is written, unless it would repeat a tag written
-        // above.
-        let repeats_rating = |name: &str| {
-            (self.white_elo.is_some() && name == white_rating_tag)
-                || (self.black_elo.is_some() && name == black_rating_tag)
+        // `WhiteUSCF`, is written, unless reading the PGN back would change
+        // the player's rating with it: when it repeats the rating tag
+        // written above, or when the player has no rating, so that it would
+        // become one.
+        let changes_rating = |name: &str| match crate::pgn::rating_tag(name) {
+            Some((Color::White, _)) => self.white_elo.is_none() || name == white_rating_tag,
+            Some((Color::Black, _)) => self.black_elo.is_none() || name == black_rating_tag,
+            None => false,
         };
         for tag in &self.tags {
-            if !excluded_tags.contains(&tag.name.as_str()) && !repeats_rating(&tag.name) {
+            if !excluded_tags.contains(&tag.name.as_str()) && !changes_rating(&tag.name) {
                 pgn.push_str(&tag_pair(&tag.name, &tag.value));
             }
         }
