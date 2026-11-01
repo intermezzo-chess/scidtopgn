@@ -1558,6 +1558,9 @@ fn test_player_names_are_tidied() {
         ("Smith,\tJ\t", "Smith, \tJ"),
         ("a,,b", "a,, b"),
         ("", ""),
+        // SCID writes Dutch prefixes as `Van der`.
+        ("van der Wiel", "van der Wiel"),
+        ("Van Der Sterren", "Van Der Sterren"),
     ] {
         let tags = format!("[White \"{written}\"]\n[Black \"{written}\"]");
         let game = parse_single_game(&pgn_game(&tags, "1. e4 *")).unwrap();

@@ -345,6 +345,7 @@ The first rating tag with a rating sets the player's rating and its kind. Later 
 | --- | --- | --- | --- | --- |
 | Spacing in a player name | `Carlsen,Magnus`, ` Doe,John`, `Anand,  V` | `Carlsen, Magnus`, `Doe, John`, `Anand, V` | The same | Same |
 | A space before a comma, or a final comma | `Doe , John`, `Carlsen,` | Kept | Kept | Same |
+| Dutch name prefixes | `van der Wiel`, `Van Der Sterren`, `van Wely` | `Van der Wiel`, `Van der Sterren`, `Van Wely` | Kept as written | **Differs** |
 | Rating in a player name | `Carlsen, Magnus (2850)` | `Carlsen, Magnus`, Elo 2850 | The same | Same |
 | Names that don't end in a rating | `Smith (GM)`, `(123)`, `X (123)`, `(2850)`, `Y (２８５０)` | Kept as written | Kept as written | Same |
 | `(0000)` in a name | `B (0000)` | `B`, with no rating | The same | Same |
@@ -360,6 +361,8 @@ The first rating tag with a rating sets the player's rating and its kind. Later 
 | A rating above 4,000 | `[BlackICCF "4001"]`, `A (4500)` | 4,000, and logs `rating too large` | 4,000, with a warning | Same |
 | A negative rating | `[WhiteElo "-5"]` | 4,000, and logs `rating too large` | No rating | **Differs** |
 | A rating from 2³² to 2⁶⁴ | `[WhiteElo "4294967296"]` | The value's remainder after dividing by 2³², here 0, so no rating, without a message | 4,000, with a warning | **Differs** |
+
+**Dutch name prefixes.** *What changes:* a name starting with `van`, `Van Der`, `Van Den`, or `Van De` keeps its capital letters as written. *Why:* SCID's `standardDutchName` writes these prefixes as `Van der`, `Van den`, and `Van de`, so that one player isn't stored under several spellings. The PGN standard doesn't ask for it, and it changes how the file spells the name, so `scidtopgn` doesn't do it.
 
 **Rating in a name after tidying changes its length.** *What changes:* the rating is read from the name, and the name is stored without it. *Why:* SCID tidies the name and then looks for the rating where it would end in the name's length before tidying. When tidying added or removed a space, it looks in the wrong place and keeps the rating in the name. `scidtopgn` looks for the rating in the tidied name.
 
