@@ -64,7 +64,7 @@ reference the issue the PR addresses.
 
 ## Test data
 
-The fixtures in `tests/data/` (`one`, `five`, `edge`, `castling`, `annotated`, `long`, `accents`, `derived`, `latin1`, `mixed`, `twins`, and `search`, each
+The fixtures in `tests/data/` (`one`, `five`, `edge`, `castling`, `annotated`, `long`, `accents`, `derived`, `latin1`, `mixed`, `twins`, `search`, and `stored`, each
 with `.si4`, `.sn4`, `.sg4`, and a matching `.pgn`) are shared by both crates'
 integration tests. `castling` and `annotated` were written by the C++ reference
 converter from `castling.pgn` and `annotated.pgn`, like `edge`. `annotated` has
@@ -105,6 +105,9 @@ depends on it. Built on macOS, it links the system's Tcl 8.5.9, while SCID vs.
 PC 4.27 for macOS bundles Tcl 8.6.13. The two differ in how a search pattern
 counts characters above U+FFFF, such as emoji, so `search.pgn` has none, and
 the header search follows Tcl 8.6, as `HeaderSearch` documents.
+`stored` was written from `stored.pgn` by `pgnscid -f stored.pgn stored`. Each
+game is a case of the stored-line code, named by its `Site` tag, and
+importing `stored.pgn` gives files byte-identical to it.
 `notation.pgn` has one game per case in
 [docs/PGN_IMPORT.md](docs/PGN_IMPORT.md). `.gitignore` excludes `*.si4`, `*.sn4`, and `*.sg4` everywhere, so new
 fixtures must be added with `git add -f`.

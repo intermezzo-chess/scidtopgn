@@ -1050,6 +1050,29 @@ fn test_update_game_sets_the_derived_fields() {
 }
 
 #[test]
+fn test_update_game_sets_the_stored_line_code() {
+    // In `stored`, which SCID wrote, game 1 has code 21 and game 8 starts
+    // from a FEN, so has code 0.
+    let src = get_test_data_path("stored");
+    let temp = tempfile::TempDir::new().unwrap();
+    let path = temp.path().join("stored");
+    for ext in ["si4", "sn4", "sg4"] {
+        std::fs::copy(src.with_extension(ext), path.with_extension(ext)).unwrap();
+    }
+    let games =
+        scidtopgn::parse_pgn(&std::fs::read_to_string(src.with_extension("pgn")).unwrap()).unwrap();
+
+    let mut db = Database::open(&path).unwrap();
+    db.update_game(6, &games[1]).unwrap();
+    db.update_game(1, &games[8]).unwrap();
+    db.close().unwrap();
+
+    let db = Database::open(&path).unwrap();
+    let code = |n| db.get_entry(n).unwrap().get_stored_line_code();
+    assert_eq!((code(6), code(1)), (21, 0));
+}
+
+#[test]
 fn test_games_without_moves_have_the_starting_material() {
     let temp = tempfile::TempDir::new().unwrap();
     let mut db = Database::create(temp.path().join("games")).unwrap();
