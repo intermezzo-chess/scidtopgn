@@ -71,9 +71,94 @@ impl std::fmt::Display for GameResult {
     }
 }
 
+/// The kind of a player's rating, as SCID's `ratingTypeNames` names it.
+///
+/// A PGN tag gives a rating of each kind as `White` or `Black` followed by
+/// its [name](Self::name), such as `WhiteUSCF`. An index entry stores the
+/// kind in the top 4 bits of each rating.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum RatingType {
+    /// An Elo rating, such as FIDE's: `WhiteElo`.
+    #[default]
+    Elo,
+    /// A rating of no named kind: `WhiteRating`.
+    Rating,
+    /// A rapid rating: `WhiteRapid`.
+    Rapid,
+    /// An ICCF correspondence rating: `WhiteICCF`.
+    Iccf,
+    /// A US Chess rating: `WhiteUSCF`.
+    Uscf,
+    /// A German DWZ rating: `WhiteDWZ`.
+    Dwz,
+    /// An English ECF grade: `WhiteECF`.
+    Ecf,
+}
+
+impl RatingType {
+    const ALL: [RatingType; 7] = [
+        RatingType::Elo,
+        RatingType::Rating,
+        RatingType::Rapid,
+        RatingType::Iccf,
+        RatingType::Uscf,
+        RatingType::Dwz,
+        RatingType::Ecf,
+    ];
+
+    /// Reads the kind as an index entry stores it, from 0 for Elo to 6 for
+    /// ECF. SCID names no kind above 6, so one is read as Elo.
+    pub fn from_byte(b: u8) -> Self {
+        Self::ALL
+            .get(usize::from(b))
+            .copied()
+            .unwrap_or(RatingType::Elo)
+    }
+
+    /// Returns the kind as an index entry stores it, from 0 for Elo to 6
+    /// for ECF.
+    pub fn to_byte(self) -> u8 {
+        self as u8
+    }
+
+    /// The kind's name, which follows `White` or `Black` in its PGN tag,
+    /// such as `USCF`.
+    pub fn name(self) -> &'static str {
+        match self {
+            RatingType::Elo => "Elo",
+            RatingType::Rating => "Rating",
+            RatingType::Rapid => "Rapid",
+            RatingType::Iccf => "ICCF",
+            RatingType::Uscf => "USCF",
+            RatingType::Dwz => "DWZ",
+            RatingType::Ecf => "ECF",
+        }
+    }
+
+    /// The kind with this exact [name](Self::name), if any. Case matters, as
+    /// in SCID, so `Uscf` names none.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| kind.name() == name)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_rating_type() {
+        for (b, kind) in RatingType::ALL.into_iter().enumerate() {
+            assert_eq!(RatingType::from_byte(b as u8), kind);
+            assert_eq!(kind.to_byte(), b as u8);
+            assert_eq!(RatingType::from_name(kind.name()), Some(kind));
+        }
+        assert_eq!(RatingType::from_byte(7), RatingType::Elo);
+        assert_eq!(RatingType::from_byte(15), RatingType::Elo);
+        assert_eq!(RatingType::from_name("Uscf"), None);
+        assert_eq!(RatingType::from_name("FIDE"), None);
+        assert_eq!(RatingType::default(), RatingType::Elo);
+    }
 
     #[test]
     fn test_game_result() {

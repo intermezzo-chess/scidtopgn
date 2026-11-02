@@ -4,7 +4,7 @@
 use shakmaty::{Chess, Color, Position};
 
 use crate::bytebuf::ByteBuffer;
-use crate::common::GameResult;
+use crate::common::{GameResult, RatingType};
 use crate::error::{CorruptGameKind, Error, Result};
 use crate::mov::{
     decode_move, GameMove, ENCODE_COMMENT, ENCODE_END_GAME, ENCODE_END_MARKER, ENCODE_NAG,
@@ -183,10 +183,18 @@ pub struct Game {
     pub event_date: Option<Date>,
     /// The result.
     pub result: GameResult,
-    /// The `WhiteElo` tag, if any.
+    /// White's rating, if any, from the `WhiteElo` tag or another of
+    /// White's [rating tags](RatingType).
     pub white_elo: Option<u16>,
-    /// The `BlackElo` tag, if any.
+    /// Black's rating, if any, from the `BlackElo` tag or another of
+    /// Black's [rating tags](RatingType).
     pub black_elo: Option<u16>,
+    /// The kind of White's rating. Export writes the rating as `White`
+    /// followed by its name, such as `WhiteUSCF`.
+    pub white_rating_type: RatingType,
+    /// The kind of Black's rating, as for
+    /// [`white_rating_type`](Self::white_rating_type).
+    pub black_rating_type: RatingType,
     /// The `ECO` tag, such as `B36f`, if any.
     pub eco: Option<String>,
     /// Every node of the move tree, in no particular order.
@@ -239,6 +247,8 @@ impl Game {
             result: GameResult::None,
             white_elo: None,
             black_elo: None,
+            white_rating_type: RatingType::Elo,
+            black_rating_type: RatingType::Elo,
             eco: None,
             moves: Vec::new(),
             first_move: None,
@@ -262,6 +272,8 @@ impl Game {
         self.result = GameResult::None;
         self.white_elo = None;
         self.black_elo = None;
+        self.white_rating_type = RatingType::Elo;
+        self.black_rating_type = RatingType::Elo;
         self.eco = None;
         self.moves.clear();
         self.first_move = None;
@@ -756,11 +768,15 @@ impl Game {
             pgn.push_str(&tag_pair("BlackTitle", title));
         }
 
+        // As SCID does, each rating is written with its kind, such as
+        // `WhiteUSCF`.
+        let white_rating_tag = format!("White{}", self.white_rating_type.name());
+        let black_rating_tag = format!("Black{}", self.black_rating_type.name());
         if let Some(elo) = self.white_elo {
-            pgn.push_str(&tag_pair("WhiteElo", elo));
+            pgn.push_str(&tag_pair(&white_rating_tag, elo));
         }
         if let Some(elo) = self.black_elo {
-            pgn.push_str(&tag_pair("BlackElo", elo));
+            pgn.push_str(&tag_pair(&black_rating_tag, elo));
         }
 
         if let Some(ref eco) = self.eco {
@@ -781,8 +797,6 @@ impl Game {
         let excluded_tags = [
             "WhiteTitle",
             "BlackTitle",
-            "WhiteElo",
-            "BlackElo",
             "ECO",
             "Opening",
             "Variation",
@@ -791,8 +805,18 @@ impl Game {
             "FEN",
         ];
 
+        // A rating tag kept as an ordinary tag, such as a `WhiteElo` after
+        // `WhiteUSCF`, is written, unless reading the PGN back would change
+        // the player's rating with it: when it repeats the rating tag
+        // written above, or when the player has no rating, so that it would
+        // become one.
+        let changes_rating = |name: &str| match crate::pgn::rating_tag(name) {
+            Some((Color::White, _)) => self.white_elo.is_none() || name == white_rating_tag,
+            Some((Color::Black, _)) => self.black_elo.is_none() || name == black_rating_tag,
+            None => false,
+        };
         for tag in &self.tags {
-            if !excluded_tags.contains(&tag.name.as_str()) {
+            if !excluded_tags.contains(&tag.name.as_str()) && !changes_rating(&tag.name) {
                 pgn.push_str(&tag_pair(&tag.name, &tag.value));
             }
         }
