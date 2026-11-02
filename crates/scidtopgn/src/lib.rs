@@ -91,6 +91,7 @@ pub mod pgn;
 pub mod position;
 mod replace;
 pub mod search;
+mod stored_line;
 pub mod twins;
 
 pub use bytebuf::ByteBuffer;

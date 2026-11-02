@@ -860,6 +860,7 @@ impl Database {
         entry.set_length(encoded_data.len() as u32);
         entry.set_start_flag(game.start_position.is_some());
         summary.set_fields(&mut entry);
+        entry.set_stored_line_code(crate::stored_line::code(game));
 
         let nb = self.nfile.namebase_mut();
 

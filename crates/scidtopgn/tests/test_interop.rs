@@ -14,6 +14,8 @@
 //! written by `pgnscid` from `tests/data/derived.pgn`, which covers the index
 //! fields SCID derives from the moves: games longer than 255 and 1,023
 //! half-moves, promotions, and more than 10 variations, comments, and NAGs.
+//! `tests/data/stored` was written by `pgnscid` from `tests/data/stored.pgn`,
+//! which covers stored-line codes.
 
 use std::path::PathBuf;
 
@@ -403,6 +405,81 @@ fn test_index_derived_fields_match_scid() {
             "{name}"
         );
     }
+}
+
+/// Imports `tests/data/{name}.pgn` into a new database in `temp`, and
+/// returns its path.
+fn import(name: &str, temp: &TempDir) -> PathBuf {
+    let path = temp.path().join(name);
+    let mut db = Database::create(&path).unwrap();
+    for game in read_pgn(&format!("{name}.pgn")) {
+        db.add_game(&game).unwrap();
+    }
+    db.close().unwrap();
+    path
+}
+
+#[test]
+fn test_imports_match_scid_byte_for_byte() {
+    // Written by `pgnscid`, and not changed since.
+    for name in ["long", "accents", "derived", "twins", "stored"] {
+        let temp = TempDir::new().unwrap();
+        let path = import(name, &temp);
+        for ext in ["si4", "sn4", "sg4"] {
+            assert!(
+                std::fs::read(path.with_extension(ext)).unwrap()
+                    == std::fs::read(data_path(name).with_extension(ext)).unwrap(),
+                "{name}.{ext}"
+            );
+        }
+    }
+}
+
+/// The stored-line code of each game in the database at `path`.
+fn stored_line_codes(path: &std::path::Path) -> Vec<u8> {
+    let db = Database::open(path).unwrap();
+    (0..db.num_games())
+        .map(|i| db.get_entry(i).unwrap().get_stored_line_code())
+        .collect()
+}
+
+#[test]
+fn test_stored_line_codes_match_scid() {
+    // Written by `pgnscid`. scid-cpp's writer, which wrote the other
+    // fixtures, stores 0.
+    for name in [
+        "one", "five", "long", "accents", "derived", "search", "twins", "stored",
+    ] {
+        let temp = TempDir::new().unwrap();
+        assert_eq!(
+            stored_line_codes(&import(name, &temp)),
+            stored_line_codes(&data_path(name)),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn test_stored_line_codes() {
+    let temp = TempDir::new().unwrap();
+    let codes = stored_line_codes(&import("stored", &temp));
+    assert_eq!(
+        codes,
+        [
+            16,  // 1.d4 d5, the whole game
+            21,  // 1.d4 d5 2.c4 c6 3.Nc3 Nf6 4.Nf3, then e6
+            20,  // 1.d4 d5 2.c4 c6 3.Nc3 Nf6, then 4.e3 instead of 4.Nf3
+            244, // 1.Nf3 d5 2.d4, not 1.d4 d5 2.Nf3 Nf6 3.c4 (36)
+            61,  // ending with Black's O-O
+            199, // the longest line, 21 half-moves
+            0,   // no moves
+            0,   // 1.a3
+            0,   // a FEN start
+            0,   // a FEN of the standard start
+            0,   // 1.a3, with a variation that follows a line
+            15,  // 1.d4, then a null move
+        ]
+    );
 }
 
 #[test]
