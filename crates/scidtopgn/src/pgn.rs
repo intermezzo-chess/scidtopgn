@@ -17,7 +17,7 @@ use shakmaty::{Bitboard, CastlingSide, Chess, Color, File, Move, Position, Rank,
 
 use crate::common::{GameResult, RatingType};
 use crate::error::{Error, Result};
-use crate::game::{Game, Marker, MoveNode, MAX_TAG_VALUE_LEN};
+use crate::game::{AddedNag, Game, Marker, MoveNode, MAX_NAGS, MAX_TAG_VALUE_LEN};
 use crate::index::MAX_ELO;
 use crate::mov::GameMove;
 use crate::position::{chess_from_fen_reporting_drops, ScidPosition};
@@ -128,6 +128,12 @@ pub enum PgnWarningKind {
         /// The rating as written.
         rating: String,
     },
+    /// A NAG after a move's first 7, the most SCID keeps. It is dropped, as
+    /// in SCID.
+    TooManyNags {
+        /// The NAG dropped.
+        nag: u8,
+    },
 }
 
 /// Describes the problem in a phrase, such as `skipped unknown text "zz"`.
@@ -177,6 +183,11 @@ impl fmt::Display for PgnWarningKind {
             Self::RatingTooLarge { tag, rating } => write!(
                 f,
                 "read rating {rating:?} in tag {tag:?} as {MAX_ELO}, the highest rating SCID stores"
+            ),
+            Self::TooManyNags { nag } => write!(
+                f,
+                "dropped NAG ${nag} because a move keeps at most {}",
+                MAX_NAGS - 1
             ),
         }
     }
@@ -700,6 +711,14 @@ impl PgnParser {
         });
     }
 
+    /// Adds `nag` to the current move, with a warning if the move already
+    /// has the most NAGs it keeps.
+    fn add_nag(&self, game: &mut Game, line: u32, nag: u8) {
+        if game.add_nag(nag) == AddedNag::MoveFull {
+            self.warn(game, line, PgnWarningKind::TooManyNags { nag });
+        }
+    }
+
     /// Records a warning if the game, read from `start` to the current
     /// position, had bytes that weren't valid UTF-8. The warning is placed
     /// among the game's others in line order.
@@ -796,9 +815,10 @@ impl PgnParser {
                     game.append_comment(&comment);
                 }
                 '$' => {
+                    let line = self.line;
                     self.advance();
                     let nag = self.read_nag()?;
-                    game.add_nag(nag);
+                    self.add_nag(game, line, nag);
                 }
                 '(' => {
                     self.advance();
@@ -855,7 +875,7 @@ impl PgnParser {
                         }
                         MoveToken::Nags(nags) => {
                             for nag in nags {
-                                game.add_nag(nag);
+                                self.add_nag(game, line, nag);
                             }
                         }
                         MoveToken::Move { text, suffix } => {
@@ -875,7 +895,7 @@ impl PgnParser {
 
                             let (nags, rest) = parse_symbols(&suffix);
                             for nag in nags {
-                                game.add_nag(nag);
+                                self.add_nag(game, line, nag);
                             }
                             if !rest.is_empty() {
                                 let text = rest.to_string();

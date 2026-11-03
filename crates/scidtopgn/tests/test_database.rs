@@ -585,6 +585,40 @@ fn test_many_nags_round_trip() {
     );
 }
 
+#[test]
+fn test_a_move_with_more_than_7_nags_round_trips_as_scid_reads_it() {
+    // The reproduction in #57: SCID keeps the first 7 NAGs.
+    let pgn = "[Event \"x\"]\n\n1. e4 $1 $2 $3 $4 $5 $6 $7 $8 $9 $10 *\n";
+    let game = scidtopgn::parse_single_game(pgn).unwrap();
+    assert_eq!(game.warnings.len(), 3);
+    let exported = scid_round_trip(&game).to_pgn();
+    assert_eq!(movetext(&exported), "1. e4 ! ? !! ?? !? ?! $7\n*\n");
+}
+
+#[test]
+fn test_nags_set_directly_are_stored_as_scid_holds_them() {
+    // NAGs set directly on a move can be more than 7, or 0. The game is
+    // stored and exported with the first 7 that aren't 0, the NAGs SCID
+    // holds, and the index counts only those, as SCID's encoder does.
+    let mut game = scidtopgn::parse_single_game("[Event \"x\"]\n\n1. e4 e5 *\n").unwrap();
+    game.moves[1].nags = vec![0, 1, 2, 0, 3, 4, 5, 6, 7, 8, 9];
+    let kept = [1, 2, 3, 4, 5, 6, 7];
+    let exported = "1. e4 ! ? !! ?? !? ?! $7 e5\n*\n";
+    assert_eq!(movetext(&game.to_pgn()), exported);
+
+    let temp = tempfile::TempDir::new().unwrap();
+    let path = temp.path().join("nags");
+    let mut db = Database::create(&path).unwrap();
+    db.add_game(&game).unwrap();
+    db.close().unwrap();
+
+    let mut db = Database::open(&path).unwrap();
+    assert_eq!(db.get_entry(0).unwrap().get_nag_count(), 7);
+    let stored = db.get_game(0).unwrap();
+    assert_eq!(stored.moves[1].nags, kept);
+    assert_eq!(movetext(&stored.to_pgn()), exported);
+}
+
 /// The record of game `game_num` in the database at `path`.
 fn record(path: &std::path::Path, game_num: u32) -> Vec<u8> {
     let db = Database::open(path).unwrap();

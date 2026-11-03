@@ -2,7 +2,7 @@ use scidtopgn::shakmaty::uci::UciMove;
 use scidtopgn::{
     decode_move, encode_move, parse_move_byte, ByteBuffer, Game, GameMove, ScidPosition,
     ENCODE_COMMENT, ENCODE_END_GAME, ENCODE_END_MARKER, ENCODE_NAG, ENCODE_START_MARKER,
-    GAME_DECODE_NONE,
+    GAME_DECODE_COMMENTS, GAME_DECODE_NONE,
 };
 
 /// Encodes the moves, given in UCI, from the standard starting position,
@@ -137,4 +137,46 @@ fn test_skip_tags() {
         .unwrap();
     assert!(game.tags.is_empty(), "tags should be skipped");
     assert_eq!(game.moves[1].san, "e4", "the moves follow the tags");
+}
+
+#[test]
+fn test_decoding_keeps_the_first_7_nags_of_a_move() {
+    // As in SCID, a move keeps its first 7 NAGs, and the record is still
+    // read in full after the NAGs dropped.
+    let main_line = encode_game(&["e2e4", "e7e5"]);
+    let d4 = encode_game(&["d2d4"]);
+    // No tags, the standard start, and 1.e4 with NAGs 1 to 10 and a comment.
+    let mut record = vec![0x00, 0x00, main_line[0]];
+    for nag in 1..=10 {
+        record.extend([ENCODE_NAG, nag]);
+    }
+    record.push(ENCODE_COMMENT);
+    // A variation, 1.d4 with NAG 11, then 1...e5 with NAG 12.
+    record.extend([
+        ENCODE_START_MARKER,
+        d4[0],
+        ENCODE_NAG,
+        11,
+        ENCODE_END_MARKER,
+    ]);
+    record.extend([main_line[1], ENCODE_NAG, 12, ENCODE_END_GAME]);
+    record.extend(b"note\0");
+
+    let mut game = Game::new();
+    game.decode(&mut ByteBuffer::from_slice(&record), GAME_DECODE_COMMENTS)
+        .unwrap();
+    let nodes: Vec<(&str, &[u8], Option<&str>)> = game
+        .moves
+        .iter()
+        .filter(|node| !node.san.is_empty())
+        .map(|node| (node.san.as_str(), &node.nags[..], node.comment.as_deref()))
+        .collect();
+    assert_eq!(
+        nodes,
+        [
+            ("e4", &[1, 2, 3, 4, 5, 6, 7][..], Some("note")),
+            ("d4", &[11][..], None),
+            ("e5", &[12][..], None),
+        ]
+    );
 }
