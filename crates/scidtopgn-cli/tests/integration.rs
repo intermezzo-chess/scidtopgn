@@ -696,6 +696,49 @@ fn test_cli_export_names_corrupt_game() {
     assert!(stderr.contains("invalid move byte 0xc2"), "{stderr}");
 }
 
+#[test]
+fn test_cli_rejects_other_versions() {
+    for version in [300u16, 401] {
+        let temp = TempDir::new().expect("Failed to create temp dir");
+        let db = copy_with_deleted(temp.path(), "five", &[]);
+        let si4 = db.with_extension("si4");
+        let mut bytes = std::fs::read(&si4).expect("Failed to read index");
+        bytes[8..10].copy_from_slice(&version.to_be_bytes());
+        std::fs::write(&si4, bytes).expect("Failed to write index");
+        let before = database_bytes(&db);
+        let merged = temp.path().join("merged");
+
+        let db_arg = db.to_str().expect("temp path should be UTF-8");
+        let merged_arg = merged.to_str().expect("temp path should be UTF-8");
+        let runs: [&[&str]; 6] = [
+            &[db_arg],
+            &["export", db_arg, "--count"],
+            &["info", db_arg],
+            &["validate", db_arg],
+            &["merge", db_arg, "-o", merged_arg],
+            &["import", "tests/data/five.pgn", "-o", db_arg],
+        ];
+        for args in runs {
+            let output = cli().args(args).output().expect("Failed to run CLI");
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(!output.status.success(), "{args:?}: {stderr}");
+            for expected in [
+                db_arg,
+                "index file (.si4)",
+                &format!("Unsupported SCID format version {version}"),
+                "only SCID vs. PC 4 databases (version 400) are supported",
+            ] {
+                assert!(stderr.contains(expected), "{args:?}: {stderr}");
+            }
+            assert_eq!(database_bytes(&db), before, "{args:?} changed the database");
+        }
+        assert!(
+            !merged.with_extension("si4").exists(),
+            "merge created its output"
+        );
+    }
+}
+
 /// Imports `pgn` with `--verbose` and returns the database and stderr.
 fn import_pgn(dir: &Path, pgn: &str) -> (PathBuf, String) {
     let pgn_path = dir.join("input.pgn");

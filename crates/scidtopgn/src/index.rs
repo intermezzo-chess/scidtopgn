@@ -160,7 +160,8 @@ impl IndexHeader {
     /// # Errors
     ///
     /// Returns [`Error::InvalidMagic`] if the data doesn't start with
-    /// [`INDEX_MAGIC`], and [`Error::Io`] if it can't be read or ends early.
+    /// [`INDEX_MAGIC`], [`Error::UnsupportedVersion`] if its version isn't
+    /// [`SCID_VERSION`], and [`Error::Io`] if it can't be read or ends early.
     pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self> {
         let mut header = Self::default();
 
@@ -169,7 +170,14 @@ impl IndexHeader {
             return Err(Error::InvalidMagic);
         }
 
+        // Check before reading the rest, which other versions lay out
+        // differently.
         header.version = read_u16_be(reader)?;
+        if header.version != SCID_VERSION {
+            return Err(Error::UnsupportedVersion {
+                version: header.version,
+            });
+        }
         header.base_type = read_u32_be(reader)?;
         header.num_games = read_u24_be(reader)?;
         header.auto_load = read_u24_be(reader)?;
@@ -850,8 +858,8 @@ impl Index {
     /// # Errors
     ///
     /// Returns [`Error::File`] for [`DatabaseFile::Index`] if the file can't be
-    /// read, doesn't start with [`INDEX_MAGIC`], or is shorter than its header
-    /// says.
+    /// read, doesn't start with [`INDEX_MAGIC`], isn't of [`SCID_VERSION`],
+    /// or is shorter than its header says.
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         Self::read_file(path.as_ref()).map_err(|e| e.in_file(DatabaseFile::Index))
     }

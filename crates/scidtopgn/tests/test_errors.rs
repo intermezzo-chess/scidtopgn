@@ -122,6 +122,92 @@ fn test_open_rejects_wrong_magic_numbers() {
     }
 }
 
+/// Sets the SCID format version in `db`'s index header.
+fn set_version(db: &Path, version: u16) {
+    edit(db, "si4", |bytes| {
+        bytes[8..10].copy_from_slice(&version.to_be_bytes());
+    });
+}
+
+fn database_bytes(db: &Path) -> Vec<Vec<u8>> {
+    ["si4", "sn4", "sg4"]
+        .iter()
+        .map(|ext| std::fs::read(db.with_extension(ext)).unwrap())
+        .collect()
+}
+
+#[test]
+fn test_open_rejects_other_versions() {
+    for version in [300, 401] {
+        let temp = TempDir::new().unwrap();
+        let db = copy_one(temp.path());
+        set_version(&db, version);
+        let before = database_bytes(&db);
+
+        let opens: [fn(&Path) -> scidtopgn::Result<Database>; 2] =
+            [|p| Database::open(p), |p| Database::open_read_only(p)];
+        for open in opens {
+            match open(&db) {
+                Err(Error::File {
+                    file: DatabaseFile::Index,
+                    source,
+                }) => assert!(
+                    matches!(*source, Error::UnsupportedVersion { version: v } if v == version),
+                    "{source:?}"
+                ),
+                Err(other) => panic!("expected an unsupported version, got {other:?}"),
+                Ok(_) => panic!("version {version} opened"),
+            }
+        }
+        assert!(matches!(
+            scidtopgn::Index::open(db.with_extension("si4")),
+            Err(Error::File {
+                file: DatabaseFile::Index,
+                source,
+            }) if matches!(*source, Error::UnsupportedVersion { version: v } if v == version)
+        ));
+
+        assert_eq!(database_bytes(&db), before, "version {version}");
+    }
+}
+
+#[test]
+fn test_unsupported_version_names_both_versions() {
+    let err = Error::UnsupportedVersion { version: 300 };
+    assert_eq!(
+        err.to_string(),
+        "Unsupported SCID format version 300: only SCID vs. PC 4 databases (version 400) are supported"
+    );
+}
+
+#[test]
+fn test_version_is_checked_before_the_rest_of_the_header() {
+    let temp = TempDir::new().unwrap();
+    let db = copy_one(temp.path());
+    set_version(&db, 300);
+    edit(&db, "si4", |bytes| bytes.truncate(10));
+
+    assert!(
+        matches!(
+            open_error(&db, DatabaseFile::Index),
+            Error::UnsupportedVersion { version: 300 }
+        ),
+        "a short index of another version should report its version"
+    );
+}
+
+#[test]
+fn test_index_that_ends_inside_the_version_is_truncated() {
+    let temp = TempDir::new().unwrap();
+    let db = copy_one(temp.path());
+    edit(&db, "si4", |bytes| bytes.truncate(9));
+
+    assert!(matches!(
+        open_error(&db, DatabaseFile::Index),
+        Error::Truncated
+    ));
+}
+
 #[test]
 fn test_open_reports_truncated_files() {
     for (ext, file) in [("si4", DatabaseFile::Index), ("sn4", DatabaseFile::Name)] {

@@ -113,7 +113,9 @@ impl Database {
     /// # Errors
     ///
     /// Returns [`Error::File`] naming the file that couldn't be opened or is
-    /// damaged.
+    /// damaged. An index file of a SCID format version other than
+    /// [`SCID_VERSION`](crate::index::SCID_VERSION) gives
+    /// [`Error::UnsupportedVersion`] for [`DatabaseFile::Index`].
     ///
     /// # Examples
     ///
