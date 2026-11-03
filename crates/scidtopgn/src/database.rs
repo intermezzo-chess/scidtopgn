@@ -1008,9 +1008,11 @@ impl Database {
                 }
             }
 
-            for nag in &node.nags {
+            // Only the NAGs SCID can hold, so that it reads back each one
+            // written and counted.
+            for nag in node.stored_nags() {
                 buf.put_byte(crate::mov::ENCODE_NAG)?;
-                buf.put_byte(*nag)?;
+                buf.put_byte(nag)?;
                 summary.nags += 1;
             }
 

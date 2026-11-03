@@ -871,6 +871,67 @@ fn test_nags_before_the_first_move_are_dropped() {
     assert!(game.warnings.is_empty());
 }
 
+#[test]
+fn test_a_move_keeps_at_most_7_nags() {
+    // As in SCID, a move keeps its first 7 NAGs. Each one dropped after them
+    // is warned about.
+    let game = parse_movetext("1. e4 $1 $2 $3 $4 $5 $6 $7 $8 $9 $10 *");
+    assert_eq!(node(&game, "e4").nags, [1, 2, 3, 4, 5, 6, 7]);
+    let too_many = |nag| PgnWarningKind::TooManyNags { nag };
+    assert_eq!(
+        warning_kinds(&game),
+        [too_many(8), too_many(9), too_many(10)]
+    );
+    assert_eq!(
+        game.warnings[0].to_string(),
+        "PGN game 1, line 4: dropped NAG $8 because a move keeps at most 7"
+    );
+    let exported = game.to_pgn();
+    assert!(
+        exported.ends_with("\n\n1. e4 ! ? !! ?? !? ?! $7\n*\n"),
+        "{exported}"
+    );
+}
+
+#[test]
+fn test_nags_from_symbols_and_after_variations_count_toward_the_limit() {
+    // Attached symbols, symbols on their own, `$n`, and NAGs after a
+    // variation all count toward one limit, in order. `$0` is dropped
+    // without a warning, even on a full move.
+    let game = parse_movetext("1. e4!!+- ! $2 (1. d4 $3) $4 = $13\n$0 $14 ?? e5 $1 *");
+    assert_eq!(node(&game, "e4").nags, [3, 18, 1, 2, 4, 10, 13]);
+    assert_eq!(node(&game, "d4").nags, [3]);
+    assert_eq!(node(&game, "e5").nags, [1]);
+    let warnings: Vec<(u32, PgnWarningKind)> = game
+        .warnings
+        .iter()
+        .map(|w| (w.line, w.kind.clone()))
+        .collect();
+    assert_eq!(
+        warnings,
+        [
+            (5, PgnWarningKind::TooManyNags { nag: 14 }),
+            (5, PgnWarningKind::TooManyNags { nag: 4 }),
+        ]
+    );
+}
+
+#[test]
+fn test_each_move_has_its_own_nag_limit() {
+    let nags = "$1 $2 $3 $4 $5 $6 $7";
+    let game = parse_movetext(&format!("1. e4 {nags} (1. d4 {nags} $8) e5 {nags} $9 *"));
+    for san in ["e4", "d4", "e5"] {
+        assert_eq!(node(&game, san).nags, [1, 2, 3, 4, 5, 6, 7], "{san}");
+    }
+    assert_eq!(
+        warning_kinds(&game),
+        [
+            PgnWarningKind::TooManyNags { nag: 8 },
+            PgnWarningKind::TooManyNags { nag: 9 },
+        ]
+    );
+}
+
 /// The comment before each game's first move.
 fn first_comments(pgn: &str) -> Vec<Option<String>> {
     parse_pgn(pgn)

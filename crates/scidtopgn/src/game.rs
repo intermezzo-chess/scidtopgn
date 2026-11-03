@@ -23,7 +23,9 @@ pub const MAX_TAG_LEN: u8 = 240;
 /// The longest tag value a game record stores, in bytes. SCID's PGN parser
 /// reads no longer tag name or value.
 pub(crate) const MAX_TAG_VALUE_LEN: usize = 255;
-/// The most NAGs a move keeps.
+/// The size of SCID's array of a move's NAGs. SCID ends the array with a 0,
+/// so a move keeps at most `MAX_NAGS - 1` NAGs, and never NAG 0, which means
+/// no annotation.
 pub const MAX_NAGS: usize = 8;
 /// The deepest a variation can be nested, counting a variation of the main
 /// line as 1. Reading and writing a game recurse once per level, so deeper
@@ -65,6 +67,18 @@ pub(crate) fn common_tag_code(name: &str) -> Option<u8> {
         .map(|i| MAX_TAG_LEN + 1 + i as u8)
 }
 
+/// What [`Game::add_nag`] did with a NAG.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AddedNag {
+    /// The NAG was added to the move.
+    Kept,
+    /// The NAG was dropped because it is 0 or comes before a line's first
+    /// move, which SCID drops without a message.
+    Ignored,
+    /// The NAG was dropped because the move already has `MAX_NAGS - 1`.
+    MoveFull,
+}
+
 /// What kind of node a [`MoveNode`] is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Marker {
@@ -93,7 +107,9 @@ pub struct MoveNode {
     /// The comment after the move. On a start marker, the comment before
     /// the line's first move.
     pub comment: Option<String>,
-    /// The move's NAGs, such as 1 for `!`. See [`nag_to_symbol`].
+    /// The move's NAGs, such as 1 for `!`. See [`nag_to_symbol`]. A game is
+    /// stored and exported with only the first `MAX_NAGS - 1` that aren't 0,
+    /// the NAGs SCID keeps; see [`MAX_NAGS`].
     pub nags: Vec<u8>,
     /// The index of the previous node in the line.
     pub prev: Option<usize>,
@@ -138,6 +154,17 @@ impl MoveNode {
     /// Returns whether the node's move is a null move.
     pub fn is_null_move(&self) -> bool {
         self.move_data == Some(GameMove::Null)
+    }
+
+    /// Returns the NAGs a game is stored and exported with: the first
+    /// `MAX_NAGS - 1` of [`nags`](Self::nags) that aren't 0, the NAGs SCID
+    /// can hold. [`nags`](Self::nags) can have others when set directly.
+    pub(crate) fn stored_nags(&self) -> impl Iterator<Item = u8> + '_ {
+        self.nags
+            .iter()
+            .copied()
+            .filter(|&nag| nag != 0)
+            .take(MAX_NAGS - 1)
     }
 }
 
@@ -618,14 +645,20 @@ impl Game {
     /// Adds `nag` to the current move, the move it follows.
     ///
     /// Like SCID, a NAG before the first move of the game or of a variation
-    /// is dropped, as is NAG 0, which means no annotation.
-    pub(crate) fn add_nag(&mut self, nag: u8) {
+    /// is dropped, as is NAG 0, which means no annotation. So is a NAG after
+    /// the move's first `MAX_NAGS - 1`, which a PGN import warns about.
+    pub(crate) fn add_nag(&mut self, nag: u8) -> AddedNag {
         let Some(node) = self.current_move.map(|idx| &mut self.moves[idx]) else {
-            return;
+            return AddedNag::Ignored;
         };
-        if node.marker == Marker::NoMarker && nag != 0 && node.nags.len() < MAX_NAGS {
-            node.nags.push(nag);
+        if node.marker != Marker::NoMarker || nag == 0 {
+            return AddedNag::Ignored;
         }
+        if node.nags.len() >= MAX_NAGS - 1 {
+            return AddedNag::MoveFull;
+        }
+        node.nags.push(nag);
+        AddedNag::Kept
     }
 
     /// Adds `comment` to the current move, the move it follows, or to the
@@ -894,8 +927,8 @@ impl Game {
             };
             token.push_str(&node.san);
 
-            // NAG 0 means no annotation; SCID writes nothing for it.
-            for &nag in node.nags.iter().filter(|&&nag| nag != 0) {
+            // The NAGs the game is stored with, which SCID would export.
+            for nag in node.stored_nags() {
                 token.push(' ');
                 match nag_to_symbol(nag) {
                     "" => token.push_str(&format!("${nag}")),
