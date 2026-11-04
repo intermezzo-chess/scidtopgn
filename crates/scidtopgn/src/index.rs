@@ -37,7 +37,7 @@ pub const HPSIG_SIZE: usize = 9;
 /// stored modulo 1,024.
 pub const MAX_HALF_MOVES: u16 = 1023;
 
-/// The SCID format version this crate writes: 400, for SCID 4.
+/// The SCID format version this crate reads and writes: 400, for SCID 4.
 pub const SCID_VERSION: u16 = 400;
 
 /// The bit of the flag [`IDX_MASK_START`] tests.
@@ -112,7 +112,7 @@ pub const IDX_MASK_USER: u16 = 1 << IDX_FLAG_USER;
 pub struct IndexHeader {
     /// [`INDEX_MAGIC`].
     pub magic: [u8; 8],
-    /// The SCID format version, such as [`SCID_VERSION`].
+    /// The SCID format version: [`SCID_VERSION`] in a header that was read.
     pub version: u16,
     /// The kind of database, such as tournament or theory, as SCID numbers
     /// them.
@@ -170,7 +170,7 @@ impl IndexHeader {
             return Err(Error::InvalidMagic);
         }
 
-        // Check before reading the rest, which other versions lay out
+        // Check before reading the rest, which another version may lay out
         // differently.
         header.version = read_u16_be(reader)?;
         if header.version != SCID_VERSION {
