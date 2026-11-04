@@ -11,7 +11,7 @@ use shakmaty::Square;
 use thiserror::Error;
 
 use crate::game::MAX_VARIATION_DEPTH;
-use crate::index::MAX_GAMES;
+use crate::index::{MAX_GAMES, SCID_VERSION};
 use crate::namebase::NameType;
 
 /// An error reading or writing a SCID database, or parsing PGN.
@@ -126,6 +126,16 @@ pub enum Error {
     /// A file that doesn't start with the magic number of its SCID file type.
     #[error("Not a SCID file: wrong magic number")]
     InvalidMagic,
+
+    /// An index file of a SCID format version other than [`SCID_VERSION`].
+    /// SCID vs. PC opens only that version.
+    #[error(
+        "Unsupported SCID format version {version}: only SCID vs. PC 4 databases (version {SCID_VERSION}) are supported"
+    )]
+    UnsupportedVersion {
+        /// The version in the file.
+        version: u16,
+    },
 
     /// A file that ends before the data its header describes.
     #[error("The file ends early")]

@@ -37,7 +37,7 @@ pub const HPSIG_SIZE: usize = 9;
 /// stored modulo 1,024.
 pub const MAX_HALF_MOVES: u16 = 1023;
 
-/// The SCID format version this crate writes: 400, for SCID 4.
+/// The SCID format version this crate reads and writes: 400, for SCID 4.
 pub const SCID_VERSION: u16 = 400;
 
 /// The bit of the flag [`IDX_MASK_START`] tests.
@@ -112,7 +112,7 @@ pub const IDX_MASK_USER: u16 = 1 << IDX_FLAG_USER;
 pub struct IndexHeader {
     /// [`INDEX_MAGIC`].
     pub magic: [u8; 8],
-    /// The SCID format version, such as [`SCID_VERSION`].
+    /// The SCID format version: [`SCID_VERSION`] in a header that was read.
     pub version: u16,
     /// The kind of database, such as tournament or theory, as SCID numbers
     /// them.
@@ -160,7 +160,8 @@ impl IndexHeader {
     /// # Errors
     ///
     /// Returns [`Error::InvalidMagic`] if the data doesn't start with
-    /// [`INDEX_MAGIC`], and [`Error::Io`] if it can't be read or ends early.
+    /// [`INDEX_MAGIC`], [`Error::UnsupportedVersion`] if its version isn't
+    /// [`SCID_VERSION`], and [`Error::Io`] if it can't be read or ends early.
     pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self> {
         let mut header = Self::default();
 
@@ -169,7 +170,14 @@ impl IndexHeader {
             return Err(Error::InvalidMagic);
         }
 
+        // Check before reading the rest, which another version may lay out
+        // differently.
         header.version = read_u16_be(reader)?;
+        if header.version != SCID_VERSION {
+            return Err(Error::UnsupportedVersion {
+                version: header.version,
+            });
+        }
         header.base_type = read_u32_be(reader)?;
         header.num_games = read_u24_be(reader)?;
         header.auto_load = read_u24_be(reader)?;
@@ -850,8 +858,8 @@ impl Index {
     /// # Errors
     ///
     /// Returns [`Error::File`] for [`DatabaseFile::Index`] if the file can't be
-    /// read, doesn't start with [`INDEX_MAGIC`], or is shorter than its header
-    /// says.
+    /// read, doesn't start with [`INDEX_MAGIC`], isn't of [`SCID_VERSION`],
+    /// or is shorter than its header says.
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         Self::read_file(path.as_ref()).map_err(|e| e.in_file(DatabaseFile::Index))
     }
