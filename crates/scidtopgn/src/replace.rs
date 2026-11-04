@@ -115,6 +115,7 @@ impl NewFiles {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::Error;
     use std::ffi::OsString;
     use std::io::Write;
 
@@ -179,6 +180,47 @@ mod tests {
         assert!(new.replace().is_err());
         assert_eq!(contents(&path, &["si4"]), ["old si4"]);
         assert_eq!(entries(temp.path()), ["db.si4"]);
+    }
+
+    #[test]
+    fn test_a_failed_move_aside_puts_the_files_back() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("db");
+        let new = new_files(&path, &["si4", "sg4"]);
+        // The old index moves aside, then a directory stops the old game file.
+        fs::create_dir(new.old_path("sg4")).unwrap();
+
+        assert!(matches!(new.swap(), Err(Error::Io(_))));
+        assert_eq!(contents(&path, &["si4", "sg4"]), ["old si4", "old sg4"]);
+        assert_eq!(entries(temp.path()), ["db.sg4", "db.si4"]);
+    }
+
+    #[test]
+    fn test_a_failed_restore_keeps_the_directory() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("db");
+        let new = new_files(&path, &["si4", "sn4", "sg4"]);
+        // The new index and a directory move into place, then the new game
+        // file can't. The old index moves back, then the old name file can't
+        // replace the directory.
+        fs::remove_file(new.new_path("sn4")).unwrap();
+        fs::create_dir(new.new_path("sn4")).unwrap();
+        fs::remove_file(new.new_path("sg4")).unwrap();
+        let dir = new.dir.path().to_path_buf();
+        let old_sn4 = new.old_path("sn4");
+        let old_sg4 = new.old_path("sg4");
+
+        assert!(matches!(new.swap(), Err(Error::Io(_))));
+        assert!(path.with_extension("sn4").is_dir());
+        assert!(dir.is_dir());
+        assert_eq!(contents(&path, &["si4"]), ["old si4"]);
+        assert_eq!(fs::read_to_string(old_sn4).unwrap(), "old sn4");
+        // Whether the old game file moved back is up to swap, as long as it's
+        // in one of the two places.
+        let holds_old_sg4 = [path.with_extension("sg4"), old_sg4]
+            .iter()
+            .any(|sg4| fs::read_to_string(sg4).is_ok_and(|text| text == "old sg4"));
+        assert!(holds_old_sg4);
     }
 
     #[cfg(unix)]
