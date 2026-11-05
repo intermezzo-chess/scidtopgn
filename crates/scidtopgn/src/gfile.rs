@@ -541,6 +541,27 @@ mod tests {
     }
 
     #[test]
+    fn test_read_game_reads_a_consumed_buffer_from_the_start() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut gf = GFile::create(temp_dir.path().join("test")).unwrap();
+        let offset1 = gf.add_game_data(&[1, 2, 3, 4, 5]).unwrap();
+        let offset2 = gf.add_game_data(&[6, 7]).unwrap();
+        gf.flush().unwrap();
+
+        let mut buf = ByteBuffer::new();
+        gf.read_game(&mut buf, offset1, 5).unwrap();
+        for byte in [1, 2, 3, 4, 5] {
+            assert_eq!(buf.get_byte().unwrap(), byte);
+        }
+
+        gf.read_game(&mut buf, offset2, 2).unwrap();
+        assert_eq!(buf.position(), 0);
+        assert_eq!(buf.get_byte().unwrap(), 6);
+        assert_eq!(buf.get_byte().unwrap(), 7);
+        assert!(buf.get_byte().is_err());
+    }
+
+    #[test]
     fn test_gfile_without_a_file() {
         let mut gf = GFile::default();
         assert_eq!(gf.file_size(), 0);

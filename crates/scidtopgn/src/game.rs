@@ -1006,7 +1006,11 @@ pub fn nag_to_symbol(nag: u8) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use shakmaty::uci::UciMove;
+
     use super::*;
+    use crate::mov::encode_move;
+    use crate::pgn::PgnWarningKind;
 
     #[test]
     fn test_game_new() {
@@ -1018,10 +1022,45 @@ mod tests {
 
     #[test]
     fn test_game_clear() {
-        let mut game = Game::new();
-        game.white = "Test".to_string();
+        // A literal, so that a new field has to be added here.
+        let mut game = Game {
+            white: "White".to_string(),
+            black: "Black".to_string(),
+            event: "Event".to_string(),
+            site: "Site".to_string(),
+            round: "1".to_string(),
+            date: Date::new(2022, 1, 2).unwrap(),
+            event_date: Some(Date::new(2022, 1, 1).unwrap()),
+            result: GameResult::Draw,
+            white_elo: Some(2500),
+            black_elo: Some(2400),
+            white_rating_type: RatingType::Rapid,
+            black_rating_type: RatingType::Uscf,
+            eco: Some("B36f".to_string()),
+            moves: vec![MoveNode::new()],
+            first_move: Some(0),
+            current_move: Some(0),
+            tags: vec![Tag {
+                name: "Annotator".to_string(),
+                value: "Me".to_string(),
+            }],
+            start_position: Some(Chess::default()),
+            num_half_moves: 1,
+            warnings: vec![PgnWarning {
+                game: 1,
+                line: 1,
+                kind: PgnWarningKind::UnknownText {
+                    text: "zz".to_string(),
+                },
+            }],
+        };
+        let new_game = format!("{:?}", Game::new());
+
         game.clear();
-        assert_eq!(game.white, "?");
+        assert_eq!(format!("{game:?}"), new_game);
+
+        game.clear();
+        assert_eq!(format!("{game:?}"), new_game);
     }
 
     #[test]
@@ -1075,6 +1114,97 @@ mod tests {
         game.decode(&mut ByteBuffer::from_slice(record), flags)
             .unwrap();
         game
+    }
+
+    /// The one-byte encoding of the king move `uci` from `position`, and the
+    /// position after it.
+    fn king_move(position: &ScidPosition, uci: &str) -> (u8, ScidPosition) {
+        let mv = uci
+            .parse::<UciMove>()
+            .unwrap()
+            .to_move(position.chess())
+            .unwrap();
+        let mut buf = ByteBuffer::new();
+        encode_move(&mut buf, position, GameMove::Move(mv)).unwrap();
+        let mut after = position.clone();
+        after.play(GameMove::Move(mv)).unwrap();
+        (buf.as_slice()[0], after)
+    }
+
+    #[test]
+    fn test_decode_replaces_the_previous_game() {
+        let start_fen = "4k3/8/8/8/8/8/8/4K3 w - - 0 1";
+        let start = ScidPosition::from_setup_position(chess_from_fen(start_fen).unwrap()).unwrap();
+        let (kd2, _) = king_move(&start, "e1d2");
+        let (ke2, after_ke2) = king_move(&start, "e1e2");
+        let (ke7, _) = king_move(&after_ke2, "e8e7");
+
+        // A FEN and tags, then 1.Ke2 with a NAG, a comment, and the variation
+        // 1.Kd2, then 1...Ke7.
+        let mut first = vec![243, 2];
+        first.extend(b"Me");
+        first.extend([245, 10]);
+        first.extend(b"2022.01.02");
+        first.extend([0, 1]);
+        first.extend(start_fen.as_bytes());
+        first.push(0);
+        first.extend([
+            ke2,
+            ENCODE_NAG,
+            1,
+            ENCODE_COMMENT,
+            ENCODE_START_MARKER,
+            kd2,
+            ENCODE_END_MARKER,
+            ke7,
+            ENCODE_END_GAME,
+        ]);
+        first.extend(b"c\0");
+        // No tags, the standard start, and 1.e4.
+        let second = [0, 0, E4, ENCODE_END_GAME];
+
+        let mut game = Game::new();
+        game.decode(&mut ByteBuffer::from_slice(&first), GAME_DECODE_ALL)
+            .unwrap();
+        assert_eq!(game.tags.len(), 2);
+        assert_eq!(game.event_date, Some(Date::from_string("2022.01.02")));
+        assert!(game.start_position.is_some());
+        assert_eq!(game.num_half_moves, 2);
+        let ke2_node = &game.moves[1];
+        assert_eq!(ke2_node.san, "Ke2");
+        assert_eq!(ke2_node.nags, [1]);
+        assert_eq!(ke2_node.comment.as_deref(), Some("c"));
+        assert_eq!(ke2_node.num_variations, 1);
+
+        // Database::get_game fills these in from the index.
+        game.white = "White".to_string();
+        game.black = "Black".to_string();
+        game.event = "Event".to_string();
+        game.site = "Site".to_string();
+        game.round = "1".to_string();
+        game.date = Date::new(2022, 1, 2).unwrap();
+        game.result = GameResult::Draw;
+        game.white_elo = Some(2500);
+        game.black_elo = Some(2400);
+        game.white_rating_type = RatingType::Rapid;
+        game.black_rating_type = RatingType::Uscf;
+        game.eco = Some("B36f".to_string());
+
+        game.decode(&mut ByteBuffer::from_slice(&second), GAME_DECODE_ALL)
+            .unwrap();
+        assert_eq!(
+            format!("{game:?}"),
+            format!("{:?}", decode_record(&second, GAME_DECODE_ALL))
+        );
+        let sans: Vec<_> = game.moves.iter().map(|node| node.san.as_str()).collect();
+        assert_eq!(sans, ["", "e4"]);
+        assert_eq!(game.num_half_moves, 1);
+        assert!(game.tags.is_empty());
+        assert_eq!(game.event_date, None);
+        assert_eq!(game.start_position, None);
+        assert!(game.moves[1].nags.is_empty());
+        assert_eq!(game.moves[1].comment, None);
+        assert_eq!(game.moves[1].num_variations, 0);
     }
 
     #[test]
