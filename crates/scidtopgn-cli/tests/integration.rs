@@ -1759,8 +1759,12 @@ struct ReadOnlyFiles(Vec<(PathBuf, std::fs::Permissions)>);
 
 impl ReadOnlyFiles {
     fn new(db: &Path) -> Self {
+        Self::with_extensions(db, &["si4", "sn4", "sg4"])
+    }
+
+    fn with_extensions(db: &Path, extensions: &[&str]) -> Self {
         let mut files = Self(Vec::new());
-        for ext in ["si4", "sn4", "sg4"] {
+        for ext in extensions {
             let path = db.with_extension(ext);
             let original = std::fs::metadata(&path)
                 .expect("Failed to read permissions")
@@ -1781,6 +1785,31 @@ impl Drop for ReadOnlyFiles {
             let _ = std::fs::set_permissions(path, original.clone());
         }
     }
+}
+
+#[test]
+fn test_cli_import_names_a_database_it_cant_write() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let db = copy_with_deleted(temp.path(), "five", &[]);
+    let games = export_both_ways(&db);
+    let before = database_bytes(&db);
+    let _read_only = ReadOnlyFiles::with_extensions(&db, &["si4"]);
+
+    let output = cli()
+        .args(["import", "tests/data/one.pgn", "-o"])
+        .arg(&db)
+        .output()
+        .expect("Failed to run CLI");
+    assert!(!output.status.success(), "import should fail");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Failed to write database"), "{stderr}");
+    assert!(stderr.contains("five.si4' is read-only"), "{stderr}");
+
+    // The new game's record stays in the game file, unused.
+    let after = database_bytes(&db);
+    assert_eq!(after[..2], before[..2]);
+    assert!(after[2].starts_with(&before[2]));
+    assert_eq!(export_both_ways(&db), games);
 }
 
 #[test]

@@ -104,6 +104,16 @@ scidtopgn import games.pgn -o mydb --on-error=abort  # strict mode
 
 By default, import appends to an existing database. Games that can't be read or stored, such as one whose record is longer than 131,071 bytes, get skipped with a warning unless you pass `--on-error=abort`. Then import stops at the first such game, and the database is left as it was, or isn't created.
 
+Appending writes the name and index files in a temporary directory beside the database, and replaces the originals only once both are complete. If that fails, for example because the disk is full, the two files are as they were and the database reads the same games as before. Running the import again doesn't duplicate any game. The new games' records may stay at the end of the game file as unused bytes, which SCID's Compact games command removes.
+
+This has some limits:
+
+- The new files need disk space alongside the old ones, and the database's directory must be writable, even if its files are.
+- A read-only or symbolically linked `.si4` or `.sn4` file makes the import fail when it writes the database, because replacing the file would ignore its protection or leave the file it links to out of date.
+- Replacing the files breaks hard links to them. The new files keep the old files' permissions, but not their owner, access control lists, or extended attributes.
+- A killed process can leave a directory named `.scidtopgn-compact-*` beside the database. If it holds no `old.*` files, it can be removed. If it does, which takes a kill during the few renames that swap the files in, or a failed rename that can't be undone, they are the original files, and a database file can be missing. Move them back over the database's files to open the database as it was.
+- This doesn't protect against a power loss, or other programs writing to the database at the same time.
+
 Import reads the same PGN notation as SCID, such as `0-0`, `ed` for `exd5`, `e2-e4`, or `N` for a novelty. Problems that don't stop a game from being imported, such as castling after the king has moved and returned, are printed as warnings. [docs/PGN_IMPORT.md](docs/PGN_IMPORT.md) lists each notation and where `scidtopgn` differs from SCID.
 
 #### Import arguments

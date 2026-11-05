@@ -994,6 +994,16 @@ impl Index {
     ///
     /// Returns [`Error::Io`] if it can't be written.
     pub fn flush<W: Write + Seek>(&mut self, writer: &mut W) -> Result<()> {
+        self.write_to(writer)?;
+        self.mark_written();
+
+        Ok(())
+    }
+
+    /// Writes the whole index file to `writer`, from its start, for a file
+    /// that doesn't yet replace the index file, so the index stays dirty
+    /// until [`mark_written`](Self::mark_written).
+    pub(crate) fn write_to<W: Write + Seek>(&self, writer: &mut W) -> Result<()> {
         writer.seek(SeekFrom::Start(0))?;
         self.header.write(writer)?;
 
@@ -1002,9 +1012,13 @@ impl Index {
         }
 
         writer.flush()?;
-        self.dirty = false;
 
         Ok(())
+    }
+
+    /// Records that the index file holds this index.
+    pub(crate) fn mark_written(&mut self) {
+        self.dirty = false;
     }
 
     /// Returns the header.

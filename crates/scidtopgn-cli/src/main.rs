@@ -269,7 +269,8 @@ fn import_command(args: &ImportArgs, reporter: &Reporter) -> Result<()> {
     }
 
     let total = db.num_games();
-    db.close()?;
+    db.close()
+        .with_context(|| format!("Failed to write database '{}'", args.output))?;
     if let Some(staging) = staging {
         staging.finish(db_path, &[])?;
     }
