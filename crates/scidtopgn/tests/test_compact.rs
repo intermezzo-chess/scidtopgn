@@ -357,11 +357,12 @@ fn test_compact_games_deletes_the_tree_cache() {
     let temp = tempfile::TempDir::new().unwrap();
     let path = five_with_deleted(temp.path(), &[]);
     let stc = path.with_extension("stc");
-    std::fs::write(&stc, "cache").unwrap();
 
     let mut db = Database::open(&path).unwrap();
     db.update_game(0, &parse_single_game(NEW_GAME).unwrap())
         .unwrap();
+    db.flush().unwrap();
+    std::fs::write(&stc, "cache").unwrap();
     db.compact_names().unwrap();
     assert!(stc.exists(), "compacting names keeps game numbers");
 

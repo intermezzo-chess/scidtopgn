@@ -825,6 +825,234 @@ fn test_delete_and_undelete_game() {
     assert_eq!(delete_flags(&db), [false, false, false, true, false]);
 }
 
+/// Copies `five`, with the games in `deleted` logically deleted, beside a
+/// tree cache file. Returns the database's path and the cache's.
+fn five_with_tree_cache(
+    dir: &std::path::Path,
+    deleted: &[u32],
+) -> (std::path::PathBuf, std::path::PathBuf) {
+    let path = five_with_deleted(dir, deleted);
+    let stc = path.with_extension("stc");
+    std::fs::write(&stc, "cache").unwrap();
+    (path, stc)
+}
+
+#[test]
+fn test_writing_an_updated_game_deletes_the_tree_cache() {
+    let writes: [fn(&mut Database) -> scidtopgn::Result<()>; 3] = [
+        Database::flush,
+        Database::compact_names,
+        Database::compact_games,
+    ];
+    let game = scidtopgn::parse_single_game(NEW_GAME).unwrap();
+    for write in writes {
+        let temp = tempfile::TempDir::new().unwrap();
+        let (path, stc) = five_with_tree_cache(temp.path(), &[]);
+
+        let mut db = Database::open(&path).unwrap();
+        db.update_game(0, &game).unwrap();
+        assert!(stc.exists(), "the change isn't written yet");
+        write(&mut db).unwrap();
+        assert!(!stc.exists());
+    }
+
+    let temp = tempfile::TempDir::new().unwrap();
+    let (path, stc) = five_with_tree_cache(temp.path(), &[]);
+    let mut db = Database::open(&path).unwrap();
+    db.update_game(0, &game).unwrap();
+    db.close().unwrap();
+    assert!(!stc.exists());
+}
+
+#[test]
+fn test_writing_an_update_without_a_tree_cache_succeeds() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let path = five_with_deleted(temp.path(), &[]);
+    let mut db = Database::open(&path).unwrap();
+    db.update_game(0, &scidtopgn::parse_single_game(NEW_GAME).unwrap())
+        .unwrap();
+    db.close().unwrap();
+
+    let mut db = Database::open(&path).unwrap();
+    assert_eq!(db.get_game(0).unwrap().white, "Kasparov, Garry");
+}
+
+#[test]
+fn test_updating_a_deleted_or_added_game_deletes_the_tree_cache() {
+    let game = scidtopgn::parse_single_game(NEW_GAME).unwrap();
+    let temp = tempfile::TempDir::new().unwrap();
+    let (path, stc) = five_with_tree_cache(temp.path(), &[0]);
+    let mut db = Database::open(&path).unwrap();
+    db.update_game(0, &game).unwrap();
+    db.close().unwrap();
+    assert!(!stc.exists());
+
+    let temp = tempfile::TempDir::new().unwrap();
+    let (path, stc) = five_with_tree_cache(temp.path(), &[]);
+    let mut db = Database::open(&path).unwrap();
+    let added = db.add_game(&game).unwrap();
+    db.update_game(added, &game).unwrap();
+    db.close().unwrap();
+    assert!(!stc.exists());
+}
+
+#[test]
+fn test_other_changes_keep_the_tree_cache() {
+    let changes: [fn(&mut Database); 4] = [
+        |db| {
+            db.add_game(&scidtopgn::parse_single_game(NEW_GAME).unwrap())
+                .unwrap();
+        },
+        |db| {
+            let mut source = Database::open_read_only(get_test_data_path("one")).unwrap();
+            db.copy_game(&mut source, 0).unwrap();
+        },
+        |db| db.delete_game(0).unwrap(),
+        |db| db.undelete_game(1).unwrap(),
+    ];
+    for change in changes {
+        let temp = tempfile::TempDir::new().unwrap();
+        let (path, stc) = five_with_tree_cache(temp.path(), &[1]);
+        let mut db = Database::open(&path).unwrap();
+        change(&mut db);
+        db.close().unwrap();
+        assert_eq!(std::fs::read(&stc).unwrap(), b"cache");
+    }
+}
+
+#[test]
+fn test_an_update_not_written_keeps_the_tree_cache() {
+    let game = scidtopgn::parse_single_game(NEW_GAME).unwrap();
+    let temp = tempfile::TempDir::new().unwrap();
+    let (path, stc) = five_with_tree_cache(temp.path(), &[]);
+
+    let mut db = Database::open(&path).unwrap();
+    assert!(matches!(
+        db.update_game(5, &game),
+        Err(Error::GameNotFound { .. })
+    ));
+    db.delete_game(0).unwrap();
+    db.flush().unwrap();
+    assert!(stc.exists(), "the update failed");
+
+    db.update_game(0, &game).unwrap();
+    db.discard().unwrap();
+    assert!(stc.exists(), "the update was discarded");
+
+    let mut db = Database::open(&path).unwrap();
+    db.update_game(0, &game).unwrap();
+    drop(db);
+    assert!(stc.exists(), "the update was dropped");
+
+    let mut db = Database::open_read_only(&path).unwrap();
+    assert!(matches!(db.update_game(0, &game), Err(Error::ReadOnly)));
+    db.close().unwrap();
+    assert!(stc.exists(), "the update was refused");
+}
+
+#[test]
+fn test_later_writes_keep_a_rebuilt_tree_cache() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let (path, stc) = five_with_tree_cache(temp.path(), &[]);
+    let game = scidtopgn::parse_single_game(NEW_GAME).unwrap();
+
+    let mut db = Database::open(&path).unwrap();
+    db.update_game(0, &game).unwrap();
+    db.flush().unwrap();
+    assert!(!stc.exists());
+
+    std::fs::write(&stc, "rebuilt").unwrap();
+    db.add_game(&game).unwrap();
+    db.flush().unwrap();
+    db.delete_game(0).unwrap();
+    db.close().unwrap();
+    assert_eq!(std::fs::read(&stc).unwrap(), b"rebuilt");
+}
+
+#[test]
+fn test_a_tree_cache_that_cant_be_deleted_leaves_the_update_unwritten() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let path = five_with_deleted(temp.path(), &[]);
+    let stc = path.with_extension("stc");
+    std::fs::create_dir(&stc).unwrap();
+    let indexes = ["si4", "sn4"].map(|ext| std::fs::read(path.with_extension(ext)).unwrap());
+
+    let mut db = Database::open(&path).unwrap();
+    db.update_game(0, &scidtopgn::parse_single_game(NEW_GAME).unwrap())
+        .unwrap();
+    let err = db.flush().unwrap_err();
+    assert!(matches!(err, Error::Io(_)), "{err:?}");
+    assert!(stc.is_dir());
+    assert_eq!(
+        ["si4", "sn4"].map(|ext| std::fs::read(path.with_extension(ext)).unwrap()),
+        indexes
+    );
+
+    // The change is kept for another try.
+    std::fs::remove_dir(&stc).unwrap();
+    db.close().unwrap();
+    let mut db = Database::open(&path).unwrap();
+    assert_eq!(db.get_game(0).unwrap().white, "Kasparov, Garry");
+}
+
+#[test]
+fn test_files_that_cant_be_replaced_leave_the_tree_cache_deleted() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let (path, stc) = five_with_tree_cache(temp.path(), &[]);
+    let sn4_before = std::fs::read(path.with_extension("sn4")).unwrap();
+    // Without an index file to take the permissions of, replacing it fails.
+    let si4 = path.with_extension("si4");
+    let aside = temp.path().join("aside");
+
+    let mut db = Database::open(&path).unwrap();
+    db.update_game(0, &scidtopgn::parse_single_game(NEW_GAME).unwrap())
+        .unwrap();
+    std::fs::rename(&si4, &aside).unwrap();
+    assert!(matches!(db.flush(), Err(Error::Io(_))));
+    assert!(!stc.exists());
+    assert_eq!(
+        std::fs::read(path.with_extension("sn4")).unwrap(),
+        sn4_before
+    );
+
+    std::fs::rename(&aside, &si4).unwrap();
+    db.close().unwrap();
+    let mut db = Database::open(&path).unwrap();
+    assert_eq!(db.get_game(0).unwrap().white, "Kasparov, Garry");
+}
+
+#[test]
+fn test_create_deletes_the_tree_cache() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let (path, stc) = five_with_tree_cache(temp.path(), &[]);
+
+    let db = Database::create(&path).unwrap();
+    assert!(!stc.exists());
+    assert_eq!(db.num_games(), 0);
+}
+
+#[test]
+fn test_create_refuses_a_tree_cache_it_cant_delete() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let path = five_with_deleted(temp.path(), &[]);
+    let stc = path.with_extension("stc");
+    std::fs::create_dir(&stc).unwrap();
+
+    let err = Database::create(&path).map(drop).unwrap_err();
+    assert!(matches!(err, Error::Io(_)), "{err:?}");
+    assert_eq!(Database::open(&path).unwrap().num_games(), 5);
+}
+
+#[test]
+fn test_create_under_a_file_names_the_index_file() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let file = temp.path().join("file");
+    std::fs::write(&file, "").unwrap();
+
+    let err = Database::create(file.join("db")).map(drop).unwrap_err();
+    assert!(matches!(err, Error::File { .. }), "{err:?}");
+}
+
 /// The raw index entries of the database at `path`.
 fn raw_entries(path: &std::path::Path) -> Vec<Vec<u8>> {
     let si4 = std::fs::read(path.with_extension("si4")).unwrap();

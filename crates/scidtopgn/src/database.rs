@@ -105,6 +105,8 @@ pub struct Database {
     /// The game file's length when the database was opened, created, or
     /// last flushed, which [`discard`](Self::discard) restores.
     saved_game_size: u64,
+    /// Whether the unwritten changes put SCID's tree cache file out of date.
+    tree_cache_stale: bool,
 }
 
 impl Database {
@@ -200,6 +202,7 @@ impl Database {
             nfile,
             modified: false,
             saved_game_size,
+            tree_cache_stale: false,
         })
     }
 
@@ -207,11 +210,15 @@ impl Database {
     /// replacing the files of any database already there.
     ///
     /// All three files are written at once, so the new database can be
-    /// opened even if no game is ever added.
+    /// opened even if no game is ever added. SCID's tree cache file (`.stc`)
+    /// is deleted first, as SCID does, because SCID would use it for the new
+    /// database once that has as many games as the old one.
     ///
     /// # Errors
     ///
-    /// Returns [`Error::File`] naming the file that couldn't be created.
+    /// Returns [`Error::Io`] if the tree cache file can't be deleted, which
+    /// leaves the other files as they were, and [`Error::File`] naming the
+    /// file that couldn't be created.
     ///
     /// # Examples
     ///
@@ -232,6 +239,8 @@ impl Database {
     pub fn create<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
 
+        remove_tree_cache(&path)?;
+
         let si4_path = path.with_extension("si4");
         let index = Index::create(&si4_path)?;
 
@@ -247,6 +256,7 @@ impl Database {
             nfile,
             modified: false,
             saved_game_size: 0,
+            tree_cache_stale: false,
         })
     }
 
@@ -586,6 +596,10 @@ impl Database {
     /// The old record isn't read, so a game that can't be read can still be
     /// replaced.
     ///
+    /// Writing the change deletes SCID's tree cache file (`.stc`), as SCID
+    /// does when it saves a game. The number of games stays the same, so SCID
+    /// would otherwise use the old game's results.
+    ///
     /// # Errors
     ///
     /// Returns [`Error::GameNotFound`] if there is no such game, and
@@ -638,6 +652,7 @@ impl Database {
             .get_entry_mut(game_num)
             .expect("the entry was found above") = entry;
         self.modified = true;
+        self.tree_cache_stale = true;
 
         Ok(())
     }
@@ -1097,6 +1112,12 @@ impl Database {
     /// database's name file and index file are as they were, and it reads
     /// the same games as before.
     ///
+    /// If a game was replaced, SCID's tree cache file (`.stc`) is deleted
+    /// once the new files are complete, just before they replace the old
+    /// ones, so that it is never left beside the changes. Adding, deleting,
+    /// or undeleting games keeps it: SCID ignores results cached for another
+    /// number of games, and keeps them itself when it deletes a game.
+    ///
     /// Names are written as UTF-8, including those read from the name file
     /// as Latin-1 or Windows-1252; see [Names that aren't
     /// UTF-8](#names-that-arent-utf-8). If two names of a kind read the
@@ -1105,8 +1126,9 @@ impl Database {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Io`] if a file can't be written or replaced, or if
-    /// the name file or index file is read-only or a symbolic link. Replacing
+    /// Returns [`Error::Io`] if a file can't be written or replaced, if the
+    /// tree cache file exists and can't be deleted, or if the name file or
+    /// index file is read-only or a symbolic link. Replacing
     /// a read-only file would ignore its protection, and replacing a link
     /// would leave the file it links to out of date. When names are merged,
     /// it returns [`Error::Game`] with [`Error::NameNotFound`] for the first
@@ -1116,7 +1138,9 @@ impl Database {
     /// again writes them. The new games' records may already be in the game
     /// file, as unused bytes at its end: no index entry refers to them, and
     /// the records before them don't change. [`discard`](Self::discard) or
-    /// [`compact_games`](Self::compact_games) removes them.
+    /// [`compact_games`](Self::compact_games) removes them. If the files
+    /// couldn't be replaced, the tree cache file stays deleted, which is
+    /// harmless: SCID works out the results again without it.
     ///
     /// # Limits
     ///
@@ -1165,6 +1189,9 @@ impl Database {
         let mut new = NewFiles::new(&self.path)?;
         write_names(namebase, create(&mut new, "sn4")?)?;
         write_index(index, create(&mut new, "si4")?)?;
+        if self.tree_cache_stale {
+            remove_tree_cache(&self.path)?;
+        }
         new.replace()?;
 
         match merged {
@@ -1177,6 +1204,7 @@ impl Database {
         self.index.mark_written();
         self.modified = false;
         self.saved_game_size = self.gfile.file_size();
+        self.tree_cache_stale = false;
 
         Ok(())
     }
@@ -1358,10 +1386,7 @@ impl Database {
         write_names(&namebase, new.create("sn4")?)?;
         write_index(&index, new.create("si4")?)?;
 
-        match fs::remove_file(self.path.with_extension("stc")) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
-            _ => {}
-        }
+        remove_tree_cache(&self.path)?;
 
         // Windows can't rename a file that is open.
         self.gfile.close()?;
@@ -1708,6 +1733,21 @@ fn check_replaceable(path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Deletes SCID's tree cache file of the database at `path`, if it has one.
+fn remove_tree_cache(path: &Path) -> Result<()> {
+    match fs::remove_file(path.with_extension("stc")) {
+        Err(e)
+            if !matches!(
+                e.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+            ) =>
+        {
+            Err(e.into())
+        }
+        _ => Ok(()),
+    }
+}
+
 /// Writes `index` to `file` as an index file.
 fn write_index<W: Write + Seek>(index: &Index, file: W) -> Result<()> {
     index.write_to(&mut BufWriter::new(file))
@@ -1925,6 +1965,24 @@ mod tests {
         assert_eq!(after[..games.len()], games);
         assert_eq!(after.len(), games.len() + 1);
         assert_eq!(db.get_game(db.num_games() - 1).unwrap().white, "Kept");
+    }
+
+    #[test]
+    fn test_a_failed_write_keeps_the_tree_cache_until_writing_succeeds() {
+        for failing in ["sn4", "si4"] {
+            let temp = tempfile::TempDir::new().unwrap();
+            let path = copy_of(temp.path(), "five");
+            let stc = path.with_extension("stc");
+            fs::write(&stc, "cache").unwrap();
+
+            let mut db = Database::open(&path).unwrap();
+            db.update_game(0, &game("A new player", "1")).unwrap();
+            fail_flush(&mut db, failing);
+            assert!(stc.exists(), "{failing}");
+
+            db.flush().unwrap();
+            assert!(!stc.exists(), "{failing}");
+        }
     }
 
     fn frequency(db: &Database, ntype: NameType, name: &str) -> u32 {

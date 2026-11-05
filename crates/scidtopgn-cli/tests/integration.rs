@@ -173,6 +173,30 @@ fn test_cli_import_overwrite() {
     assert_eq!(db.num_games(), 1, "Should have 1 game after overwrite");
 }
 
+#[test]
+fn test_cli_import_removes_the_tree_cache_only_when_it_overwrites() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let db = temp.path().join("db");
+    let stc = db.with_extension("stc");
+    let import = |overwrite: &[&str]| {
+        let output = cli()
+            .args(["import", "tests/data/one.pgn", "-o"])
+            .arg(&db)
+            .args(overwrite)
+            .output()
+            .expect("Failed to run CLI");
+        assert!(output.status.success(), "{output:?}");
+    };
+
+    import(&[]);
+    std::fs::write(&stc, "cache").expect("Failed to write tree cache");
+    import(&[]);
+    assert_eq!(std::fs::read(&stc).unwrap(), b"cache", "appending keeps it");
+
+    import(&["--overwrite"]);
+    assert!(!stc.exists());
+}
+
 const EMPTY_INFO: &str = "Total games: 0\nDeleted games: 0\nActive games: 0\n\
     Player names: 0\nEvent names: 0\nSite names: 0\nRound names: 0\n\
     Years of active games: unknown\n";
@@ -2244,7 +2268,8 @@ fn test_cli_rejects_a_log_that_is_a_file_of_the_command() {
         &["import", "input.pgn", "-o", "new", "--log", "new.sg4"],
         &["merge", "five", "-o", "new", "--log", "./five.si4"],
         &["merge", "five", "-o", "new", "--log", "new.sn4"],
-        // Merge removes the output's tree cache.
+        // Import and merge remove the output's tree cache.
+        &["import", "input.pgn", "-o", "new", "--log", "new.stc"],
         &["merge", "five", "-o", "new", "--log", "new.stc"],
     ] {
         let output = cli()
@@ -2699,7 +2724,12 @@ fn test_cli_merge_failures_leave_no_database_behind() {
 fn test_cli_overwrite_refuses_to_replace_a_directory() {
     let temp = TempDir::new().expect("Failed to create temp dir");
     let target = temp.path().join("target");
-    for (ext, command) in [("si4", "merge"), ("sg4", "import"), ("stc", "merge")] {
+    for (ext, command) in [
+        ("si4", "merge"),
+        ("sg4", "import"),
+        ("stc", "merge"),
+        ("stc", "import"),
+    ] {
         let dir = target.with_extension(ext);
         std::fs::create_dir(&dir).expect("Failed to create directory");
         std::fs::write(dir.join("keep.txt"), "keep").expect("Failed to write file");
