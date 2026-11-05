@@ -363,6 +363,20 @@ fn test_compact_games_removes_the_twins() {
 }
 
 #[test]
+fn test_keeps_the_tree_cache() {
+    let dir = TempDir::new().unwrap();
+    let path = copy_of(dir.path(), "twins");
+    let stc = path.with_extension("stc");
+    std::fs::write(&stc, "cache").unwrap();
+
+    let mut db = Database::open(&path).unwrap();
+    assert!(!db.delete_twins(&gui()).unwrap().is_empty());
+    db.close().unwrap();
+
+    assert_eq!(std::fs::read(&stc).unwrap(), b"cache");
+}
+
+#[test]
 fn test_skips_deleted_games() {
     let dir = TempDir::new().unwrap();
     let mut db = Database::open(copy_of(dir.path(), "twins")).unwrap();

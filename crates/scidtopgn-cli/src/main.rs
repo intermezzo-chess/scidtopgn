@@ -76,6 +76,7 @@ fn command_files(command: &Command) -> Vec<PathBuf> {
                 files.push(PathBuf::from(&args.pgn_file));
             }
             files.extend(database(&args.output));
+            files.push(Path::new(&args.output).with_extension("stc"));
         }
         Command::Info(args) => files.extend(database(&args.database)),
         Command::Validate(args) => files.extend(database(&args.database)),
@@ -272,7 +273,9 @@ fn import_command(args: &ImportArgs, reporter: &Reporter) -> Result<()> {
     db.close()
         .with_context(|| format!("Failed to write database '{}'", args.output))?;
     if let Some(staging) = staging {
-        staging.finish(db_path, &[])?;
+        // Remove SCID's tree cache, which would be out of date, as `pgnscid`
+        // does.
+        staging.finish(db_path, &["stc"])?;
     }
 
     reporter.info(format_args!(
