@@ -1348,8 +1348,12 @@ struct ReadOnlyFiles(Vec<(std::path::PathBuf, std::fs::Permissions)>);
 
 impl ReadOnlyFiles {
     fn new(path: &std::path::Path) -> Self {
+        Self::with_extensions(path, &["si4", "sn4", "sg4"])
+    }
+
+    fn with_extensions(path: &std::path::Path, extensions: &[&str]) -> Self {
         let mut files = Self(Vec::new());
-        for ext in ["si4", "sn4", "sg4"] {
+        for ext in extensions {
             let file = path.with_extension(ext);
             let original = std::fs::metadata(&file).unwrap().permissions();
             let mut read_only = original.clone();
@@ -1677,4 +1681,118 @@ fn test_rating_types_are_stored_and_exported() {
     let exported = read.to_pgn();
     assert!(exported.contains("[WhiteUSCF \"2400\"]\n"), "{exported}");
     assert!(!exported.contains("DWZ"), "{exported}");
+}
+
+/// The names of the files in `dir`, sorted.
+fn files_in(dir: &std::path::Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .collect();
+    names.sort();
+    names
+}
+
+#[test]
+fn test_writing_nothing_touches_no_file() {
+    for read_only in [false, true] {
+        let temp = tempfile::TempDir::new().unwrap();
+        let path = five_with_deleted(temp.path(), &[]);
+        let open = if read_only {
+            Database::open_read_only
+        } else {
+            Database::open
+        };
+        let mut db = open(&path).unwrap();
+
+        // Writing either file would bring it back.
+        std::fs::remove_file(path.with_extension("si4")).unwrap();
+        std::fs::remove_file(path.with_extension("sn4")).unwrap();
+        db.flush().unwrap();
+        db.close().unwrap();
+
+        assert_eq!(files_in(temp.path()), ["five.sg4"], "{read_only}");
+    }
+}
+
+#[test]
+fn test_flush_refuses_a_read_only_name_or_index_file() {
+    let game = scidtopgn::parse_single_game(NEW_GAME).unwrap();
+    for ext in ["si4", "sn4"] {
+        let temp = tempfile::TempDir::new().unwrap();
+        let path = five_with_deleted(temp.path(), &[]);
+        let index = std::fs::read(path.with_extension("si4")).unwrap();
+        let names = std::fs::read(path.with_extension("sn4")).unwrap();
+        let files = files_in(temp.path());
+        let read_only = ReadOnlyFiles::with_extensions(&path, &[ext]);
+
+        let mut db = Database::open(&path).unwrap();
+        db.add_game(&game).unwrap();
+        let err = db.flush().unwrap_err();
+        assert!(matches!(err, Error::Io(_)), "{err:?}");
+        let message = err.to_string();
+        assert!(message.contains(&format!("five.{ext}")), "{message}");
+        assert!(message.contains("read-only"), "{message}");
+
+        assert_eq!(std::fs::read(path.with_extension("si4")).unwrap(), index);
+        assert_eq!(std::fs::read(path.with_extension("sn4")).unwrap(), names);
+        assert_eq!(files_in(temp.path()), files);
+
+        // The changes are kept, and are written once the file can be replaced.
+        drop(read_only);
+        db.close().unwrap();
+        assert_eq!(Database::open_read_only(&path).unwrap().num_games(), 6);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn test_flush_refuses_a_linked_name_or_index_file() {
+    let game = scidtopgn::parse_single_game(NEW_GAME).unwrap();
+    for ext in ["si4", "sn4"] {
+        let temp = tempfile::TempDir::new().unwrap();
+        let path = five_with_deleted(temp.path(), &[]);
+        let file = path.with_extension(ext);
+        let target = temp.path().join("target");
+        std::fs::rename(&file, &target).unwrap();
+        std::os::unix::fs::symlink(&target, &file).unwrap();
+        let contents = std::fs::read(&target).unwrap();
+
+        let mut db = Database::open(&path).unwrap();
+        db.add_game(&game).unwrap();
+        let err = db.flush().unwrap_err();
+        assert!(matches!(err, Error::Io(_)), "{err:?}");
+        let message = err.to_string();
+        assert!(message.contains(&format!("five.{ext}")), "{message}");
+        assert!(message.contains("symbolic link"), "{message}");
+
+        assert_eq!(std::fs::read_link(&file).unwrap(), target);
+        assert_eq!(std::fs::read(&target).unwrap(), contents);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn test_flush_keeps_the_files_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = tempfile::TempDir::new().unwrap();
+    let path = five_with_deleted(temp.path(), &[]);
+    let modes = [0o640, 0o604];
+    for (ext, mode) in ["si4", "sn4"].iter().zip(modes) {
+        let permissions = std::fs::Permissions::from_mode(mode);
+        std::fs::set_permissions(path.with_extension(ext), permissions).unwrap();
+    }
+
+    let mut db = Database::open(&path).unwrap();
+    db.add_game(&scidtopgn::parse_single_game(NEW_GAME).unwrap())
+        .unwrap();
+    db.close().unwrap();
+
+    for (ext, mode) in ["si4", "sn4"].iter().zip(modes) {
+        let permissions = std::fs::metadata(path.with_extension(ext))
+            .unwrap()
+            .permissions();
+        assert_eq!(permissions.mode() & 0o777, mode, "{ext}");
+    }
 }

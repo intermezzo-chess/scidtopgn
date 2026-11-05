@@ -1,8 +1,8 @@
 //! [`Database`], which reads and writes a SCID database's three files
 //! together.
 
-use std::fs::{self, File};
-use std::io::{BufWriter, Write};
+use std::fs;
+use std::io::{self, BufWriter, Seek, Write};
 use std::path::{Path, PathBuf};
 
 use crate::bytebuf::ByteBuffer;
@@ -32,7 +32,9 @@ use shakmaty::{Board, Position, Role};
 /// games](#logically-deleted-games).
 ///
 /// Changes are written by [`flush`](Self::flush) and
-/// [`close`](Self::close). Dropping a `Database` with unwritten changes
+/// [`close`](Self::close), which replace the name file and index file only
+/// once new ones are complete, so a failed write leaves them as they were.
+/// Dropping a `Database` with unwritten changes
 /// loses them, though the records of games it added or replaced may stay
 /// in the game file unused; [`discard`](Self::discard) removes those too.
 /// A database opened with
@@ -1086,50 +1088,93 @@ impl Database {
 
     /// Writes the games added, replaced, deleted, or undeleted since the
     /// database was opened, created, or last flushed: the game file's
-    /// pending data, then the name file, then the index file. Does nothing
-    /// if no game changed.
+    /// pending data, then the name file and the index file. Does nothing,
+    /// and touches no file, if no game changed.
+    ///
+    /// The name file and index file are written in a temporary directory
+    /// beside the database, and replace the database's files, with the same
+    /// permissions, only once both are complete. If that fails, the
+    /// database's name file and index file are as they were, and it reads
+    /// the same games as before.
     ///
     /// Names are written as UTF-8, including those read from the name file
     /// as Latin-1 or Windows-1252; see [Names that aren't
     /// UTF-8](#names-that-arent-utf-8). If two names of a kind read the
     /// same, they are merged into one, **the names get new IDs**, and the
-    /// name IDs in every index entry change to match. The name file and
-    /// index file are then written in a temporary directory beside the
-    /// database, and replace the database's files once both are complete,
-    /// as [`compact_names`](Self::compact_names) does.
+    /// name IDs in every index entry change to match.
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Io`] if a file can't be written. When names are
-    /// merged, it returns [`Error::Game`] with [`Error::NameNotFound`] for
-    /// the first game that refers to a name the name file doesn't have, and
-    /// the name file and index file are left as they were.
+    /// Returns [`Error::Io`] if a file can't be written or replaced, or if
+    /// the name file or index file is read-only or a symbolic link. Replacing
+    /// a read-only file would ignore its protection, and replacing a link
+    /// would leave the file it links to out of date. When names are merged,
+    /// it returns [`Error::Game`] with [`Error::NameNotFound`] for the first
+    /// game that refers to a name the name file doesn't have.
+    ///
+    /// After an error, the `Database` keeps its changes, so calling `flush`
+    /// again writes them. The new games' records may already be in the game
+    /// file, as unused bytes at its end: no index entry refers to them, and
+    /// the records before them don't change. [`discard`](Self::discard) or
+    /// [`compact_games`](Self::compact_games) removes them.
+    ///
+    /// # Limits
+    ///
+    /// - A process killed while writing the files leaves the database as it
+    ///   was, and beside it the temporary directory, named
+    ///   `.scidtopgn-compact-*`, which can be removed.
+    /// - Each file is moved aside before its replacement moves into place. If
+    ///   a process is killed during those few renames, or a rename fails and
+    ///   a file can't be moved back, that directory stays, holding the
+    ///   original files as `old.si4` and `old.sn4`, and a file of the database
+    ///   can be missing. Moving them back over the database's files makes the
+    ///   database as it was.
+    /// - The new files need disk space alongside the old ones, and the
+    ///   database's directory must be writable, even if its files are.
+    /// - The new files are new: a hard link to an old one keeps the old
+    ///   contents, and they keep only the old files' permissions, not their
+    ///   owner, access control lists, or extended attributes.
+    /// - Nothing is synced to disk, so this doesn't protect against a power
+    ///   loss. Other programs must not have the database open for writing.
     pub fn flush(&mut self) -> Result<()> {
+        self.flush_with(NewFiles::create)
+    }
+
+    /// Does what [`flush`](Self::flush) does, writing the name file and index
+    /// file to what `create` returns for each, so that a test can make
+    /// writing them fail.
+    fn flush_with<W: Write + Seek>(
+        &mut self,
+        mut create: impl FnMut(&mut NewFiles, &'static str) -> Result<W>,
+    ) -> Result<()> {
         if !self.modified {
             return Ok(());
         }
 
         self.gfile.flush()?;
+        check_replaceable(&self.path)?;
 
-        if let Some((namebase, new_ids)) = self.nfile.namebase().merged() {
-            let mut index = renumbered(&self.index, &new_ids)?;
-            let mut new = NewFiles::new(&self.path)?;
-            write_names(&namebase, new.create("sn4")?)?;
-            write_index(&mut index, new.create("si4")?)?;
-            new.replace()?;
-            self.index = index;
-            *self.nfile.namebase_mut() = namebase;
-        } else {
-            self.nfile.close()?;
-            self.nfile.namebase_mut().clear_converted();
+        let merged = match self.nfile.namebase().merged() {
+            Some((namebase, new_ids)) => Some((namebase, renumbered(&self.index, &new_ids)?)),
+            None => None,
+        };
+        let (namebase, index) = match &merged {
+            Some((namebase, index)) => (namebase, index),
+            None => (self.nfile.namebase(), &self.index),
+        };
+        let mut new = NewFiles::new(&self.path)?;
+        write_names(namebase, create(&mut new, "sn4")?)?;
+        write_index(index, create(&mut new, "si4")?)?;
+        new.replace()?;
 
-            let si4_path = self.path.with_extension("si4");
-            let file = File::create(&si4_path)?;
-            let mut writer = BufWriter::new(file);
-            self.index.flush(&mut writer)?;
-            writer.flush()?;
+        match merged {
+            Some((namebase, index)) => {
+                self.index = index;
+                *self.nfile.namebase_mut() = namebase;
+            }
+            None => self.nfile.namebase_mut().clear_converted(),
         }
-
+        self.index.mark_written();
         self.modified = false;
         self.saved_game_size = self.gfile.file_size();
 
@@ -1137,11 +1182,15 @@ impl Database {
     }
 
     /// Writes any changes, as [`flush`](Self::flush) does, and closes the
-    /// database.
+    /// database, with the same guarantee and limits: if writing fails, the
+    /// database's name file and index file are as they were.
     ///
     /// # Errors
     ///
-    /// The same as [`flush`](Self::flush).
+    /// The same as [`flush`](Self::flush). The changes are then lost, because
+    /// the `Database` is gone, and the new games' records may stay in the
+    /// game file as unused bytes at its end. To be able to try again, or to
+    /// [`discard`](Self::discard) them, call [`flush`](Self::flush) first.
     ///
     /// # Examples
     ///
@@ -1247,9 +1296,10 @@ impl Database {
     /// file doesn't have, and [`Error::Io`] if a file can't be written or
     /// replaced.
     /// After an error, the database's files are as they were after the
-    /// unwritten changes were written, unless a file that was moved aside
-    /// couldn't be put back; it is then left in the temporary directory. The
-    /// `Database` can still be used.
+    /// unwritten changes were written, or before them if those couldn't be
+    /// written, unless a file that was moved aside couldn't be put back; it
+    /// is then left in the temporary directory. The `Database` can still be
+    /// used.
     ///
     /// # Examples
     ///
@@ -1306,7 +1356,7 @@ impl Database {
             count_names(&mut namebase, entry, NameBase::increment_frequency);
         }
         write_names(&namebase, new.create("sn4")?)?;
-        write_index(&mut index, new.create("si4")?)?;
+        write_index(&index, new.create("si4")?)?;
 
         match fs::remove_file(self.path.with_extension("stc")) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
@@ -1318,6 +1368,7 @@ impl Database {
         let replaced = new.replace();
         if replaced.is_ok() {
             self.index = index;
+            self.index.mark_written();
             *self.nfile.namebase_mut() = namebase;
         }
         let reopened = GFile::open_file(&self.path, FileMode::Both).map(|gfile| self.gfile = gfile);
@@ -1355,9 +1406,10 @@ impl Database {
     /// [`Error::NameNotFound`] for the first game that refers to a name the
     /// name file doesn't have, and [`Error::Io`] if a file can't be written
     /// or replaced. After an error, the database's files are as they were
-    /// after the unwritten changes were written, unless a file that was moved
-    /// aside couldn't be put back; it is then left in the temporary
-    /// directory. The `Database` can still be used.
+    /// after the unwritten changes were written, or before them if those
+    /// couldn't be written, unless a file that was moved aside couldn't be
+    /// put back; it is then left in the temporary directory. The `Database`
+    /// can still be used.
     ///
     /// # Examples
     ///
@@ -1404,13 +1456,14 @@ impl Database {
             *self.nfile.namebase_mut() = counted;
             return Ok(());
         };
-        let mut index = renumbered(&self.index, &new_ids)?;
+        let index = renumbered(&self.index, &new_ids)?;
 
         let mut new = NewFiles::new(&self.path)?;
         write_names(&namebase, new.create("sn4")?)?;
-        write_index(&mut index, new.create("si4")?)?;
+        write_index(&index, new.create("si4")?)?;
         new.replace()?;
         self.index = index;
+        self.index.mark_written();
         *self.nfile.namebase_mut() = namebase;
         Ok(())
     }
@@ -1630,13 +1683,38 @@ fn empty_copy(index: &Index) -> Index {
     copy
 }
 
+/// Returns an error if the database at `path` has a name file or index file
+/// that [`Database::flush`] shouldn't replace.
+fn check_replaceable(path: &Path) -> Result<()> {
+    for ext in ["sn4", "si4"] {
+        let file = path.with_extension(ext);
+        // A missing file is reported when it would be replaced.
+        let Ok(metadata) = fs::symlink_metadata(&file) else {
+            continue;
+        };
+        let problem = if metadata.is_symlink() {
+            "is a symbolic link, which writing the database would replace with a file"
+        } else if metadata.permissions().readonly() {
+            "is read-only"
+        } else {
+            continue;
+        };
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("'{}' {problem}", file.display()),
+        )
+        .into());
+    }
+    Ok(())
+}
+
 /// Writes `index` to `file` as an index file.
-fn write_index(index: &mut Index, file: File) -> Result<()> {
-    index.flush(&mut BufWriter::new(file))
+fn write_index<W: Write + Seek>(index: &Index, file: W) -> Result<()> {
+    index.write_to(&mut BufWriter::new(file))
 }
 
 /// Writes `namebase` to `file` as a name file.
-fn write_names(namebase: &NameBase, file: File) -> Result<()> {
+fn write_names<W: Write>(namebase: &NameBase, file: W) -> Result<()> {
     let mut writer = BufWriter::new(file);
     namebase.write_sn4(&mut writer)?;
     writer.flush()?;
@@ -1676,6 +1754,177 @@ mod tests {
             "[White \"{white}\"]\n[Round \"{round}\"]\n\n1. e4 *\n"
         ))
         .unwrap()
+    }
+
+    /// A new file that fails once `left` bytes have been written to it.
+    struct LimitedFile {
+        file: fs::File,
+        left: usize,
+    }
+
+    impl Write for LimitedFile {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            if self.left == 0 {
+                return Err(io::Error::other("injected failure"));
+            }
+            let written = self.file.write(&buf[..buf.len().min(self.left)])?;
+            self.left -= written;
+            Ok(written)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            self.file.flush()
+        }
+    }
+
+    impl Seek for LimitedFile {
+        fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
+            self.file.seek(pos)
+        }
+    }
+
+    /// Flushes `db`, with writing the new file with extension `failing`
+    /// failing part way, and checks the error.
+    fn fail_flush(db: &mut Database, failing: &str) {
+        let result = db.flush_with(|new, ext| {
+            let file = new.create(ext)?;
+            let left = if ext == failing { 16 } else { usize::MAX };
+            Ok(LimitedFile { file, left })
+        });
+        assert!(
+            matches!(&result, Err(Error::Io(e)) if e.to_string() == "injected failure"),
+            "{result:?}"
+        );
+    }
+
+    /// Copies the fixture `name` into `dir`.
+    fn copy_of(dir: &Path, name: &str) -> PathBuf {
+        let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/data");
+        let path = dir.join(name);
+        for ext in ["si4", "sn4", "sg4"] {
+            fs::copy(
+                data.join(name).with_extension(ext),
+                path.with_extension(ext),
+            )
+            .unwrap();
+        }
+        path
+    }
+
+    fn all_pgn(db: &mut Database) -> Vec<String> {
+        db.games().map(|game| game.unwrap().to_pgn()).collect()
+    }
+
+    fn file_bytes(path: &Path, ext: &str) -> Vec<u8> {
+        fs::read(path.with_extension(ext)).unwrap()
+    }
+
+    /// The names of the files in `dir`, sorted.
+    fn files_in(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// Fails to write the new file with extension `failing` for a game added
+    /// to the fixture `name`, and checks that the database is as it was and
+    /// that writing again succeeds.
+    fn check_failed_write(name: &str, failing: &str) {
+        let temp = tempfile::TempDir::new().unwrap();
+        let path = copy_of(temp.path(), name);
+        let files = files_in(temp.path());
+        let si4 = file_bytes(&path, "si4");
+        let sn4 = file_bytes(&path, "sn4");
+        let sg4 = file_bytes(&path, "sg4");
+
+        let mut db = Database::open(&path).unwrap();
+        let games = all_pgn(&mut db);
+        let converted = db.nfile.namebase().converted_names().len();
+        assert!(converted > 0, "{name}");
+        db.add_game(&game("A new player", "1")).unwrap();
+        fail_flush(&mut db, failing);
+
+        assert_eq!(file_bytes(&path, "si4"), si4, "{name} {failing}");
+        assert_eq!(file_bytes(&path, "sn4"), sn4, "{name} {failing}");
+        // The new game's record is written, after the others.
+        let new_sg4 = file_bytes(&path, "sg4");
+        assert!(new_sg4.len() > sg4.len(), "{name} {failing}");
+        assert!(new_sg4.starts_with(&sg4), "{name} {failing}");
+        assert_eq!(files_in(temp.path()), files, "{name} {failing}");
+        let mut reopened = Database::open_read_only(&path).unwrap();
+        assert_eq!(all_pgn(&mut reopened), games, "{name} {failing}");
+
+        // The changes are kept for another try.
+        assert!(db.modified, "{name} {failing}");
+        assert!(db.index.is_dirty(), "{name} {failing}");
+        assert_eq!(db.nfile.namebase().converted_names().len(), converted);
+        db.flush().unwrap();
+        assert!(!db.modified, "{name} {failing}");
+        assert!(!db.index.is_dirty(), "{name} {failing}");
+        assert_eq!(db.nfile.namebase().converted_names(), []);
+        db.close().unwrap();
+
+        assert_eq!(files_in(temp.path()), files, "{name} {failing}");
+        let mut reopened = Database::open(&path).unwrap();
+        let after = all_pgn(&mut reopened);
+        assert_eq!(after[..games.len()], games, "{name} {failing}");
+        assert_eq!(after.len(), games.len() + 1, "{name} {failing}");
+        let last = reopened.num_games() - 1;
+        assert_eq!(reopened.get_game(last).unwrap().white, "A new player");
+    }
+
+    #[test]
+    fn test_a_failed_write_of_either_file_leaves_the_database_as_it_was() {
+        for failing in ["sn4", "si4"] {
+            // Names converted from Latin-1, none of them the same.
+            check_failed_write("latin1", failing);
+            // Names that are merged and get new IDs.
+            check_failed_write("mixed", failing);
+        }
+    }
+
+    #[test]
+    fn test_discard_after_a_failed_write_restores_the_game_file() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let path = copy_of(temp.path(), "latin1");
+        let before = ["si4", "sn4", "sg4"].map(|ext| file_bytes(&path, ext));
+
+        let mut db = Database::open(&path).unwrap();
+        db.add_game(&game("A new player", "1")).unwrap();
+        fail_flush(&mut db, "si4");
+        assert_ne!(file_bytes(&path, "sg4"), before[2]);
+        db.discard().unwrap();
+
+        assert_eq!(
+            ["si4", "sn4", "sg4"].map(|ext| file_bytes(&path, ext)),
+            before
+        );
+    }
+
+    #[test]
+    fn test_appending_after_a_failed_write_keeps_every_game_readable() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let path = copy_of(temp.path(), "latin1");
+
+        let mut db = Database::open(&path).unwrap();
+        let games = all_pgn(&mut db);
+        db.add_game(&game("Lost", "1")).unwrap();
+        fail_flush(&mut db, "si4");
+        drop(db);
+
+        // The record that failed stays in the game file, unused.
+        let mut db = Database::open(&path).unwrap();
+        db.add_game(&game("Kept", "1")).unwrap();
+        db.close().unwrap();
+
+        let mut db = Database::open(&path).unwrap();
+        let after = all_pgn(&mut db);
+        assert_eq!(after[..games.len()], games);
+        assert_eq!(after.len(), games.len() + 1);
+        assert_eq!(db.get_game(db.num_games() - 1).unwrap().white, "Kept");
     }
 
     fn frequency(db: &Database, ntype: NameType, name: &str) -> u32 {

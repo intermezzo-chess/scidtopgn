@@ -187,6 +187,41 @@ fn test_appending_writes_the_names_as_utf8() {
 }
 
 #[test]
+fn test_a_failed_replacement_keeps_the_changes_for_another_try() {
+    let temp = TempDir::new().unwrap();
+    let path = copy_of(temp.path(), "latin1");
+    let si4 = path.with_extension("si4");
+    let index = std::fs::read(&si4).unwrap();
+    let names = std::fs::read(path.with_extension("sn4")).unwrap();
+
+    let mut db = Database::open(&path).unwrap();
+    let before = all_pgn(&mut db);
+    let converted = db.nfile().namebase().converted_names().len();
+    assert!(converted > 0);
+    db.add_game(&parse_single_game(NEW_GAME).unwrap()).unwrap();
+
+    // The new files are written, then the missing index file stops them
+    // replacing the database's.
+    std::fs::remove_file(&si4).unwrap();
+    assert!(matches!(db.flush(), Err(Error::Io(_))));
+    assert_eq!(std::fs::read(path.with_extension("sn4")).unwrap(), names);
+    assert_eq!(files_in(temp.path()), ["latin1.sg4", "latin1.sn4"]);
+    assert_eq!(db.nfile().namebase().converted_names().len(), converted);
+    assert!(db.index().is_dirty());
+
+    std::fs::write(&si4, index).unwrap();
+    db.flush().unwrap();
+    assert_eq!(db.nfile().namebase().converted_names(), []);
+    assert!(!db.index().is_dirty());
+    db.close().unwrap();
+
+    assert_names_written_as_utf8(&path);
+    let mut db = Database::open(&path).unwrap();
+    assert_eq!(all_pgn(&mut db)[..before.len()], before);
+    assert_eq!(db.num_games() as usize, before.len() + 1);
+}
+
+#[test]
 fn test_appending_merges_names_stored_two_ways() {
     let temp = TempDir::new().unwrap();
     let path = copy_of(temp.path(), "mixed");
