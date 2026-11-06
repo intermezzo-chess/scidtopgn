@@ -1,4 +1,4 @@
-use scidtopgn::{parse_pgn, parse_single_game, Game, GameResult};
+use scidtopgn::{parse_pgn, parse_single_game, Date, Game, GameMove, GameResult};
 
 #[test]
 fn test_parse_simple_pgn() {
@@ -64,6 +64,13 @@ fn test_parse_with_comments() {
 
     let game = parse_single_game(pgn).expect("Failed to parse PGN");
     assert_eq!(game.event, "Test");
+    assert_eq!(sans(&game), ["e4", "e5"]);
+    let comments: Vec<(&str, &str)> = game
+        .moves
+        .iter()
+        .filter_map(|node| Some((node.san.as_str(), node.comment.as_deref()?)))
+        .collect();
+    assert_eq!(comments, [("e4", "This is a comment")]);
 }
 
 #[test]
@@ -81,10 +88,20 @@ fn test_parse_castling() {
 
     let game = parse_single_game(pgn).expect("Failed to parse PGN");
     assert_eq!(game.event, "Test");
+    assert_eq!(sans(&game).len(), 19);
+    assert_eq!(sans(&game).last().unwrap(), "O-O");
+    let castle = game.moves.iter().find(|node| node.san == "O-O").unwrap();
+    assert_eq!(
+        castle.move_data,
+        Some(GameMove::Move(Move::Castle {
+            king: Square::E1,
+            rook: Square::H1,
+        }))
+    );
 }
 
 #[test]
-fn test_game_roundtrip() {
+fn test_game_export_writes_its_headers_and_result() {
     let mut game = Game::new();
     game.event = "Test Event".to_string();
     game.site = "Test Site".to_string();
@@ -92,15 +109,97 @@ fn test_game_roundtrip() {
     game.black = "Black Player".to_string();
     game.result = GameResult::Draw;
 
-    let pgn = game.to_pgn();
-
-    assert!(pgn.contains("[Event \"Test Event\"]"));
-    assert!(pgn.contains("[White \"White Player\"]"));
-    assert!(pgn.contains("[Black \"Black Player\"]"));
-    assert!(pgn.contains("1/2-1/2"));
+    assert_eq!(
+        game.to_pgn(),
+        "[Event \"Test Event\"]\n\
+         [Site \"Test Site\"]\n\
+         [Date \"????.??.??\"]\n\
+         [Round \"?\"]\n\
+         [White \"White Player\"]\n\
+         [Black \"Black Player\"]\n\
+         [Result \"1/2-1/2\"]\n\
+         \n\
+         1/2-1/2\n"
+    );
 }
 
-use scidtopgn::shakmaty::{Color, Position};
+const ROUND_TRIP_FEN: &str = "r1bqkbnr/pppp1ppp/2n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3";
+
+/// A game with every kind of state PGN holds, as export writes it.
+fn round_trip_pgn() -> String {
+    format!(
+        "[Event \"The Event\"]\n\
+         [Site \"The Site\"]\n\
+         [Date \"2024.01.15\"]\n\
+         [Round \"7\"]\n\
+         [White \"White, A\"]\n\
+         [Black \"Black, B\"]\n\
+         [Result \"1/2-1/2\"]\n\
+         [WhiteElo \"2500\"]\n\
+         [BlackElo \"2400\"]\n\
+         [ECO \"C60\"]\n\
+         [EventDate \"2024.01.01\"]\n\
+         [Annotator \"Someone\"]\n\
+         [SetUp \"1\"]\n\
+         [FEN \"{ROUND_TRIP_FEN}\"]\n\
+         \n\
+         3... a6 {{Morphy}} (3... Nf6 !? 4. O-O) 4. Ba4 ! Nf6\n\
+         1/2-1/2\n"
+    )
+}
+
+fn assert_round_trip_state(game: &Game) {
+    assert!(game.warnings.is_empty(), "{:?}", game.warnings);
+    assert_eq!(game.event, "The Event");
+    assert_eq!(game.site, "The Site");
+    assert_eq!(game.date, Date::new(2024, 1, 15).unwrap());
+    assert_eq!(game.round, "7");
+    assert_eq!(game.white, "White, A");
+    assert_eq!(game.black, "Black, B");
+    assert_eq!(game.result, GameResult::Draw);
+    assert_eq!(game.white_elo, Some(2500));
+    assert_eq!(game.black_elo, Some(2400));
+    assert_eq!(game.eco.as_deref(), Some("C60"));
+    assert_eq!(game.event_date, Some(Date::new(2024, 1, 1).unwrap()));
+    assert_eq!(game.find_tag("Annotator").unwrap(), "Someone");
+
+    let start = game.start_position.clone().expect("the game has a setup");
+    assert_eq!(
+        Fen::from_position(&start, EnPassantMode::Legal).to_string(),
+        ROUND_TRIP_FEN
+    );
+
+    assert_eq!(sans(game), ["a6", "Ba4", "Nf6"]);
+    let a6 = game.moves.iter().find(|node| node.san == "a6").unwrap();
+    assert_eq!(a6.comment.as_deref(), Some("Morphy"));
+    let ba4 = game.moves.iter().find(|node| node.san == "Ba4").unwrap();
+    assert_eq!(ba4.nags, [1]);
+
+    // The variation of 3...a6.
+    assert_eq!(a6.num_variations, 1);
+    let first = game.moves[a6.var_child.unwrap()].next.unwrap();
+    assert_eq!(game.moves[first].san, "Nf6");
+    assert_eq!(game.moves[first].nags, [5]);
+    let second = game.moves[first].next.unwrap();
+    assert_eq!(game.moves[second].san, "O-O");
+}
+
+#[test]
+fn test_pgn_round_trip_keeps_the_game_state() {
+    let pgn = round_trip_pgn();
+    let game = parse_single_game(&pgn).unwrap();
+    assert_round_trip_state(&game);
+
+    let exported = game.to_pgn();
+    assert_eq!(exported, pgn);
+
+    let reimported = parse_single_game(&exported).unwrap();
+    assert_round_trip_state(&reimported);
+    assert_eq!(reimported.to_pgn(), pgn);
+}
+
+use scidtopgn::shakmaty::fen::Fen;
+use scidtopgn::shakmaty::{Color, EnPassantMode, Move, Position, Square};
 use scidtopgn::{Error, PgnParser, PgnWarningKind, RatingType};
 
 fn pgn_game(tags: &str, movetext: &str) -> String {

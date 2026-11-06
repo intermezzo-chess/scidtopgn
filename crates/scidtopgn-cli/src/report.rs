@@ -283,9 +283,11 @@ mod tests {
             file: File::open(&path).unwrap(),
             failed: Cell::new(false),
         };
-        let reporter = Reporter::new(Verbosity::Normal, true, Some(log));
+        let mut reporter = Reporter::new(Verbosity::Normal, true, Some(log));
         reporter.warn(format_args!("lost"));
         assert!(reporter.log_failed());
+        // Any further write now succeeds, so it would change the file.
+        reporter.log.as_mut().unwrap().file = OpenOptions::new().append(true).open(&path).unwrap();
         reporter.warn(format_args!("also lost"));
         assert!(reporter.log_failed());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "kept\n");
