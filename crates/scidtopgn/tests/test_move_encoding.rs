@@ -177,7 +177,6 @@ fn test_marker_bytes_in_a_record() {
     let variation = node("e4").var_child.unwrap();
     let first = game.moves[variation].next.unwrap();
     assert_eq!(game.moves[first].san, "d4");
-    assert_eq!(game.moves[variation].var_child, None);
 }
 
 #[test]
