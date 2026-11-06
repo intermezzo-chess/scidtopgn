@@ -296,12 +296,29 @@ mod tests {
     #[test]
     fn test_date_add_months() {
         let date = Date::new(2022, 6, 15).unwrap();
-        let new_date = date.add_months(3);
-        assert_eq!(new_date.month(), 9);
+        assert_eq!(date.add_months(3), Date::new(2022, 9, 15).unwrap());
+        assert_eq!(date.add_months(8), Date::new(2023, 2, 15).unwrap());
 
-        let new_date = date.add_months(8);
-        assert_eq!(new_date.year(), 2023);
-        assert_eq!(new_date.month(), 2);
+        let date = Date::new(2022, 12, 15).unwrap();
+        assert_eq!(date.add_months(1), Date::new(2023, 1, 15).unwrap());
+    }
+
+    #[test]
+    fn test_date_add_months_keeps_the_day() {
+        // An unknown day stays unknown.
+        let date = Date::new(2022, 6, 0).unwrap();
+        assert_eq!(date.add_months(3), Date::new(2022, 9, 0).unwrap());
+        assert_eq!(date.add_months(8), Date::new(2023, 2, 0).unwrap());
+
+        // As in SCID, the day isn't limited to the new month's length.
+        let date = Date::new(2022, 1, 31).unwrap();
+        assert_eq!(date.add_months(1), Date::new(2022, 2, 31).unwrap());
+    }
+
+    #[test]
+    fn test_date_add_months_past_the_last_year() {
+        let date = Date::new(YEAR_MAX, 12, 15).unwrap();
+        assert_eq!(date.add_months(1), Date::ZERO);
     }
 
     #[test]

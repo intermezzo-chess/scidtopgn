@@ -372,4 +372,38 @@ mod tests {
         bb.put_byte(2).unwrap();
         assert_eq!(bb.as_slice(), [2]);
     }
+
+    #[test]
+    fn test_provide_external_reads_replacement_from_the_start() {
+        // Longer than, shorter than, and empty compared with the 3 bytes read.
+        let replacements: [&[u8]; 3] = [&[10, 11, 12, 13, 14, 15], &[10, 11], &[]];
+        for replacement in replacements {
+            let mut bb = ByteBuffer::from_slice(&[1, 2, 3, 4, 5]);
+            for byte in [1, 2, 3] {
+                assert_eq!(bb.get_byte().unwrap(), byte);
+            }
+
+            bb.provide_external(replacement);
+            assert_eq!(bb.position(), 0);
+            assert_eq!(bb.len(), replacement.len());
+            assert_eq!(bb.as_slice(), replacement);
+
+            for &byte in replacement {
+                assert_eq!(bb.get_byte().unwrap(), byte);
+            }
+            assert!(bb.get_byte().is_err());
+        }
+    }
+
+    #[test]
+    fn test_provide_external_makes_a_writable_buffer_read_only() {
+        let mut bb = ByteBuffer::new();
+        bb.put_byte(1).unwrap();
+        bb.put_byte(2).unwrap();
+        assert_eq!(bb.get_byte().unwrap(), 1);
+
+        bb.provide_external(&[3]);
+        assert!(matches!(bb.put_byte(0), Err(Error::BufferFull)));
+        assert_eq!(bb.as_slice(), [3]);
+    }
 }
