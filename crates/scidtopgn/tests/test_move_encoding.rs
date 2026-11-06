@@ -93,7 +93,7 @@ fn test_special_byte_detection() {
     }
     assert_eq!(MARKERS, [11, 12, 13, 14, 15]);
 
-    for byte in [0, 1, 10, 0x10, 0xA0] {
+    for byte in [0, 1, 10, 0x10, 0xA0, 0x1B, 0xAF] {
         assert!(
             !MARKERS.contains(&byte),
             "0x{byte:02X} shouldn't be a marker"
@@ -101,26 +101,82 @@ fn test_special_byte_detection() {
     }
 }
 
-#[test]
-fn test_move_byte_detection() {
-    let move_bytes = [
-        0x00, 0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80, 0x90, 0xA0,
-    ];
-    for byte in move_bytes {
-        let (_, value) = parse_move_byte(byte);
-        assert!(value < ENCODE_NAG, "0x{byte:02X} should be a move byte");
-    }
+/// Decodes a record with no tags, the standard start, and `body`.
+fn decode_body(body: &[u8]) -> Game {
+    let mut record = vec![0x00, 0x00];
+    record.extend(body);
+    let mut game = Game::new();
+    game.decode(&mut ByteBuffer::from_slice(&record), GAME_DECODE_COMMENTS)
+        .unwrap();
+    game
+}
 
-    let special_bytes = [
-        0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0xAF,
-    ];
-    for byte in special_bytes {
-        let (_, value) = parse_move_byte(byte);
-        assert!(
-            value >= ENCODE_NAG,
-            "0x{byte:02X} should NOT be a move byte"
-        );
+/// The SAN of the main line's moves.
+fn main_line(game: &Game) -> Vec<&str> {
+    let mut sans = Vec::new();
+    let mut idx = game.first_move;
+    while let Some(i) = idx {
+        if game.moves[i].move_data.is_some() {
+            sans.push(game.moves[i].san.as_str());
+        }
+        idx = game.moves[i].next;
     }
+    sans
+}
+
+#[test]
+fn test_moves_with_a_marker_like_low_nibble() {
+    // Only piece 0 has marker bytes, so another piece's value of 11 to 15 is
+    // a move. Here, the c-pawn's double step.
+    assert_eq!(encode_game(&["c2c4"]), [0xAF]);
+    assert_eq!(main_line(&decode_body(&[0xAF, 0x0F])), ["c4"]);
+
+    // Piece 1, the rook on a1, moves along an open file.
+    let open_file = [
+        "a2a4", "b7b5", "a4b5", "a7a6", "b5a6", "c8b7", "a6b7", "h7h6",
+    ];
+    for (uci, byte, san) in [
+        ("a1a4", 0x1B, "Ra4"),
+        ("a1a5", 0x1C, "Ra5"),
+        ("a1a6", 0x1D, "Ra6"),
+        ("a1a7", 0x1E, "Ra7"),
+        ("a1a8", 0x1F, "Rxa8"),
+    ] {
+        let mut moves = open_file.to_vec();
+        moves.push(uci);
+        let mut body = encode_game(&moves);
+        assert_eq!(body.last(), Some(&byte), "{uci}");
+
+        body.push(0x0F);
+        let game = decode_body(&body);
+        assert_eq!(main_line(&game).len(), moves.len(), "{uci}");
+        assert_eq!(main_line(&game).last(), Some(&san), "{uci}");
+    }
+}
+
+#[test]
+fn test_marker_bytes_in_a_record() {
+    let main = encode_game(&["e2e4", "e7e5"]);
+    let d4 = encode_game(&["d2d4"]);
+    // 1.e4 with a NAG, a comment, and the variation 1.d4, then 1...e5 and the
+    // end of the game. The comment's text follows that.
+    let mut body = vec![main[0], 0x0B, 1, 0x0C, 0x0D, d4[0], 0x0E, main[1], 0x0F];
+    body.extend(b"note\0");
+
+    let game = decode_body(&body);
+    assert_eq!(main_line(&game), ["e4", "e5"]);
+    let node = |san: &str| game.moves.iter().find(|node| node.san == san).unwrap();
+    assert_eq!(node("e4").nags, [1]);
+    assert_eq!(node("e4").comment.as_deref(), Some("note"));
+    assert_eq!(node("e4").num_variations, 1);
+    assert!(node("d4").nags.is_empty());
+    assert_eq!(node("d4").comment, None);
+    assert!(node("e5").nags.is_empty());
+    assert_eq!(node("e5").comment, None);
+
+    let variation = node("e4").var_child.unwrap();
+    let first = game.moves[variation].next.unwrap();
+    assert_eq!(game.moves[first].san, "d4");
 }
 
 #[test]

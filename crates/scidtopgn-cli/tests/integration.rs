@@ -26,6 +26,7 @@ fn test_cli_count() {
         .output()
         .expect("Failed to run CLI");
 
+    assert!(output.status.success(), "--count should succeed");
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.contains("1 games"),
@@ -52,6 +53,7 @@ fn test_cli_output() {
         .output()
         .expect("Failed to run CLI");
 
+    assert!(output.status.success(), "export should succeed");
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("[Event \"47th ch-Bangahbandhu 2022\"]"));
     assert!(stdout.contains("[White \"Hossain, Enam\"]"));
@@ -66,6 +68,7 @@ fn test_cli_five_games() {
         .output()
         .expect("Failed to run CLI");
 
+    assert!(output.status.success(), "export should succeed");
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     let game_count = stdout.matches("[Event \"").count();
@@ -287,6 +290,15 @@ fn test_cli_pgn_roundtrip() {
     assert!(exported.contains("[ECO \"B36f\"]"));
     assert!(exported.contains("1. e4 c5"));
     assert!(exported.contains("19. Nxe6"));
+
+    let source = std::fs::read_to_string(get_workspace_root().join("tests/data/one.pgn"))
+        .expect("Failed to read one.pgn");
+    let source = scidtopgn::parse_single_game(&source).expect("Failed to parse one.pgn");
+    let reread = scidtopgn::parse_single_game(&exported).expect("Failed to parse exported");
+    assert_eq!(reread.result, scidtopgn::GameResult::Draw);
+    assert_eq!(reread.white_elo, Some(2372));
+    assert_eq!(reread.num_half_moves, source.num_half_moves);
+    assert_eq!(reread.to_pgn(), source.to_pgn());
 }
 
 // Byte offset of the low byte of an index entry's big-endian flags field
@@ -461,6 +473,7 @@ fn test_cli_import_five_games() {
     );
 
     let exported = cli().arg(&db_path).output().expect("Failed to run CLI");
+    assert!(exported.status.success());
     let source = std::fs::read_to_string(get_workspace_root().join("tests/data/five.pgn"))
         .expect("Failed to read five.pgn");
     let exported = String::from_utf8_lossy(&exported.stdout);
@@ -587,6 +600,7 @@ fn test_cli_import_warns_about_games_too_large_to_store() {
 
     let output = import("verbose", &["--verbose"]);
     let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
     assert!(stderr.contains("2 games imported, 2 skipped"), "{stderr}");
 
     let log = temp.path().join("import.log");
@@ -863,6 +877,7 @@ fn test_cli_import_keeps_text_before_games() {
 
         // The text is stored and exported as each game's first comment.
         let output = cli().arg(&db_path).output().expect("Failed to run CLI");
+        assert!(output.status.success());
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(
             stdout.contains(
@@ -928,6 +943,7 @@ fn test_cli_import_accepts_delimiters_attached_to_moves() {
         assert!(output.status.success(), "{mode}: {stderr}");
         assert!(!stderr.contains("Warning"), "{mode}: {stderr}");
         let exported = cli().arg(&db_path).output().expect("Failed to run CLI");
+        assert!(exported.status.success(), "{mode}");
         assert_eq!(
             main_lines(&String::from_utf8_lossy(&exported.stdout)),
             [["e4", "e5"], ["d4", "d5"]],
@@ -973,6 +989,7 @@ fn test_cli_import_prints_warnings_and_keeps_the_game() {
 
         // The castle is exported like any other.
         let exported = cli().arg(&db_path).output().expect("Failed to run CLI");
+        assert!(exported.status.success());
         let exported = String::from_utf8_lossy(&exported.stdout);
         assert!(exported.contains("6. O-O"), "{exported}");
     }
@@ -1005,6 +1022,7 @@ fn test_cli_import_reads_text_that_isnt_utf8_as_windows_1252() {
             );
 
             let exported = cli().arg(&db_path).output().expect("Failed to run CLI");
+            assert!(exported.status.success(), "{mode} {name}");
             let exported = String::from_utf8(exported.stdout).expect("Output should be UTF-8");
             assert!(
                 exported.contains("[Event \"événement\"]\n"),
@@ -1159,7 +1177,9 @@ fn test_cli_round_trip_keeps_annotations_and_variations() {
     );
 
     let exported = cli().arg(&db_path).output().expect("Failed to run CLI");
+    assert!(exported.status.success());
     let stdout = String::from_utf8_lossy(&exported.stdout);
+    assert!(stdout.contains("[Event \"x\"]\n"), "{stdout}");
     assert!(
         stdout.contains("1. e4 ! e5 {after e5} 2. Nf3 ? (2. f4 !?)\n*\n"),
         "{stdout}"
@@ -1340,6 +1360,7 @@ fn test_cli_count_includes_deleted_games() {
 
     for args in [&["--help"][..], &["export", "--help"]] {
         let output = cli().args(args).output().expect("Failed to run CLI");
+        assert!(output.status.success(), "{args:?}");
         let help = String::from_utf8_lossy(&output.stdout);
         assert!(
             help.contains(
@@ -1978,6 +1999,7 @@ fn test_cli_quiet_hides_errors() {
         assert_eq!(stdout.matches("[Event \"").count(), 5);
     }
     for output in export_outputs(five, &["--count", "--quiet"]) {
+        assert!(output.status.success());
         assert!(output.stderr.is_empty());
         assert_eq!(String::from_utf8_lossy(&output.stdout), "5 games\n");
     }
@@ -1985,6 +2007,7 @@ fn test_cli_quiet_hides_errors() {
         .args(["info", "tests/data/five", "--quiet"])
         .output()
         .expect("Failed to run CLI");
+    assert!(output.status.success());
     assert!(output.stderr.is_empty());
     assert!(String::from_utf8_lossy(&output.stdout).starts_with("Total games: 5\n"));
 

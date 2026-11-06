@@ -52,28 +52,112 @@ fn test_five_database() {
     }
 }
 
+/// Asserts that `after` has the tags, moves, and annotations of `before`.
+fn assert_same_game(before: &scidtopgn::Game, after: &scidtopgn::Game) {
+    assert_eq!(after.white, before.white);
+    assert_eq!(after.black, before.black);
+    assert_eq!(after.event, before.event);
+    assert_eq!(after.site, before.site);
+    assert_eq!(after.round, before.round);
+    assert_eq!(after.date, before.date);
+    assert_eq!(after.event_date, before.event_date);
+    assert_eq!(after.result, before.result);
+    assert_eq!(after.white_elo, before.white_elo);
+    assert_eq!(after.black_elo, before.black_elo);
+    assert_eq!(after.white_rating_type, before.white_rating_type);
+    assert_eq!(after.black_rating_type, before.black_rating_type);
+    assert_eq!(after.eco, before.eco);
+    assert_eq!(after.num_half_moves, before.num_half_moves);
+
+    let tags = |game: &scidtopgn::Game| -> Vec<(String, String)> {
+        game.tags
+            .iter()
+            .map(|tag| (tag.name.clone(), tag.value.clone()))
+            .collect()
+    };
+    assert_eq!(tags(after), tags(before));
+
+    let nodes = |game: &scidtopgn::Game| -> Vec<_> {
+        game.moves
+            .iter()
+            .map(|node| {
+                (
+                    node.move_data,
+                    node.san.clone(),
+                    node.comment.clone(),
+                    node.nags.clone(),
+                    node.marker,
+                    node.num_variations,
+                )
+            })
+            .collect()
+    };
+    assert_eq!(nodes(after), nodes(before));
+
+    assert_eq!(after.to_pgn(), before.to_pgn());
+}
+
 #[test]
 fn test_roundtrip() {
     let workspace = get_workspace_root();
-    let db1_path = format!("{}/tests/data/one", workspace);
+    // Text from each fixture's games, so that the games compared have them.
+    for (name, count, expected) in [
+        (
+            "one",
+            1,
+            &[
+                "[White \"Hossain, Enam\"]",
+                "[Result \"1/2-1/2\"]",
+                "[WhiteElo \"2372\"]",
+                "[ECO \"B36f\"]",
+                "19. Nxe6",
+            ][..],
+        ),
+        (
+            "annotated",
+            2,
+            &[
+                "{Intro}",
+                "{after e5}",
+                "(2. f4 !? {gambit}",
+                "[FEN \"r1bqkbnr/pppp1ppp/2n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3\"]",
+                "3... a6 {Morphy}",
+            ],
+        ),
+    ] {
+        let db1_path = format!("{workspace}/tests/data/{name}");
+        let mut db1 =
+            scidtopgn::Database::open_read_only(&db1_path).expect("Failed to open database");
+        let games: Vec<_> = db1
+            .games()
+            .collect::<Result<_, _>>()
+            .expect("Failed to read games");
+        assert_eq!(games.len(), count, "{name}");
 
-    let mut db1 = scidtopgn::Database::open(&db1_path).expect("Failed to open database");
-    let game1 = db1.get_game(0).expect("Failed to get game");
+        let temp = TempDir::new().expect("Failed to create temp dir");
+        let db2_path = temp.path().join("test");
+        let mut db2 = scidtopgn::Database::create(&db2_path).expect("Failed to create database");
+        for game in &games {
+            db2.add_game(game).expect("Failed to add game");
+        }
+        db2.flush().expect("Failed to flush");
 
-    let temp = TempDir::new().expect("Failed to create temp dir");
-    let db2_path = temp.path().join("test");
+        let mut db3 =
+            scidtopgn::Database::open(&db2_path).expect("Failed to open roundtrip database");
+        let reread: Vec<_> = db3
+            .games()
+            .collect::<Result<_, _>>()
+            .expect("Failed to read roundtrip games");
+        assert_eq!(reread.len(), count, "{name}");
 
-    let mut db2 = scidtopgn::Database::create(&db2_path).expect("Failed to create database");
-    db2.add_game(&game1).expect("Failed to add game");
-    db2.flush().expect("Failed to flush");
-
-    let mut db3 = scidtopgn::Database::open(&db2_path).expect("Failed to open roundtrip database");
-    let game2 = db3.get_game(0).expect("Failed to get roundtrip game");
-
-    assert_eq!(game1.white, game2.white);
-    assert_eq!(game1.black, game2.black);
-    assert_eq!(game1.event, game2.event);
-    assert_eq!(game1.result, game2.result);
+        for (before, after) in games.iter().zip(&reread) {
+            assert_same_game(before, after);
+        }
+        let pgn: String = reread.iter().map(|game| game.to_pgn()).collect();
+        for text in expected {
+            assert!(pgn.contains(text), "{name} should have {text}: {pgn}");
+        }
+    }
 }
 
 #[test]
