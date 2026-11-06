@@ -207,8 +207,8 @@ pub fn date_encode_from_string(s: &str) -> u32 {
 /// are valid. The day isn't checked against the month.
 ///
 /// A number too large for a `u32` is invalid. SCID gives different answers
-/// for these depending on the platform: on 64-bit macOS and Linux it cuts the
-/// number to 32 bits and accepts `4294967301.01.01` as year 5.
+/// for these depending on the platform: on 64-bit macOS and Linux it cuts a
+/// number below 2^64 to 32 bits, and so accepts `4294967301.01.01` as year 5.
 pub fn date_valid_string(s: &str) -> bool {
     let parts: Vec<&str> = s.split('.').collect();
     if parts.len() > 3 {
@@ -366,6 +366,7 @@ mod tests {
             "2022.13.01",
             "2022.12.32",
             "2048.01.01",
+            "4294967295.01.01",
             // Characters
             "2022.1?.01",
             "2022.Jan.01",
@@ -375,7 +376,6 @@ mod tests {
             "2022.12.１９",
             "2022\0.12",
             // Too large for a u32, and out of range in SCID too
-            "4294967295.01.01",
             "99999999999.01.01",
             "18446744073709551616.01.01",
             // Too large for a u32, but in range once SCID cuts it to 32 bits
