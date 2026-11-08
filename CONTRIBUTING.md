@@ -141,9 +141,6 @@ cmake ..
 make
 ```
 
-To build the C++ unit tests, download `doctest.h` first. The steps are in
-[scid-cpp/README.md](scid-cpp/README.md).
-
 ## Releasing
 
 See [docs/RELEASING.md](docs/RELEASING.md).
