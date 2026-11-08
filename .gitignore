@@ -2,6 +2,9 @@
 /target
 /*/target
 
+# C++ reference converter build directory
+/scid-cpp/build/
+
 # Cargo lock file (keep for binary crates, ignore for libraries)
 # Cargo.lock  # Uncomment if pure library
 

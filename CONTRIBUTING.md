@@ -120,7 +120,7 @@ encoding. To change it:
 1. Edit `edge.pgn`.
 2. Delete `edge.si4`, `edge.sn4`, and `edge.sg4`.
 3. From the repository root, run the converter (see below) as
-   `scidtopgn tests/data/edge tests/data/edge.pgn`.
+   `scid-cpp/build/scidtopgn tests/data/edge tests/data/edge.pgn`.
 4. Update the expected movetext in `crates/scidtopgn/tests/test_interop.rs`.
    It is python-chess's export of `edge.pgn`, with variations and without
    line wrapping.
@@ -140,6 +140,9 @@ mkdir -p build && cd build
 cmake ..
 make
 ```
+
+The build needs CMake 3.15 or later, a C++17 compiler, and zlib. It writes the
+converter to `scid-cpp/build/scidtopgn`, which is not the Rust `scidtopgn` CLI.
 
 ## Releasing
 

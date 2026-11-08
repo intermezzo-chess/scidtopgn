@@ -65,9 +65,9 @@ set(SCID_HEADERS
 add_library(scid_core STATIC ${SCID_CORE_SOURCES})
 
 # Main executable
-set(SCID_MAIN_SOURCES ${SCID_SOURCES_DIR}/src/main.cpp)
-add_executable(scidtopgn ${SCID_MAIN_SOURCES} scid_core)
-target_link_libraries(scidtopgn PRIVATE ${CMAKE_DL_LIBS})
+set(SCID_MAIN_SOURCES ${CMAKE_SOURCE_DIR}/src/main.cpp)
+add_executable(scidtopgn ${SCID_MAIN_SOURCES})
+target_link_libraries(scidtopgn PRIVATE scid_core ${CMAKE_DL_LIBS})
 
 # Link zlib for compression
 find_package(ZLIB REQUIRED)
@@ -86,4 +86,6 @@ set(CMAKE_BUILD_TYPE Release)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(scidtopgn PRIVATE -Wall -Wextra)
     target_compile_options(scidtopgn PRIVATE -Wno-register)
+    # SCID's sources use `register`, which C++17 removed and Clang rejects.
+    target_compile_options(scid_core PRIVATE -Wno-register)
 endif()
