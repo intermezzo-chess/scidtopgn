@@ -87,8 +87,3 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(scidtopgn PRIVATE -Wall -Wextra)
     target_compile_options(scidtopgn PRIVATE -Wno-register)
 endif()
-
-# Optional: Add tests
-if(BUILD_TESTS)
-    add_subdirectory(tests)
-endif()

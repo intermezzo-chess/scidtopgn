@@ -2,6 +2,8 @@
 
 A standalone C++ CLI tool that converts SCID chess database files to PGN format and vice versa.
 
+It is kept as the behavioral reference for the Rust implementation and for generating the fixtures in `tests/data/`. It is not a supported product and has no test suite.
+
 ## Features
 
 - ✅ Reads SCID database files (.si4, .sn4, .sg4)
@@ -58,16 +60,6 @@ scidtopgn newdb games.pgn
 
 ## Building
 
-### Initial Setup (One-time)
-
-From the project root directory:
-
-```bash
-# Download doctest (single-header test framework)
-cd scid-cpp/tests
-curl -L https://github.com/doctest/doctest/releases/download/v2.4.11/doctest.h -o doctest.h
-```
-
 ### Build with CMake
 
 ```bash
@@ -105,7 +97,6 @@ This installs `scidtopgn` executable to `/usr/local/bin`.
 - CMake 3.15 or later
 - SCID source files (in scid/ directory)
 - zlib (for compression support)
-- doctest (for unit tests, optional)
 
 ## Project Structure
 
@@ -118,46 +109,8 @@ scid-cpp/
 │   ├── index.cpp/h   # Index file handling
 │   ├── namebase.cpp/h # Name file handling
 │   └── ...          # Other SCID files
-├── tests/            # Unit tests
-│   ├── CMakeLists.txt
-│   ├── README.md         # Test documentation
-│   ├── doctest.h        # Test framework
-│   ├── run_tests.sh     # Test runner
-│   ├── test_bytebuf.cpp
-│   ├── test_date.cpp
-│   ├── test_namebase.cpp
-│   └── test_pgn.cpp
 ├── CMakeLists.txt   # Build configuration
 └── README.md           # This file
-```
-
-## Testing
-
-### Run All Tests
-
-```bash
-cd scid-cpp/tests
-./run_tests.sh
-```
-
-### Run Specific Test
-
-```bash
-cd scid-cpp/tests
-./test_bytebuf
-./test_date
-./test_namebase
-./test_pgn
-```
-
-### Run with CMake Test
-
-```bash
-cd scid-cpp
-mkdir -p build && cd build
-cmake ..
-make
-ctest --verbose
 ```
 
 ## PGN Features
@@ -185,101 +138,6 @@ The tool outputs full PGN format including:
 - Pawn promotions: e8=Q
 - En passant: exd6
 - Non-standard starting positions: [FEN "..."]
-
-## Unit Tests
-
-The project includes a comprehensive unit test suite covering:
-
-### Test Files
-
-| Test File | Description | Test Count |
-|-----------|-------------|------------|
-| `test_bytebuf.cpp` | ByteBuffer operations (PutByte, GetByte, buffer boundaries) | ~40 |
-| `test_date.cpp` | Date encoding/decoding (absolute and relative formats) | ~20 |
-| `test_namebase.cpp` | Name management (add, lookup, duplicates, special chars) | ~25 |
-| `test_pgn.cpp` | PGN format validation (tags, moves, annotations) | ~20 |
-
-### Test Coverage
-
-- **Critical buffer operations** (ByteBuffer read/write, boundaries, overflow)
-- **Date encoding accuracy** (absolute dates, leap years, month/day ranges)
-- **Name management** (adding, lookup, case sensitivity, special characters)
-- **PGN format validation** (tags, moves, castling, promotions, annotations)
-
-### Running Tests
-
-```bash
-# Build tests
-cd scid-cpp
-mkdir -p build && cd build
-cmake ..
-make
-
-# Run tests
-cd ../tests
-./run_tests.sh
-
-# Run with CMake
-cd build
-ctest --verbose
-```
-
-### Test Categories
-
-1. **ByteBuffer Tests**
-   - Basic read/write operations
-   - Buffer boundary checking
-   - Multi-byte operations (Put2Bytes, Put3Bytes, Put4Bytes)
-   - String operations (PutTerminatedString, PutFixedString)
-   - Buffer navigation (BackToStart, Skip)
-   - Memory operations (CopyTo, CopyFrom)
-
-2. **Date Tests**
-   - Absolute date encoding (year << 9 | month << 5 | day)
-   - Date bounds checking (valid ranges)
-   - Leap year handling
-   - Month validation (1-12)
-   - Day validation (1-31)
-   - Year range (0-2047)
-
-3. **NameBase Tests**
-   - Name adding (players, events, sites, rounds)
-   - Name lookup by ID
-   - Duplicate name detection
-   - Special characters (hyphens, apostrophes)
-   - Case sensitivity
-   - Unicode handling
-
-4. **PGN Tests**
-   - PGN header tags parsing
-   - Move notation (SAN format)
-   - Castling (O-O, O-O-O)
-   - Pawn promotions (e8=Q, etc.)
-   - Annotations (comments, NAG symbols)
-   - Variations (move alternatives)
-   - Round numbers
-   - Check and mate symbols
-   - SCID file extensions
-
-### Dependencies
-
-- **Required**: C++17, CMake 3.15, zlib
-- **Optional**: doctest (for unit tests)
-
-## CI/CD Integration
-
-For continuous integration, the test suite can be integrated with GitHub Actions or other CI systems.
-
-### Test Output
-
-All tests should pass with no failures. The test suite provides:
-
-- ✅ Comprehensive coverage of core SCID operations
-- ✅ Validation of date/time encoding logic
-- ✅ Name management accuracy
-- ✅ PGN format compliance
-- ✅ Buffer operation reliability
-- ✅ Edge case handling
 
 ## Troubleshooting
 
@@ -318,7 +176,6 @@ The rest of `scid-cpp/` is part of scidtopgn and licensed under GPL-3.0-or-later
 
 - SCID: Shane's Chess Information Database
 - PGN format: Portable Game Notation Standard
-- doctest: Lightweight C++ test framework
 - CMake: Cross-platform build system
 - zlib: Compression library
 
@@ -340,18 +197,8 @@ make clean
 make
 ```
 
-## Testing
+## Round-Trip Example
 
-### Run Unit Tests:
-```bash
-cd scid-cpp/tests
-mkdir -p build && cd build
-cmake ..
-make
-./run_tests.sh
-```
-
-### Test with Sample PGN:
 ```bash
 # Create test PGN file
 cat > /tmp/test.pgn << 'EOF'
@@ -395,56 +242,9 @@ scid-cpp/
 │   └── ...                # Other SCID modules
 ├── src/                     # Tool source code
 │   └── main.cpp             # CLI entry point
-├── tests/                   # Unit tests
-│   ├── test_bytebuf.cpp     # ByteBuffer tests
-│   ├── test_date.cpp        # Date encoding tests
-│   ├── test_namebase.cpp     # Name management tests
-│   ├── test_pgn.cpp         # PGN format tests
-│   ├── CMakeLists.txt       # Test build config
-│   ├── README.md             # Test documentation
-│   ├── run_tests.sh          # Test runner script
-│   └── doctest.h            # Test framework
 ├── build/                   # Build output (created by CMake)
 ├── CMakeLists.txt          # Build configuration
 ├── README.md                 # This file
-```
-
-## Unit Tests
-
-Comprehensive unit test suite covering:
-
-### Test Categories:
-1. **ByteBuffer Operations** (`test_bytebuf.cpp`)
-   - Basic read/write operations
-   - Buffer boundary checking
-   - Multi-byte operations (Put2Bytes, Put3Bytes, Put4Bytes)
-   - String operations
-   - Memory operations
-
-2. **Date Encoding** (`test_date.cpp`)
-   - Absolute date encoding/decoding
-   - Date bounds validation
-   - Leap year handling
-   - Month/day range checking
-
-3. **NameBase Operations** (`test_namebase.cpp`)
-   - Name adding and lookup
-   - Duplicate detection
-   - Special character handling
-   - Case sensitivity
-   - Prefix compression simulation
-
-4. **PGN Format** (`test_pgn.cpp`)
-   - PGN header parsing
-   - Move notation (SAN)
-   - Castling, promotions, annotations
-   - Variations
-   - SCID file format validation
-
-### Running Tests:
-```bash
-cd scid-cpp/tests
-./run_tests.sh
 ```
 
 ## Troubleshooting
@@ -512,4 +312,3 @@ The rest of `scid-cpp/` is part of scidtopgn and licensed under GPL-3.0-or-later
 
 - SCID: Shane's Chess Information Database by Shane Hudson
 - PGN format: Portable Game Notation Standard
-- doctest: Test framework
