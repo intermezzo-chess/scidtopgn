@@ -200,12 +200,18 @@ pub fn date_encode_from_string(s: &str) -> u32 {
     Date::from_string(s).raw()
 }
 
-/// Returns whether `s` looks like a PGN date: three parts separated by
-/// dots, each made of digits or of `?` but not both, with a year, month, and
-/// day no larger than [`YEAR_MAX`], 12, and 31.
+/// Returns whether `s` looks like a PGN date, as SCID's `date_ValidString`
+/// decides: at most three parts separated by dots, each empty or made of
+/// digits or of `?` but not both, with a year, month, and day no larger than
+/// [`YEAR_MAX`], 12, and 31. So `2022`, `2022..19`, and even an empty string
+/// are valid. The day isn't checked against the month.
+///
+/// A number too large for a `u32` is invalid. SCID gives different answers
+/// for these depending on the platform: on 64-bit macOS and Linux it cuts a
+/// number below 2^64 to 32 bits, and so accepts `4294967301.01.01` as year 5.
 pub fn date_valid_string(s: &str) -> bool {
     let parts: Vec<&str> = s.split('.').collect();
-    if parts.len() != 3 {
+    if parts.len() > 3 {
         return false;
     }
 
@@ -233,12 +239,8 @@ pub fn date_valid_string(s: &str) -> bool {
         if seen_question && seen_digit {
             return false;
         }
-        if seen_digit {
-            if let Ok(value) = part.parse::<u32>() {
-                if value > max_val {
-                    return false;
-                }
-            }
+        if seen_digit && !part.parse::<u32>().is_ok_and(|value| value <= max_val) {
+            return false;
         }
     }
 
@@ -323,15 +325,68 @@ mod tests {
 
     #[test]
     fn test_date_valid_string() {
-        assert!(date_valid_string("2022.12.19"));
-        assert!(date_valid_string("2022.??.??"));
-        assert!(date_valid_string("????.12.??"));
-        assert!(!date_valid_string("2022.13.01"));
-        assert!(!date_valid_string("2022.12.32"));
-        assert!(!date_valid_string("2022.12")); // Missing day part
-        assert!(!date_valid_string("2022.1?.01"));
-        assert!(!date_valid_string("2022.Jan.01"));
-        assert!(!date_valid_string("2048.01.01"));
+        for s in [
+            // Full dates and unknown parts
+            "2022.12.19",
+            "2022.??.??",
+            "????.12.??",
+            // Short forms
+            "2022",
+            "2022.12",
+            "2047",
+            "?",
+            "?.?",
+            // Empty parts
+            "",
+            ".",
+            "..",
+            "2022.",
+            "2022.12.",
+            "2022..19",
+            ".12.19",
+            // Ranges, where leading zeros don't make a number too large
+            "0.0.0",
+            "00000000002022.012.019",
+            "2047.12.31",
+            // Only ranges are checked, not the day against the month
+            "2022.02.31",
+        ] {
+            assert!(date_valid_string(s), "{s:?} should be valid");
+        }
+
+        for s in [
+            // Short forms out of range
+            "2022.13",
+            "2048",
+            // Too many parts
+            "...",
+            "2022.12.19.",
+            "2022.12.19.5",
+            // Ranges
+            "2022.13.01",
+            "2022.12.32",
+            "2048.01.01",
+            "4294967295.01.01",
+            // Characters
+            "2022.1?.01",
+            "2022.Jan.01",
+            " 2022",
+            "+2022",
+            "2022.12.1a",
+            "2022.12.１９",
+            "2022\0.12",
+            // Too large for a u32, and out of range in SCID too
+            "99999999999.01.01",
+            "18446744073709551616.01.01",
+            // Too large for a u32, but in range once SCID cuts it to 32 bits
+            // on 64-bit macOS and Linux
+            "4294967296.01.01",
+            "4294967301.01.01",
+            "2022.4294967301.01",
+            "2022.12.4294967327",
+        ] {
+            assert!(!date_valid_string(s), "{s:?} should be invalid");
+        }
     }
 
     #[test]
