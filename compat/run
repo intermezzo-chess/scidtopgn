@@ -62,6 +62,9 @@ if ! build; then
   exit 1
 fi
 target=${CARGO_TARGET_DIR:-$repo/target}
+# Cargo reads a relative CARGO_TARGET_DIR from the current directory, which
+# the scenarios change.
+[[ $target == /* ]] || target=$PWD/$target
 scidtopgn=$target/release/scidtopgn
 driver=$target/release/examples/compat_driver
 reference=$work/scid-cpp/scidtopgn
