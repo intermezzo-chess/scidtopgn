@@ -119,6 +119,11 @@ names() {
   grep '^N' "$1.dump" | sed -E 's/^N ([a-z]+) [0-9]+ /\1 /' | sort
 }
 
+# name_list DB: each name's type and name, without its frequency.
+name_list() {
+  names "$1" | sed -E 's/ freq=[0-9]+ / /'
+}
+
 # same_lines WHAT A B: the files A and B are the same.
 same_lines() {
   diff "$2" "$3" > "$2.diff" || die "$1 differ: $(sed -n 2p "$2.diff")"
@@ -314,9 +319,12 @@ s_update() {
   copy_db scid "$db"
   "$tcscid" "$tcl/search.tcl" "$db.positions" "$db" write-cache > /dev/null
   [[ -f $db.stc ]] || die "SCID vs. PC wrote no tree cache"
+  name_list scid > "$db.kept-names"
   if [[ $case == twice ]]; then
     same_names_game "$pgn" "$n" "$append_pgn" > "$db.first.pgn"
     "$driver" "$db" update "$n" "$db.first.pgn" 1
+    "$dump" "$db" > "$db.dump" || die "scid-dump checks fail after the first update"
+    name_list "$db" >> "$db.kept-names"
   fi
   "$driver" "$db" update "$n" "$repl" 1
   check_db "$db"
@@ -325,7 +333,12 @@ s_update() {
   entries "$db" > "$db.entries"
   entries "$db-scid" > "$db.expected-entries"
   same_lines "index entries" "$db.entries" "$db.expected-entries"
-  # Names the update left unused keep a frequency of 0, as in SCID (#72).
+  # Names the update left unused stay, with a frequency of 0, until the
+  # database is compacted, as in SCID (#72). scid-dump checked that each
+  # frequency equals the name's uses.
+  sort -u "$db.kept-names" > "$db.expected-kept-names"
+  name_list "$db" | sort -u | comm -23 "$db.expected-kept-names" - > "$db.lost-names"
+  [[ ! -s $db.lost-names ]] || die "the update removed names: $(head -n 1 "$db.lost-names")"
   names "$db" | grep -v ' freq=0 ' > "$db.names"
   names "$db-scid" > "$db.expected-names"
   same_lines "names" "$db.names" "$db.expected-names"
