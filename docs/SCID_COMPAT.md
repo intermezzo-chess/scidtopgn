@@ -90,14 +90,14 @@ Two fixtures are left out, because scidtopgn imports them differently from SCID 
 | `merge` | Merges `scid` and `names.pgn`'s SCID database | Its entries, names, and games read back match `scid+names`, and it has the same searches |
 | `delete` | Deletes the first, middle, and last games of a copy of `scid` | Its files are byte-identical to a copy in which SCID deleted the same games, and SCID reads the rest |
 | `undelete` | Deletes those games, then undeletes them | Its files are byte-identical to `scid`'s |
-| `update-same-names` | Replaces the middle game with other moves, keeping its tags | Its games read back, entries, and names match `pgnscid`'s database from the PGN with that game replaced, apart from game-file offsets and names left unused, and it has the same searches. Before the update, SCID writes its tree cache for the old and new positions, which must not give the old results |
+| `update-same-names` | Replaces the middle game with other moves, keeping its tags | Its games read back, entries, and names match `pgnscid`'s database from the PGN with that game replaced, apart from game-file offsets and names left unused. Every name it had before the update is still there, and it has the same searches. Before the update, SCID writes its tree cache for the old and new positions, which must not give the old results |
 | `update-new-names` | The same, with `names.pgn`'s first game | As above |
 | `update-long` | The same, with the 72 KB second game of `long.pgn` | As above |
 | `update-twice` | Replaces the same game twice | As above, for the second game |
 | `append`, `delete`, `update` on `latin1` and `mixed` | As above, on the repaired database | SCID reads it, every game keeps its names as [README.md](../README.md#names-that-arent-utf-8) describes, and the appended entries match `names.pgn`'s SCID database |
 | `self-check` | Nothing | The checks fail for a database whose half-move count and home-pawn data are zeroed, as before #55 |
 
-The empty input runs only `reference` through `merge`. An update leaves the names it no longer uses with a frequency of 0 until the database is compacted, as SCID does (#72).
+The empty input runs only `reference` through `merge`. An update must leave the names it no longer uses in the name file, with a frequency of 0, until the database is compacted, as SCID does (#72). For `update-twice`, that includes the names the first update added.
 
 ## CI
 
