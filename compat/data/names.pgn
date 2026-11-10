@@ -12,7 +12,9 @@ a5 15. f5 a4 16. Nbd4 exd4 17. Nxd4 b3 18. Kb1 bxc2+ 19. Nxc2 Bb3 20. axb3
 axb3 21. Na3 Ra4 22. Bb5 Rxa3 23. bxa3 Qa5 24. Qb2 1-0
 
 [Event "Open"]
+; A comment line between tags
 [Site "Zürich"]
+% An escape line between tags
 [Date "2026.11.10"]
 [Round "1"]
 [White "Nowak, Jan"]
