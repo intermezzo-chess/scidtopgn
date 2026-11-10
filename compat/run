@@ -168,33 +168,57 @@ num_games() {
 }
 
 # PGN games start at a tag line that follows movetext. pgn_numbered prints
-# each line of a PGN file with its game's number, counting from 1.
+# each line of a PGN file with its game's number, counting from 1, and its
+# kind: T for a tag, B for a blank line, M for anything else. A line inside
+# a {...} comment is M, even if it starts with "[", and a comment ends no
+# game. A ";" comment runs to the end of its line, and a "%" line is skipped.
 pgn_numbered() {
-  awk '/^[ \t]*\[/ { if (!tags) { g++; tags = 1 } }
-       !/^[ \t]*\[/ && !/^[ \t]*$/ { tags = 0 }
-       { print g "\t" $0 }' "$1"
+  awk '{
+    kind = "M"
+    if (!c && /^[ \t]*\[/) {
+      kind = "T"
+      if (!tags) { g++; tags = 1 }
+    } else if (!c && /^[ \t]*$/) {
+      kind = "B"
+    } else {
+      tags = 0
+      if (c || !/^%/) {
+        for (i = 1; i <= length($0); i++) {
+          ch = substr($0, i, 1)
+          if (c) { if (ch == "}") c = 0 }
+          else if (ch == "{") c = 1
+          else if (ch == ";") break
+        }
+      }
+    }
+    print g "\t" kind "\t" $0
+  }' "$1"
+}
+
+# pgn_lines PGN N KINDS: the lines of game N whose kind is one of KINDS.
+pgn_lines() {
+  pgn_numbered "$1" | awk -F '\t' -v n="$2" -v kinds="$3" '$1 == n && index(kinds, $2)' | cut -f 3-
 }
 
 pgn_game() {
-  pgn_numbered "$1" | awk -F '\t' -v n="$2" '$1 == n' | cut -f 2-
+  pgn_lines "$1" "$2" TBM
 }
 
 # pgn_splice PGN N REPLACEMENT: PGN with game N replaced.
 pgn_splice() {
   pgn_numbered "$1" | awk -F '\t' -v n="$2" -v repl="$3" '
     $1 == n { if (!done) { while ((getline line < repl) > 0) print line; print ""; done = 1 } next }
-    { sub(/^[^\t]*\t/, ""); print }'
+    { sub(/^[^\t]*\t[^\t]*\t/, ""); print }'
 }
 
 # same_names_game PGN N SOURCE: game N's tags, apart from a FEN start, with
 # the moves of SOURCE's game 2 and game N's result.
 same_names_game() {
   local result
-  result=$(pgn_game "$1" "$2" | sed -n -E 's/^\[Result "(.*)"\].*/\1/p')
-  pgn_game "$1" "$2" | grep '^[[:space:]]*\[' | grep -v -E '^\[(FEN|SetUp) '
+  result=$(pgn_lines "$1" "$2" T | sed -n -E 's/^[[:space:]]*\[Result "(.*)"\].*/\1/p')
+  pgn_lines "$1" "$2" T | grep -v -E '^[[:space:]]*\[(FEN|SetUp) '
   echo
-  pgn_game "$3" 2 | grep -v -e '^[[:space:]]*\[' -e '^[[:space:]]*$' |
-    sed -E "\$s#(1-0|0-1|1/2-1/2|\*)[[:space:]]*\$#${result:-*}#"
+  pgn_lines "$3" 2 M | sed -E "\$s#(1-0|0-1|1/2-1/2|\*)[[:space:]]*\$#${result:-*}#"
   echo
 }
 
