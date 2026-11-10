@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+# Downloads the source of SCID vs. PC 4.26, checks its SHA-256, and builds
+# its pgnscid and tcscid (the Tcl-only build, without Tk) into
+# <work>/scidvspc/bin. compat/run calls it; see docs/SCID_COMPAT.md.
+#
+# Usage: compat/build-scidvspc [<work>]
+#
+# <work> defaults to $COMPAT_WORK, or target/compat in the repository. The
+# build, and the download, are skipped when the binaries were built from the
+# same tarball, by the same version of this script, with the same compiler
+# and Tcl on the same kind of host. The tarball is kept in <work>/download.
+# Set TCL_CFLAGS and TCL_LIBS to use a Tcl other than the one found below.
+set -euo pipefail
+
+version=4.26
+url="https://downloads.sourceforge.net/project/scidvspc/source/scid_vs_pc-$version.tgz"
+sha256=386eda599c058c3da9fef64de2f5248d51204e00715b94babeb09976c36afa87
+
+repo=$(cd "$(dirname "$0")/.." && pwd)
+work=${1:-${COMPAT_WORK:-$repo/target/compat}}
+mkdir -p "$work"
+work=$(cd "$work" && pwd)
+download="$work/download/scid_vs_pc-$version.tgz"
+out="$work/scidvspc"
+
+hash_stdin() {
+  if command -v sha256sum > /dev/null; then sha256sum | cut -d' ' -f1; else shasum -a 256 | cut -d' ' -f1; fi
+}
+
+# CXX and the Tcl flags change the binaries, so they are part of the stamp.
+cxx=${CXX:-c++}
+case $(uname -s) in
+  Darwin)
+    sdk=$(xcrun --show-sdk-path)
+    tcl_cflags=${TCL_CFLAGS:-"-I$sdk/System/Library/Frameworks/Tcl.framework/Headers"}
+    tcl_libs=${TCL_LIBS:-"-framework Tcl"}
+    ;;
+  *)
+    tcl_pc=tcl
+    pkg-config --exists tcl 2> /dev/null || tcl_pc=tcl8.6
+    if [[ -z ${TCL_CFLAGS:-} ]] && ! pkg-config --exists "$tcl_pc" 2> /dev/null; then
+      echo "error: Tcl not found by pkg-config. Install Tcl's development files, such as tcl-dev, or set TCL_CFLAGS and TCL_LIBS." >&2
+      exit 1
+    fi
+    tcl_cflags=${TCL_CFLAGS:-$(pkg-config --cflags "$tcl_pc")}
+    tcl_libs=${TCL_LIBS:-$(pkg-config --libs "$tcl_pc")}
+    ;;
+esac
+stamp=$({ echo "$sha256"; cat "$0"; uname -sm; "$cxx" --version | head -n 1; echo "$tcl_cflags $tcl_libs"; } | hash_stdin)
+if [[ -x $out/bin/pgnscid && -x $out/bin/tcscid && $(cat "$out/bin/stamp" 2> /dev/null) == "$stamp" ]]; then
+  echo "pgnscid and tcscid are up to date in $out/bin" >&2
+  exit 0
+fi
+
+if [[ ! -f $download ]]; then
+  echo "Downloading SCID vs. PC $version from $url" >&2
+  mkdir -p "$(dirname "$download")"
+  if ! curl -fsSL --retry 3 --retry-delay 5 -o "$download.part" "$url"; then
+    rm -f "$download.part"
+    echo "error: could not download $url. SourceForge may be unavailable; try again later." >&2
+    exit 1
+  fi
+  mv "$download.part" "$download"
+fi
+if [[ $(hash_stdin < "$download") != "$sha256" ]]; then
+  rm -f "$download"
+  echo "error: the SHA-256 of $url isn't $sha256. The file was deleted; run again to download it again." >&2
+  exit 1
+fi
+
+rm -rf "$out"
+mkdir -p "$out/obj" "$out/bin"
+tar -xzf "$download" -C "$out"
+src="$out/scid_vs_pc-$version/src"
+
+# The object lists come from SCID vs. PC's own Makefile.conf.
+objects() {
+  awk -v name="$1" '
+    $0 ~ "^" name "=" { on = 1; sub("^" name "= *", "") }
+    on { line = $0; more = sub(/\\$/, "", line); printf "%s ", line; if (!more) exit }
+  ' "$out/scid_vs_pc-$version/Makefile.conf" | tr -s ' ' '\n' | grep '^src/' | sed 's|^src/||'
+}
+
+# -fsigned-char: SCID sorts and hashes names as signed chars, as on x86 and
+# Apple arm64. -std=c++11: SCID's sources use `register`, which C++17 removed.
+export CXX_CMD="$cxx -std=c++11 -O2 -w -fsigned-char -DTCL_ONLY -I$src -I$src/cql $tcl_cflags"
+export SRC=$src OBJ=$out/obj
+compile() {
+  local o=$1 c
+  c=${o%.o}.cpp
+  case $o in
+    cql/i_*) c=cql/${o#cql/i_}; c=${c%.o}.cpp; set -- -DINTEGRATED ;;
+    tcscid.o) c=tkscid.cpp; set -- ;;
+    *) set -- ;;
+  esac
+  $CXX_CMD "$@" -c "$SRC/$c" -o "$OBJ/$(echo "$o" | tr / _)"
+}
+export -f compile
+
+scid=$(objects SCIDOBJS)
+charset=$(objects CHARSETCONVOBJS)
+cql=$(objects CQLOBJS_I)
+tcl_extra="tree.o filter.o pbook.o crosstab.o spellchk.o probe.o optable.o engine.o recog.o"
+jobs=$(getconf _NPROCESSORS_ONLN 2> /dev/null || echo 4)
+echo "Building pgnscid and tcscid in $out" >&2
+printf '%s\n' $scid $charset $cql $tcl_extra pgnscid.o tcscid.o | xargs -P "$jobs" -I{} bash -c 'compile "$1"' _ {}
+
+flat() { for o in "$@"; do printf '%s/%s ' "$OBJ" "$(echo "$o" | tr / _)"; done; }
+# shellcheck disable=SC2046,SC2086
+$cxx -o "$out/bin/pgnscid" "$OBJ/pgnscid.o" $(flat $scid $charset) $tcl_libs -lz
+# shellcheck disable=SC2046,SC2086
+$cxx -o "$out/bin/tcscid" "$OBJ/tcscid.o" $(flat $scid $cql $charset $tcl_extra) $tcl_libs -lz
+echo "$stamp" > "$out/bin/stamp"
+echo "Built $out/bin/pgnscid and $out/bin/tcscid" >&2

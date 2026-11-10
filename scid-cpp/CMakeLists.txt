@@ -76,6 +76,10 @@ if(ZLIB_FOUND)
     target_link_libraries(scidtopgn PRIVATE ${ZLIB_LIBRARIES})
 endif()
 
+# Checks a database with SCID's code, for compat/run (docs/SCID_COMPAT.md)
+add_executable(scid-dump ${CMAKE_SOURCE_DIR}/tools/scid_dump.cpp)
+target_link_libraries(scid-dump PRIVATE scid_core ${ZLIB_LIBRARIES})
+
 # Install target
 install(TARGETS scidtopgn DESTINATION bin)
 
@@ -88,4 +92,11 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(scidtopgn PRIVATE -Wno-register)
     # SCID's sources use `register`, which C++17 removed and Clang rejects.
     target_compile_options(scid_core PRIVATE -Wno-register)
+    target_compile_options(scid-dump PRIVATE -Wno-register)
+    # SCID sorts and hashes names as signed chars, as on x86 and Apple
+    # arm64, where its databases are written. Unsigned char, as on Linux
+    # arm64, would reject their name files.
+    foreach(target scid_core scidtopgn scid-dump)
+        target_compile_options(${target} PRIVATE -fsigned-char)
+    endforeach()
 endif()

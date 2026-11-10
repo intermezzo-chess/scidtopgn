@@ -1,0 +1,519 @@
+#!/usr/bin/env bash
+# Checks that SCID vs. PC 4.26 reads the databases scidtopgn writes, and the
+# SCID-written databases it changes. See docs/SCID_COMPAT.md.
+#
+# Usage: compat/run [<pgn-file>...]
+#
+# It builds the tools it needs, then runs each scenario on the PGN fixtures
+# in tests/data and compat/data, and on any UTF-8 PGN files given. It prints
+# what it checked, then PASS or FAIL for each scenario and input, and exits
+# with 1 if any failed. Build output goes to stderr.
+# Everything it writes goes under $COMPAT_WORK, by default target/compat.
+# Set CARGO to run another cargo, such as CARGO="cargo +1.99.1".
+set -uo pipefail
+# Names may not be UTF-8, so text tools compare bytes.
+export LC_ALL=C
+
+repo=$(cd "$(dirname "$0")/.." && pwd)
+work=${COMPAT_WORK:-$repo/target/compat}
+mkdir -p "$work"
+work=$(cd "$work" && pwd)
+run=$work/run
+tcl=$repo/compat/tcl
+data=$repo/tests/data
+# The PGN appended to every database, merged with it, and from which update
+# takes its new games. It has non-ASCII names of every kind.
+append_pgn=$repo/compat/data/names.pgn
+
+# notation.pgn and search.pgn are left out: scidtopgn imports them
+# differently from SCID on purpose, as docs/PGN_IMPORT.md describes.
+# notation.pgn holds its cases, and search.pgn has a Dutch name prefix,
+# "van der Wiel", which SCID capitalizes.
+inputs=(
+  "$data"/{accents,annotated,castling,derived,edge,five,long,one,stored,twins}.pgn
+  "$repo/compat/data/names.pgn"
+)
+for pgn in "$@"; do
+  [[ -f $pgn ]] || { echo "FAIL  setup: no such file: $pgn"; exit 1; }
+  inputs+=("$(cd "$(dirname "$pgn")" && pwd)/$(basename "$pgn")")
+done
+# Databases the C++ reference converter wrote from PGN that isn't UTF-8.
+# pgnscid would convert their names, so these start from the committed
+# files, repaired by SCID vs. PC, as the converter counts no names.
+non_utf8=(latin1 mixed)
+
+# --- Building ---------------------------------------------------------------
+
+build() {
+  local cargo
+  read -r -a cargo <<< "${CARGO:-cargo}"
+  echo "Building scidtopgn and the compat driver" >&2
+  "${cargo[@]}" build --release --locked -p scidtopgn-cli -p scidtopgn --bin scidtopgn \
+    --example compat_driver >&2 || return 1
+  echo "Building the reference converter and scid-dump" >&2
+  cmake -S "$repo/scid-cpp" -B "$work/scid-cpp" -DCMAKE_BUILD_TYPE=Release > /dev/null &&
+    cmake --build "$work/scid-cpp" --parallel > "$work/scid-cpp.log" 2>&1 ||
+    { cat "$work/scid-cpp.log" >&2; return 1; }
+  "$repo/compat/build-scidvspc" "$work"
+}
+
+if ! build; then
+  echo "FAIL  build: the tools didn't build"
+  exit 1
+fi
+target=${CARGO_TARGET_DIR:-$repo/target}
+# Cargo reads a relative CARGO_TARGET_DIR from the current directory, which
+# the scenarios change.
+[[ $target == /* ]] || target=$PWD/$target
+scidtopgn=$target/release/scidtopgn
+driver=$target/release/examples/compat_driver
+reference=$work/scid-cpp/scidtopgn
+dump=$work/scid-cpp/scid-dump
+pgnscid=$work/scidvspc/bin/pgnscid
+tcscid=$work/scidvspc/bin/tcscid
+
+# --- Helpers ----------------------------------------------------------------
+#
+# A database is its path without an extension. A check that fails prints
+# why to stderr, as "error: ...", and exits the scenario's subshell.
+
+die() {
+  echo "error: $*" >&2
+  exit 1
+}
+
+copy_db() {
+  for ext in si4 sn4 sg4; do cp "$1.$ext" "$2.$ext"; done
+}
+
+# same_files A B: the three files of A and B are byte-identical.
+same_files() {
+  for ext in si4 sn4 sg4; do
+    cmp -s "$1.$ext" "$2.$ext" || die "$(basename "$1").$ext differs from $(basename "$2").$ext"
+  done
+}
+
+# pgnscid PGN DB: SCID vs. PC writes DB from PGN.
+pgnscid() {
+  "$pgnscid" -f "$1" "$2" > "$2.pgnscid.log" 2>&1 || die "pgnscid can't convert $1"
+}
+
+# check_db DB: the reference converter reads every game with no warnings,
+# into DB.pgn; scid-dump finds no problems; SCID vs. PC opens it.
+check_db() {
+  local name
+  name=$(basename "$1")
+  "$reference" "$1" > "$1.pgn" 2> "$1.reference.err" || die "the reference converter can't read $name"
+  [[ ! -s $1.reference.err ]] || die "the reference converter warns about $name: $(head -n 1 "$1.reference.err")"
+  "$dump" "$1" > "$1.dump" || die "scid-dump checks fail for $name: $(grep -m 1 '^!' "$1.dump")"
+  "$tcscid" "$tcl/open.tcl" "$1" > "$1.open" 2>&1 || die "SCID vs. PC can't open $name: $(head -n 1 "$1.open")"
+}
+
+# entries DB: the index entries scid-dump printed, without game-file offsets.
+entries() {
+  grep '^G' "$1.dump" | sed -E 's/ offset=[0-9]+$//'
+}
+
+# names DB: each name with its frequency, sorted, without IDs.
+names() {
+  grep '^N' "$1.dump" | sed -E 's/^N ([a-z]+) [0-9]+ /\1 /' | sort
+}
+
+# name_list DB: each name's type and name, without its frequency.
+name_list() {
+  names "$1" | sed -E 's/ freq=[0-9]+ / /'
+}
+
+# same_lines WHAT A B: the files A and B are the same.
+same_lines() {
+  diff "$2" "$3" > "$2.diff" || die "$1 differ: $(sed -n 2p "$2.diff")"
+}
+
+# same_entries DB EXPECTED [FROM]: the entries from game FROM on (default 1)
+# and the names of DB match EXPECTED's, apart from game-file offsets.
+same_entries() {
+  local from=${3:-1}
+  entries "$1" | tail -n "+$from" > "$1.entries"
+  entries "$2" | tail -n "+$from" > "$1.expected-entries"
+  same_lines "index entries" "$1.entries" "$1.expected-entries"
+  names "$1" > "$1.names"
+  names "$2" > "$1.expected-names"
+  same_lines "names" "$1.names" "$1.expected-names"
+}
+
+# positions DB: the positions to search for, from DB's games, into DB.positions.
+positions() {
+  "$tcscid" "$tcl/positions.tcl" "$1" > "$1.positions" 2>&1 || die "SCID vs. PC can't list positions in $(basename "$1")"
+}
+
+# same_search DB EXPECTED [POSITIONS]: SCID vs. PC's board and tree searches
+# find as many games in DB as in EXPECTED, for EXPECTED's positions or the
+# given ones. At least one search past the start must find a game.
+same_search() {
+  local pos=${3:-$2.positions}
+  [[ -n ${3:-} ]] || positions "$2"
+  "$tcscid" "$tcl/search.tcl" "$pos" "$2" > "$1.expected-search" 2>&1 || die "SCID vs. PC can't search $(basename "$2")"
+  "$tcscid" "$tcl/search.tcl" "$pos" "$1" > "$1.search" 2>&1 || die "SCID vs. PC can't search $(basename "$1")"
+  grep -q 'board=[1-9]' "$1.expected-search" || die "no search finds a game in $(basename "$2")"
+  same_lines "search results" "$1.search" "$1.expected-search"
+}
+
+# index_entries DB COUNT: the first COUNT raw index entries of DB.
+index_entries() {
+  head -c $((182 + 47 * $2)) "$1.si4" | tail -c +183
+}
+
+num_games() {
+  grep -c '^G' "$1.dump"
+}
+
+# PGN games start at a tag line that follows movetext. pgn_numbered prints
+# each line of a PGN file with its game's number, counting from 1, and its
+# kind: T for a tag, B for a blank line, M for anything else. A line inside
+# a {...} comment is M, even if it starts with "[". Only movetext outside
+# comments ends a game's tags: a line that holds only comments, a ";"
+# comment, which runs to the end of its line, or a "%" escape line doesn't.
+pgn_numbered() {
+  awk '{
+    kind = "M"
+    if (!c && /^[ \t]*\[/) {
+      kind = "T"
+      if (!tags) { g++; tags = 1 }
+    } else if (!c && /^[ \t]*$/) {
+      kind = "B"
+    } else {
+      moves = 0
+      if (c || !/^%/) {
+        for (i = 1; i <= length($0); i++) {
+          ch = substr($0, i, 1)
+          if (c) { if (ch == "}") c = 0 }
+          else if (ch == "{") c = 1
+          else if (ch == ";") break
+          else if (ch !~ /[ \t\r]/) moves = 1
+        }
+      }
+      if (moves) tags = 0
+    }
+    print g "\t" kind "\t" $0
+  }' "$1"
+}
+
+# pgn_lines PGN N KINDS: the lines of game N whose kind is one of KINDS.
+pgn_lines() {
+  pgn_numbered "$1" | awk -F '\t' -v n="$2" -v kinds="$3" '$1 == n && index(kinds, $2)' | cut -f 3-
+}
+
+pgn_game() {
+  pgn_lines "$1" "$2" TBM
+}
+
+# pgn_splice PGN N REPLACEMENT: PGN with game N replaced.
+pgn_splice() {
+  pgn_numbered "$1" | awk -F '\t' -v n="$2" -v repl="$3" '
+    $1 == n { if (!done) { while ((getline line < repl) > 0) print line; print ""; done = 1 } next }
+    { sub(/^[^\t]*\t[^\t]*\t/, ""); print }'
+}
+
+# same_names_game PGN N SOURCE: game N's tags, apart from a FEN start, with
+# the moves of SOURCE's game 2 and game N's result.
+same_names_game() {
+  local result
+  result=$(pgn_lines "$1" "$2" T | sed -n -E 's/^[[:space:]]*\[Result "(.*)"\].*/\1/p')
+  pgn_lines "$1" "$2" T | grep -v -E '^[[:space:]]*\[(FEN|SetUp) '
+  echo
+  pgn_lines "$3" 2 M | sed -E "\$s#(1-0|0-1|1/2-1/2|\*)[[:space:]]*\$#${result:-*}#"
+  echo
+}
+
+# game_names DB: each game's names, tab-separated, as SCID reads them.
+game_names() {
+  grep '^G' "$1.dump" | sed -E \
+    's/^G [0-9]+ white="(.*)" black="(.*)" event="(.*)" site="(.*)" round="(.*)" date=.*/\1\t\2\t\3\t\4\t\5/'
+}
+
+# as_utf8: names that aren't valid UTF-8 read as Windows-1252, as README.md
+# says scidtopgn reads them.
+as_utf8() {
+  local line out field
+  while IFS= read -r line; do
+    out=()
+    while IFS= read -r -d $'\t' field; do
+      if ! printf '%s' "$field" | iconv -f UTF-8 -t UTF-8 > /dev/null 2>&1; then
+        field=$(printf '%s' "$field" | iconv -f CP1252 -t UTF-8)
+      fi
+      out+=("$field")
+    done <<< "$line"$'\t'
+    (IFS=$'\t'; printf '%s\n' "${out[*]}")
+  done
+}
+
+# The first, middle, and last games, once each.
+some_games() {
+  printf '%s\n' 1 $((($1 + 1) / 2)) "$1" | sort -n -u | tr '\n' ' '
+}
+
+# --- Scenarios --------------------------------------------------------------
+#
+# Each runs in a subshell, in the input's directory, and fails at the first
+# failed command.
+
+# The SCID-written databases are references for the scenarios, so they must
+# pass the checks themselves.
+s_reference() {
+  check_db scid
+  check_db scid+names
+}
+
+s_import() {
+  "$scidtopgn" import "$pgn" -o import
+  same_files import scid
+  check_db import
+  [[ $games -eq 0 ]] || same_search import scid
+}
+
+s_overwrite() {
+  "$scidtopgn" import "$append_pgn" -o overwrite
+  "$scidtopgn" import --overwrite "$pgn" -o overwrite
+  same_files overwrite scid
+}
+
+s_append() {
+  copy_db scid append
+  "$tcscid" "$tcl/meta.tcl" set append
+  "$tcscid" "$tcl/meta.tcl" get append "$games" > append.meta-before
+  index_entries append "$games" > append.entries-before
+  "$scidtopgn" import "$append_pgn" -o append
+  "$tcscid" "$tcl/meta.tcl" get append "$games" > append.meta
+  same_lines "header fields and flags" append.meta append.meta-before
+  index_entries append "$games" > append.entries-after
+  cmp -s append.entries-after append.entries-before || die "the original index entries changed"
+  check_db append
+  same_entries append scid+names $((games + 1))
+  same_search append scid+names
+}
+
+s_merge() {
+  "$scidtopgn" merge scid "$run/names-scid" -o merge
+  check_db merge
+  same_entries merge scid+names
+  same_lines "games" merge.pgn scid+names.pgn
+  same_search merge scid+names
+}
+
+s_delete() {
+  local some
+  some=$(some_games "$games")
+  copy_db scid delete
+  # shellcheck disable=SC2086
+  "$driver" delete delete $some
+  copy_db scid delete-scid
+  # shellcheck disable=SC2086
+  "$tcscid" "$tcl/flag.tcl" delete-scid D 1 $some
+  same_files delete delete-scid
+  check_db delete
+  local left=$((games - $(wc -w <<< "$some")))
+  [[ $(grep -c '^\[Event ' delete.pgn) -eq $left ]] || die "SCID doesn't read exactly $left games"
+}
+
+s_undelete() {
+  local some
+  some=$(some_games "$games")
+  copy_db scid undelete
+  # shellcheck disable=SC2086
+  "$driver" undelete delete $some
+  # shellcheck disable=SC2086
+  "$driver" undelete undelete $some
+  same_files undelete scid
+  check_db undelete
+}
+
+# s_update CASE: replace the middle game, then compare with pgnscid's
+# database from the PGN with that game replaced. SCID's tree cache file,
+# written before the update, must not give the old results.
+s_update() {
+  local case=$1 db=update-$1 n=$(((games + 1) / 2)) repl
+  repl=$db.replacement.pgn
+  case $case in
+    same-names) same_names_game "$pgn" "$n" "$append_pgn" > "$repl" ;;
+    new-names | twice) pgn_game "$append_pgn" 1 > "$repl" ;;
+    long) pgn_game "$data/long.pgn" 2 > "$repl" ;;
+  esac
+  pgn_splice "$pgn" "$n" "$repl" > "$db.expected.pgn"
+  pgnscid "$db.expected.pgn" "$db-scid"
+  positions scid
+  positions "$db-scid"
+  cat scid.positions "$db-scid.positions" | sort -u > "$db.positions"
+  copy_db scid "$db"
+  "$tcscid" "$tcl/search.tcl" "$db.positions" "$db" write-cache > /dev/null
+  [[ -f $db.stc ]] || die "SCID vs. PC wrote no tree cache"
+  name_list scid > "$db.kept-names"
+  if [[ $case == twice ]]; then
+    same_names_game "$pgn" "$n" "$append_pgn" > "$db.first.pgn"
+    "$driver" "$db" update "$n" "$db.first.pgn" 1
+    "$dump" "$db" > "$db.dump" || die "scid-dump checks fail after the first update"
+    name_list "$db" >> "$db.kept-names"
+  fi
+  "$driver" "$db" update "$n" "$repl" 1
+  check_db "$db"
+  check_db "$db-scid"
+  same_lines "games" "$db.pgn" "$db-scid.pgn"
+  entries "$db" > "$db.entries"
+  entries "$db-scid" > "$db.expected-entries"
+  same_lines "index entries" "$db.entries" "$db.expected-entries"
+  # Names the update left unused stay, with a frequency of 0, until the
+  # database is compacted, as in SCID (#72). scid-dump checked that each
+  # frequency equals the name's uses.
+  sort -u "$db.kept-names" > "$db.expected-kept-names"
+  name_list "$db" | sort -u | comm -23 "$db.expected-kept-names" - > "$db.lost-names"
+  [[ ! -s $db.lost-names ]] || die "the update removed names: $(head -n 1 "$db.lost-names")"
+  names "$db" | grep -v ' freq=0 ' > "$db.names"
+  names "$db-scid" > "$db.expected-names"
+  same_lines "names" "$db.names" "$db.expected-names"
+  same_search "$db" "$db-scid" "$db.positions"
+}
+
+# Names that aren't UTF-8: every game keeps its names, read as
+# Windows-1252, and SCID reads the result.
+s_non_utf8_append() {
+  copy_db original append
+  "$scidtopgn" import "$append_pgn" -o append
+  check_db append
+  game_names original | as_utf8 > append.expected-names
+  game_names "$run/names-scid" >> append.expected-names
+  game_names append > append.game-names
+  same_lines "game names" append.game-names append.expected-names
+  entries append | tail -n "+$((games + 1))" | sed -E 's/^G [0-9]+ /G /' > append.entries
+  entries "$run/names-scid" | sed -E 's/^G [0-9]+ /G /' > append.expected-entries
+  same_lines "appended index entries" append.entries append.expected-entries
+}
+
+s_non_utf8_delete() {
+  local some
+  some=$(some_games "$games")
+  copy_db original delete
+  # shellcheck disable=SC2086
+  "$driver" delete delete $some
+  check_db delete
+  cmp -s delete.sg4 original.sg4 || die "the game file changed"
+  game_names original | as_utf8 > delete.expected-names
+  game_names delete > delete.game-names
+  same_lines "game names" delete.game-names delete.expected-names
+  local left=$((games - $(wc -w <<< "$some")))
+  [[ $(grep -c '^\[Event ' delete.pgn) -eq $left ]] || die "SCID doesn't read exactly $left games"
+}
+
+s_non_utf8_update() {
+  local n=$(((games + 1) / 2))
+  copy_db original update
+  pgn_game "$append_pgn" 1 > update.replacement.pgn
+  "$driver" update update "$n" update.replacement.pgn 1
+  check_db update
+  game_names original | as_utf8 |
+    awk -v n="$n" -v repl="$(game_names "$run/names-scid" | head -n 1)" 'NR == n { print repl; next } 1' \
+      > update.expected-names
+  game_names update > update.game-names
+  same_lines "game names" update.game-names update.expected-names
+}
+
+# The checks must fail for a database whose search fields are zeroed, as
+# scidtopgn wrote them before #55.
+s_self_check() {
+  copy_db "$run/names-scid" broken
+  dd if=/dev/zero of=broken.si4 bs=1 seek=$((182 + 37)) count=10 conv=notrunc 2> /dev/null
+  if (check_db broken) 2> /dev/null; then die "the checks pass a database with zeroed search fields"; fi
+  if (same_search broken "$run/names-scid") 2> /dev/null; then
+    die "the searches find the same games in a database with zeroed search fields"
+  fi
+}
+
+# --- Running ----------------------------------------------------------------
+
+passed=0
+failed=0
+
+# scenario NAME INPUT FUNCTION [ARGS...]: runs FUNCTION in INPUT's directory
+# and reports the result.
+scenario() {
+  local name=$1 input=$2 log
+  shift 2
+  log=$run/$input/$name.log
+  (
+    set -eE
+    trap 'echo "error: failed: $BASH_COMMAND" >&2' ERR
+    cd "$run/$input"
+    "$@"
+  ) > "$log" 2>&1
+  if [[ $? -eq 0 ]]; then
+    printf 'PASS  %-22s %s\n' "$name" "$input"
+    passed=$((passed + 1))
+  else
+    printf 'FAIL  %-22s %s: %s (see %s)\n' "$name" "$input" \
+      "$(grep -m 1 '^error: ' "$log" | sed 's/^error: //')" "${log#"$repo"/}"
+    failed=$((failed + 1))
+  fi
+}
+
+commit=$(git -C "$repo" rev-parse HEAD 2> /dev/null || echo unknown)
+git -C "$repo" diff --quiet HEAD 2> /dev/null || commit+=" with uncommitted changes"
+names_of() { for f in "$@"; do printf '%s ' "$(basename "$f" .pgn)"; done; }
+echo "SCID compatibility check"
+echo "Commit:      $commit"
+echo "Platform:    $(uname -sm)"
+echo "SCID vs. PC: $(sed -n 's/^version=//p' "$repo/compat/build-scidvspc")"
+echo "Inputs:      $(names_of "${inputs[@]}")empty; ${non_utf8[*]} (names not UTF-8)"
+echo
+
+rm -rf "$run"
+mkdir -p "$run"
+{ "$pgnscid" -f "$append_pgn" "$run/names-scid" && "$dump" "$run/names-scid" > "$run/names-scid.dump"; } \
+  > "$run/names-scid.log" 2>&1 || { echo "FAIL  setup: pgnscid can't convert $append_pgn"; exit 1; }
+printf '' > "$run/empty.pgn"
+inputs+=("$run/empty.pgn")
+
+seen=" "
+for pgn in "${inputs[@]}"; do
+  input=$(basename "$pgn" .pgn)
+  [[ $seen != *" $input "* ]] || { echo "FAIL  setup: two inputs are named $input"; exit 1; }
+  seen+="$input "
+  mkdir -p "$run/$input"
+  cd "$run/$input" || exit 1
+  if ! { pgnscid "$pgn" scid && { cat "$pgn"; echo; cat "$append_pgn"; } > scid+names.pgn &&
+         pgnscid scid+names.pgn scid+names; } > setup.log 2>&1; then
+    echo "FAIL  setup                  $input: pgnscid can't convert it (see ${run#"$repo"/}/$input/setup.log)"
+    failed=$((failed + 1))
+    continue
+  fi
+  "$dump" scid > scid.dump
+  games=$(num_games scid)
+  scenario reference "$input" s_reference
+  scenario import "$input" s_import
+  scenario overwrite "$input" s_overwrite
+  scenario append "$input" s_append
+  scenario merge "$input" s_merge
+  if [[ $games -gt 0 ]]; then
+    scenario delete "$input" s_delete
+    scenario undelete "$input" s_undelete
+    for case in same-names new-names long twice; do
+      scenario "update-$case" "$input" s_update "$case"
+    done
+  fi
+done
+
+for input in "${non_utf8[@]}"; do
+  mkdir -p "$run/$input"
+  cd "$run/$input" || exit 1
+  copy_db "$data/$input" original
+  "$tcscid" "$tcl/fix.tcl" original > fix.log 2>&1 || { echo "FAIL  setup                  $input: SCID vs. PC can't repair it"; failed=$((failed + 1)); continue; }
+  "$dump" original > original.dump
+  games=$(num_games original)
+  scenario append "$input" s_non_utf8_append
+  scenario delete "$input" s_non_utf8_delete
+  scenario update "$input" s_non_utf8_update
+done
+
+mkdir -p "$run/self-check"
+scenario self-check self-check s_self_check
+
+echo
+echo "$passed passed, $failed failed"
+[[ $failed -eq 0 ]]

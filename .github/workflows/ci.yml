@@ -83,13 +83,50 @@ jobs:
           persist-credentials: false
       - run: .github/scripts/run-tests
 
+  # Checks that SCID vs. PC reads what scidtopgn writes. See
+  # docs/SCID_COMPAT.md. SourceForge is contacted only when the tarball isn't
+  # cached, and the tools are rebuilt only when their cache misses.
+  compat:
+    name: SCID compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: ${{ env.STABLE_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Install Tcl
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tcl-dev
+      # The image version keys the tools' cache, as a new runner image can
+      # bring a new compiler or Tcl.
+      - name: Set the work directory and find the runner image
+        id: image
+        run: |
+          echo "COMPAT_WORK=$RUNNER_TEMP/compat" >> "$GITHUB_ENV"
+          echo "version=$ImageOS-$ImageVersion" >> "$GITHUB_OUTPUT"
+      # Keyed on the tarball's SHA-256 in compat/build-scidvspc.
+      - name: Cache the SCID vs. PC source
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.COMPAT_WORK }}/download
+          key: scidvspc-source-4.26-386eda599c058c3da9fef64de2f5248d51204e00715b94babeb09976c36afa87
+      # compat/build-scidvspc rebuilds them anyway if they don't match it.
+      - name: Cache the SCID vs. PC tools
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.COMPAT_WORK }}/scidvspc/bin
+          key: scidvspc-tools-${{ runner.arch }}-${{ steps.image.outputs.version }}-${{ hashFiles('compat/build-scidvspc') }}
+      - run: compat/run
+
   # The only required check. Matrix entries can change without touching branch
   # protection. `always()` makes it run, and fail, when a needed job fails or
   # is skipped, because a skipped required check counts as passing.
   ci-success:
     name: ci-success
     if: always()
-    needs: [lint, test, msrv, scripts]
+    needs: [lint, test, msrv, scripts, compat]
     runs-on: ubuntu-latest
     steps:
       - name: Check that every job succeeded

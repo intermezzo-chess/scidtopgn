@@ -110,9 +110,10 @@ Once both crates exist on crates.io, [Trusted Publishing](https://crates.io/docs
 3. If no changesets are pending, the run succeeds and its summary says so. No branch or PR changes.
 4. Otherwise, the run creates or updates the PR titled `chore: prepare release vX.Y.Z` from the `knope/version` branch. The run summary links to it. Each run replaces that branch with `main` plus one new version commit.
 5. Review the PR. Check the proposed version against the changes, the new `CHANGELOG.md` section, the version changes in `Cargo.toml`, `Cargo.lock`, and `crates/scidtopgn-cli/Cargo.toml`, and the deleted changesets.
-6. To change the changelog wording, fix the changesets on `main` and run the workflow again. Commits pushed to `knope/version` by hand are lost on the next run.
-7. Approve the CI run. On the PR, open the **Checks** tab, or find the CI run with the status **Action required** under **Actions**, and approve it. Each run of the Version workflow updates the branch and needs a new approval.
-8. Wait for `ci-success` to pass, then merge the PR. Merging prepares the version; nothing is tagged or published.
+6. Run the [SCID compatibility check](SCID_COMPAT.md) on the PR's commit, and record the result in the PR. Check out `knope/version`, run `compat/run`, and paste everything it prints to stdout into a comment on the PR, in a code block. Its report names the commit, the platform, the SCID vs. PC version, the inputs, and the result of each scenario. CI runs the check on Linux, so run it on macOS if you can. Don't merge the PR while any scenario fails. Each run of the Version workflow changes the commit, so run the check again.
+7. To change the changelog wording, fix the changesets on `main` and run the workflow again. Commits pushed to `knope/version` by hand are lost on the next run.
+8. Approve the CI run. On the PR, open the **Checks** tab, or find the CI run with the status **Action required** under **Actions**, and approve it. Each run of the Version workflow updates the branch and needs a new approval.
+9. Wait for `ci-success` to pass, then merge the PR. Merging prepares the version; nothing is tagged or published.
 
 If more changesets are merged to `main` while the version PR is open, run the workflow again to include them.
 
