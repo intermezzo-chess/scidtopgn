@@ -142,7 +142,16 @@ make
 ```
 
 The build needs CMake 3.15 or later, a C++17 compiler, and zlib. It writes the
-converter to `scid-cpp/build/scidtopgn`, which is not the Rust `scidtopgn` CLI.
+converter to `scid-cpp/build/scidtopgn`, which is not the Rust `scidtopgn` CLI,
+and `scid-cpp/build/scid-dump`, which checks a database with SCID's code. Both
+are built with `-fsigned-char`, as SCID compares names as signed `char`s.
+
+## The SCID compatibility check
+
+`compat/run` checks that SCID vs. PC 4.26 reads what scidtopgn writes. CI runs
+it on every pull request. Run it yourself when you change how databases are
+written; [docs/SCID_COMPAT.md](docs/SCID_COMPAT.md) describes what it needs and
+what it checks.
 
 ## Releasing
 

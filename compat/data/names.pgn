@@ -1,0 +1,35 @@
+[Event "Ölympiade"]
+[Site "Århus"]
+[Date "2026.11.10"]
+[Round "Финал"]
+[White "Ånstad, Øystein"]
+[Black "Anand, Viswanathan"]
+[Result "1-0"]
+
+1. e4 c5 2. Nf3 d6 3. d4 cxd4 4. Nxd4 Nf6 5. Nc3 a6 6. Be3 e5 7. Nb3 Be6
+8. f3 Be7 9. Qd2 O-O 10. O-O-O Nbd7 11. g4 b5 12. g5 b4 13. Ne2 Ne8 14. f4
+a5 15. f5 a4 16. Nbd4 exd4 17. Nxd4 b3 18. Kb1 bxc2+ 19. Nxc2 Bb3 20. axb3
+axb3 21. Na3 Ra4 22. Bb5 Rxa3 23. bxa3 Qa5 24. Qb2 1-0
+
+[Event "Open"]
+[Site "Zürich"]
+[Date "2026.11.10"]
+[Round "1"]
+[White "Nowak, Jan"]
+[Black "Ńowak, Łukasz"]
+[Result "1/2-1/2"]
+
+1. d4 Nf6 2. c4 e6 3. Nc3 Bb4 4. e3 O-O 5. Bd3 d5 6. Nf3 c5 7. O-O dxc4
+8. Bxc4 Nbd7 9. Qe2 b6 10. Rd1 cxd4 11. exd4 Bb7 12. d5 Bxc3 13. dxe6 fxe6
+14. bxc3 Qc7 1/2-1/2
+
+[Event "Ölympiade"]
+[Site "Zagreb"]
+[Date "2026.11.11"]
+[Round "2"]
+[White "Blübaum, Matthias"]
+[Black "Blagojević, Dragisa"]
+[Result "0-1"]
+
+1. c4 e5 2. Nc3 Nf6 3. g3 d5 4. cxd5 Nxd5 5. Bg2 Nb6 6. Nf3 Nc6 7. O-O Be7
+8. d3 O-O 9. Be3 Be6 10. Rc1 f5 0-1
