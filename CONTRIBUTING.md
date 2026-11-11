@@ -153,6 +153,13 @@ it on every pull request. Run it yourself when you change how databases are
 written; [docs/SCID_COMPAT.md](docs/SCID_COMPAT.md) describes what it needs and
 what it checks.
 
+## The benchmark
+
+`bench/run` measures every operation's time and memory on a large set of PGN
+files, such as Caissabase, and checks that they grow in proportion to the
+number of games. Run it when you change how databases are imported, appended,
+opened, or exported; [docs/BENCHMARK.md](docs/BENCHMARK.md) describes it.
+
 ## Releasing
 
 See [docs/RELEASING.md](docs/RELEASING.md).

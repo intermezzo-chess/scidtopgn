@@ -1,0 +1,432 @@
+#!/usr/bin/env bash
+# Measures the time and peak memory of scidtopgn's operations on a directory
+# of PGN files, such as Caissabase's, at a sample of the files and at all of
+# them, and checks that each operation works and grows in proportion to the
+# number of games. See docs/BENCHMARK.md.
+#
+# Usage: bench/run [--sample N] [--chunk FILE] [--memory-limit MB] <pgn-dir>
+#
+# It prints PASS or FAIL for each check, and exits with 1 if any failed, or
+# if a tool doesn't build. Progress and build output go to stderr.
+# Everything it writes goes under $BENCH_WORK, by default target/bench. The
+# SCID vs. PC tools are built where compat/run builds them, $COMPAT_WORK or
+# target/compat. Set CARGO to run another cargo, such as CARGO="cargo +1.99.1".
+set -uo pipefail
+export LC_ALL=C
+
+repo=$(cd "$(dirname "$0")/.." && pwd)
+tcl=$repo/compat/tcl
+
+usage() {
+  echo "usage: bench/run [--sample N] [--chunk FILE] [--memory-limit MB] <pgn-dir>" >&2
+  exit 2
+}
+
+sample=
+chunk=
+limit_mb=
+dir=
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --sample) sample=${2:-}; shift 2 || usage ;;
+    --chunk) chunk=${2:-}; shift 2 || usage ;;
+    --memory-limit) limit_mb=${2:-}; shift 2 || usage ;;
+    -*) usage ;;
+    *) [[ -z $dir ]] || usage; dir=$1; shift ;;
+  esac
+done
+[[ -n $dir ]] || usage
+[[ -d $dir ]] || { echo "error: no such directory: $dir" >&2; exit 2; }
+dir=$(cd "$dir" && pwd)
+
+# Games that pgnscid and scidtopgn are known to import differently in an
+# input, by the SHA-256 the results give as "Input checksum": the games
+# pgnscid stores minus those scidtopgn stores, the same for 1.e4 tree search
+# counts, and why.
+explained=(
+  # Caissabase 2022-12-24, in 488 files.
+  "4d550e51bec1155dafd899abebb330363b7fbc280eb09a624007b76fdbc16575 5 0 scidtopgn skips 5 Chess960 games, as PGN_IMPORT.md #32 says"
+)
+
+# --- Machine ----------------------------------------------------------------
+
+os=$(uname -s)
+case $os in
+  Darwin)
+    ram_mb=$(($(sysctl -n hw.memsize) / 1048576))
+    cpu="$(sysctl -n machdep.cpu.brand_string), $(sysctl -n hw.ncpu) cores"
+    machine="$(sysctl -n hw.model), macOS $(sw_vers -productVersion)"
+    ;;
+  Linux)
+    ram_mb=$(($(awk '/^MemTotal:/ { print $2 }' /proc/meminfo) / 1024))
+    cpu="$(awk -F': ' '/^model name/ { print $2; exit }' /proc/cpuinfo), $(getconf _NPROCESSORS_ONLN) cores"
+    machine="$(. /etc/os-release && echo "$PRETTY_NAME")"
+    ;;
+  *) echo "error: bench/run runs on macOS and Linux" >&2; exit 2 ;;
+esac
+[[ ${ram_mb:-0} -gt 0 ]] || { echo "error: can't read the machine's memory size" >&2; exit 2; }
+machine+=", $(uname -m)"
+limit_mb=${limit_mb:-$((ram_mb / 2))}
+[[ $limit_mb =~ ^[1-9][0-9]*$ ]] || { echo "error: --memory-limit must be a number of MB" >&2; exit 2; }
+if [[ $os == Linux ]] && ! /usr/bin/time -f '' true 2> /dev/null; then
+  echo "error: GNU time is missing at /usr/bin/time; install it, such as with apt-get install time" >&2
+  exit 2
+fi
+
+# --- Inputs -----------------------------------------------------------------
+
+# The PGN files, in the numeric order of their names, then by name.
+files=()
+while IFS= read -r f; do files+=("$f"); done < <(
+  for f in "$dir"/*.pgn; do [[ -f $f ]] && printf '%s\t%s\n' "$(basename "$f")" "$f"; done |
+    sort -t $'\t' -k1,1n -k1,1 | cut -f 2
+)
+n=${#files[@]}
+[[ $n -ge 2 ]] || { echo "error: $dir needs at least 2 PGN files" >&2; exit 2; }
+sample=${sample:-$(((n + 9) / 10))}
+[[ $sample =~ ^[0-9]+$ && $sample -ge 1 && $sample -lt $n ]] ||
+  { echo "error: --sample must be from 1 to $((n - 1)) files" >&2; exit 2; }
+chunk=${chunk:-${files[n - 1]}}
+[[ -f $chunk ]] || { echo "error: no such file: $chunk" >&2; exit 2; }
+chunk=$(cd "$(dirname "$chunk")" && pwd)/$(basename "$chunk")
+
+hash_stdin() {
+  if command -v sha256sum > /dev/null; then sha256sum | cut -d' ' -f1; else shasum -a 256 | cut -d' ' -f1; fi
+}
+
+# The size of what each file holds, through any link, which du wouldn't follow.
+input_kb=$(for f in "${files[@]}"; do wc -c < "$f"; done | awk '{ s += $1 } END { printf "%d", s / 1024 }')
+echo "Hashing the inputs" >&2
+checksum=$(for f in "${files[@]}"; do hash_stdin < "$f"; done | hash_stdin)
+
+work=${BENCH_WORK:-$repo/target/bench}
+mkdir -p "$work"
+work=$(cd "$work" && pwd)
+run=$work/run
+rm -rf "$run"
+mkdir -p "$run"
+
+# A size's concatenated PGN, its three databases, and one export at a time:
+# about 3 times the input. 4 leaves room for the file system.
+free_kb=$(df -Pk "$work" | awk 'NR == 2 { print $4 }')
+if [[ $free_kb -lt $((4 * input_kb)) ]]; then
+  echo "FAIL  setup: $((free_kb / 1024)) MB free in $work, and the run needs about $((4 * input_kb / 1024)) MB"
+  exit 1
+fi
+
+# --- Building ---------------------------------------------------------------
+
+read -r -a cargo <<< "${CARGO:-cargo}"
+toolchain=
+for arg in "${cargo[@]}"; do [[ $arg != +* ]] || toolchain=$arg; done
+compat_work=${COMPAT_WORK:-$repo/target/compat}
+build() {
+  echo "Building scidtopgn" >&2
+  "${cargo[@]}" build --release --locked -p scidtopgn-cli --bin scidtopgn >&2 || return 1
+  "$repo/compat/build-scidvspc" "$compat_work"
+}
+if ! build; then
+  echo "FAIL  build: the tools didn't build"
+  exit 1
+fi
+target=${CARGO_TARGET_DIR:-$repo/target}
+[[ $target == /* ]] || target=$PWD/$target
+scidtopgn=$target/release/scidtopgn
+compat_work=$(cd "$compat_work" && pwd)
+pgnscid=$compat_work/scidvspc/bin/pgnscid
+tcscid=$compat_work/scidvspc/bin/tcscid
+
+# --- Measuring --------------------------------------------------------------
+
+results=$run/results.tsv
+imports=$run/imports.tsv
+printf 'size\tdatabase\toperation\tgames\tseconds\tpeak_mb\tstatus\n' > "$results"
+printf 'size\tfile\tgames_before\tseconds\tpeak_mb\tstatus\n' > "$imports"
+
+# /usr/bin/time is run directly, not from a function, so that the command it
+# runs is its child, whose memory measure watches.
+if [[ $os == Darwin ]]; then timed=(/usr/bin/time -l); else timed=(/usr/bin/time -f 'bench-time %e %M'); fi
+
+# measure NAME COMMAND...: runs COMMAND, with its stdout in NAME.out and its
+# stderr in NAME.log, and stops it if its resident memory passes the limit.
+# Sets seconds, peak_mb, and status: ok, "exit N", or "stopped at the memory
+# limit".
+measure() {
+  local name=$1 pid child rss stopped=0 code
+  shift
+  "${timed[@]}" "$@" > "$name.out" 2> "$name.log" &
+  pid=$!
+  # The redirection hides the shell's notice that a stopped job terminated.
+  {
+    while kill -0 "$pid"; do
+      child=$(pgrep -P "$pid" | head -n 1)
+      rss=$(ps -o rss= -p "${child:-$pid}" | tr -d ' ')
+      if [[ -n $child && ${rss:-0} -gt $((limit_mb * 1024)) ]]; then
+        kill "$child"
+        stopped=1
+      fi
+      sleep 0.2
+    done
+    wait "$pid"
+    code=$?
+  } 2> /dev/null
+  if [[ $os == Darwin ]]; then
+    seconds=$(awk '$2 == "real" { s = $1 } END { print s }' "$name.log")
+    peak_mb=$(awk '/maximum resident set size/ { m = $1 } END { printf "%d", m / 1048576 }' "$name.log")
+  else
+    seconds=$(awk '$1 == "bench-time" { s = $2 } END { print s }' "$name.log")
+    peak_mb=$(awk '$1 == "bench-time" { m = $3 } END { printf "%d", m / 1024 }' "$name.log")
+  fi
+  if [[ $stopped -eq 1 ]]; then
+    status="stopped at the memory limit"
+  elif [[ $code -ne 0 ]]; then
+    status="exit $code"
+  else
+    status=ok
+  fi
+}
+
+# record SIZE DATABASE OPERATION GAMES: adds the last measurement to the
+# results.
+record() {
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "$seconds" "$peak_mb" "$status" >> "$results"
+  printf '  %-6s %-9s %-24s %8ss %7s MB  %s\n' "$1" "$2" "$3" "$seconds" "$peak_mb" "$status" >&2
+}
+
+# total_games DB: the number of games `scidtopgn info` gives for DB.
+total_games() {
+  "$scidtopgn" info "$1" 2> /dev/null | awk -F': ' '/^Total games:/ { print $2 }'
+}
+
+# done_field N LOG: from import's last line, "Done. A games imported, B
+# skipped. Database now has C games (was D).", field A, B, C, or D.
+done_field() {
+  sed -n -E 's/^Done\. ([0-9]+) games imported, ([0-9]+) skipped\. Database now has ([0-9]+) games \(was ([0-9]+)\)\.$/\1 \2 \3 \4/p' "$2" |
+    tail -n 1 | cut -d' ' -f "$1"
+}
+
+# bench SIZE COUNT: measures every operation on the first COUNT files.
+bench() {
+  local size=$1 count=$2 i f db label games skipped warnings utf8 total n_skipped
+  mkdir -p "$run/$size"
+  cd "$run/$size" || exit 1
+  echo "Measuring the $size: $count files" >&2
+
+  for ((i = 0; i < count; i++)); do cat "${files[i]}"; echo; done > all.pgn
+
+  measure pgnscid "$pgnscid" -f all.pgn scid
+  record "$size" pgnscid "import (pgnscid)" "$(total_games scid)"
+
+  # One file at a time: the first creates the database, each later one
+  # appends to it.
+  local sum=0 peak=0 failed=ok
+  skipped=0 warnings=0 utf8=0
+  for ((i = 0; i < count; i++)); do
+    f=${files[i]}
+    measure "import-$i" "$scidtopgn" import "$f" -o files --verbose
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$size" "$(basename "$f")" "$(done_field 4 "import-$i.log")" \
+      "$seconds" "$peak_mb" "$status" >> "$imports"
+    sum=$(awk -v a="$sum" -v b="$seconds" 'BEGIN { print a + b }')
+    [[ $peak_mb -le $peak ]] || peak=$peak_mb
+    [[ $status == ok ]] || failed="$status in $(basename "$f")"
+    n_skipped=$(done_field 2 "import-$i.log")
+    skipped=$((skipped + ${n_skipped:-0}))
+    warnings=$((warnings + $(grep -c '^Warning: ' "import-$i.log")))
+    utf8=$((utf8 + $(grep -c "that isn't UTF-8" "import-$i.log")))
+    rm -f "import-$i.out"
+  done
+  games=$(total_games files)
+  seconds=$sum peak_mb=$peak status=$failed
+  record "$size" scidtopgn "import one at a time" "$games"
+  printf '%s\t%s\t%s\t%s\n' "$size" "$skipped" "$warnings" "$utf8" >> "$run/import-warnings.tsv"
+
+  measure whole "$scidtopgn" import all.pgn -o whole
+  record "$size" scidtopgn "import all at once" "$(total_games whole)"
+  rm -f whole.si4 whole.sn4 whole.sg4
+
+  for db in files scid; do
+    if [[ $db == files ]]; then label=scidtopgn; else label=pgnscid; fi
+    total=$(total_games "$db")
+    measure "$db-info" "$scidtopgn" info "$db"
+    record "$size" "$label" info "$total"
+    measure "$db-export" "$scidtopgn" export "$db" -o "$db-export.pgn"
+    record "$size" "$label" "export" "$total"
+    rm -f "$db-export.pgn"
+    measure "$db-validate" "$scidtopgn" validate "$db"
+    record "$size" "$label" validate "$total"
+    measure "$db-search" "$scidtopgn" export "$db" --white carlsen -o "$db-search.pgn"
+    record "$size" "$label" "header search" "$total"
+    measure "$db-append" "$scidtopgn" import "$chunk" -o "$db" --verbose
+    record "$size" "$label" "append" "$total"
+  done
+  rm -f all.pgn
+}
+
+commit=$(git -C "$repo" rev-parse HEAD 2> /dev/null || echo unknown)
+git -C "$repo" diff --quiet HEAD 2> /dev/null || commit+=" with uncommitted changes"
+started=$(date -u '+%Y-%m-%d %H:%M UTC')
+
+bench sample "$sample"
+# The sample's databases aren't needed again, and the full run needs the space.
+rm -rf "$run/sample"
+bench full "$n"
+
+# --- SCID vs. PC ------------------------------------------------------------
+
+cd "$run/full" || exit 1
+echo "Opening both databases in SCID vs. PC, and searching for 1.e4" >&2
+"$tcscid" "$tcl/open.tcl" files scid > tcscid-open.txt 2>&1
+open_status=$?
+echo 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1' > e4.fen
+"$tcscid" "$tcl/search.tcl" e4.fen files > files-e4.txt 2>&1
+e4_files_status=$?
+"$tcscid" "$tcl/search.tcl" e4.fen scid > scid-e4.txt 2>&1
+e4_scid_status=$?
+finished=$(date -u '+%Y-%m-%d %H:%M UTC')
+
+# --- Checking ---------------------------------------------------------------
+
+passed=0
+failed=0
+checks=$run/checks.txt
+: > "$checks"
+
+check() {
+  local result=$1
+  shift
+  printf '%-4s  %s\n' "$result" "$*" | tee -a "$checks"
+  if [[ $result == PASS ]]; then passed=$((passed + 1)); else failed=$((failed + 1)); fi
+}
+
+# field SIZE DATABASE OPERATION COLUMN: a column of a result.
+field() {
+  awk -F '\t' -v s="$1" -v d="$2" -v o="$3" -v c="$4" '
+    NR == 1 { for (i = 1; i <= NF; i++) col[$i] = i; next }
+    $1 == s && $2 == d && $3 == o { print $col[c] }' "$results"
+}
+
+echo
+echo "Checks"
+# One check for each operation: it works at both sizes, its time and peak
+# memory at full size are at most 1.5 times what linear growth from the
+# sample predicts, and its peak memory is within the limit. Results under 1
+# second or 64 MB are too small to compare. pgnscid's import is the
+# baseline, and isn't checked.
+while IFS=$'\t' read -r verdict text; do
+  check "$verdict" "$text"
+done < <(awk -F '\t' -v limit="$limit_mb" '
+  NR == 1 || $3 == "import (pgnscid)" { next }
+  { key = $2 SUBSEP $3 }
+  $1 == "sample" { sg[key] = $4; ss[key] = $5; sm[key] = $6; st[key] = $7; next }
+  {
+    name = ($3 ~ /^import/) ? "scidtopgn " $3 : $3 " on the " $2 " database"
+    if ($7 != "ok") { print "FAIL\t" name ": " $7; next }
+    if (st[key] != "ok") { print "FAIL\t" name ": " st[key] " in the sample"; next }
+    fails = ""
+    detail = sprintf("%s s and %s MB", $5, $6)
+    if (sg[key] > 0 && $4 > 0) {
+      g = $4 / sg[key]
+      rs = ss[key] > 0 ? $5 / ss[key] : 0
+      rm = sm[key] > 0 ? $6 / sm[key] : 0
+      if ($5 >= 1 && (rs == 0 || rs > 1.5 * g)) fails = fails sprintf("; time grows %.1fx", rs)
+      if ($6 >= 64 && (rm == 0 || rm > 1.5 * g)) fails = fails sprintf("; memory grows %.1fx", rm)
+      detail = detail sprintf(", %.1fx and %.1fx the sample, for %.1fx the games", rs, rm, g)
+    } else {
+      detail = detail ", with no sample to compare"
+    }
+    if ($6 > limit) fails = fails sprintf("; over the memory limit of %s MB", limit)
+    if (fails != "") print "FAIL\t" name ": " substr(fails, 3) ": " detail
+    else print "PASS\t" name ": " detail
+  }' "$results")
+
+files_games=$(field full scidtopgn "import one at a time" games)
+scid_games=$(field full pgnscid "import (pgnscid)" games)
+whole_games=$(field full scidtopgn "import all at once" games)
+if [[ $(field full scidtopgn "import all at once" status) == ok ]]; then
+  if [[ $whole_games == "$files_games" ]]; then
+    check PASS "importing all at once stores as many games as one at a time: $files_games"
+  else
+    check FAIL "importing all at once stores $whole_games games, and one at a time $files_games"
+  fi
+fi
+
+expected_games=0
+expected_e4=0
+reason=
+for entry in ${explained[@]+"${explained[@]}"}; do
+  read -r sum games_diff e4_diff why <<< "$entry"
+  [[ $sum != "$checksum" ]] || { expected_games=$games_diff; expected_e4=$e4_diff; reason=$why; }
+done
+diff_games=$((scid_games - files_games))
+if [[ $diff_games -eq $expected_games ]]; then
+  check PASS "pgnscid stores $scid_games games, and scidtopgn $files_games${reason:+: $reason}"
+else
+  check FAIL "pgnscid stores $scid_games games, and scidtopgn $files_games: $diff_games more, where $expected_games are explained"
+fi
+
+if [[ $open_status -eq 0 ]]; then
+  check PASS "SCID vs. PC opens both databases after the append"
+else
+  check FAIL "SCID vs. PC can't open both databases after the append: $(tr '\n' ' ' < tcscid-open.txt)"
+fi
+for db in files scid; do
+  want=$(done_field 3 "$db-append.log")
+  got=$(awk -v p="$db:" '$1 == p { print $2 }' tcscid-open.txt)
+  label=scidtopgn
+  [[ $db == files ]] || label=pgnscid
+  if [[ -n $want && $got == "$want" ]]; then
+    check PASS "SCID vs. PC reads $got games in the $label database after the append"
+  else
+    check FAIL "SCID vs. PC reads ${got:-no} games in the $label database after the append, where scidtopgn wrote ${want:-none}"
+  fi
+done
+
+e4() { sed -n -E 's/^board=[0-9]+ tree=([0-9]+) .*/\1/p' "$1"; }
+e4_files=$(e4 files-e4.txt)
+e4_scid=$(e4 scid-e4.txt)
+if [[ $e4_files_status -ne 0 || $e4_scid_status -ne 0 || -z $e4_files || -z $e4_scid ]]; then
+  check FAIL "SCID vs. PC can't search for 1.e4 in both databases (see ${run#"$repo"/}/full/*-e4.txt)"
+elif [[ $((e4_scid - e4_files)) -eq $expected_e4 ]]; then
+  check PASS "SCID vs. PC's tree search finds 1.e4 in $e4_scid games of the pgnscid database, and $e4_files of the scidtopgn database"
+else
+  check FAIL "SCID vs. PC's tree search finds 1.e4 in $e4_scid games of the pgnscid database, and $e4_files of the scidtopgn database"
+fi
+
+# --- Reporting --------------------------------------------------------------
+
+rustc_version=$(rustc ${toolchain:+"$toolchain"} --version 2> /dev/null || echo unknown)
+read -r skipped warnings utf8 < <(awk -F '\t' '$1 == "full" { print $2, $3, $4 }' "$run/import-warnings.tsv")
+report=$run/results.md
+{
+  echo "# Benchmark results"
+  echo
+  echo "| | |"
+  echo "| --- | --- |"
+  echo "| Commit | $commit |"
+  echo "| Run | $started to $finished |"
+  echo "| Machine | $machine |"
+  echo "| CPU | $cpu |"
+  echo "| RAM | $ram_mb MB; memory limit $limit_mb MB |"
+  echo "| Free disk | $((free_kb / 1024)) MB in the work directory at the start |"
+  echo "| Rust | $rustc_version |"
+  echo "| SCID vs. PC | $(sed -n 's/^version=//p' "$repo/compat/build-scidvspc") |"
+  echo "| Input | $n files, $((input_kb / 1024)) MB, in $(basename "$dir"); sample: the first $sample files; chunk: $(basename "$chunk") |"
+  echo "| Input checksum | $checksum |"
+  echo "| Import | $skipped games skipped, $warnings warnings, $utf8 names that aren't UTF-8 |"
+  echo
+  echo "The inputs are read just before each size is measured, so they are in the OS file cache if memory allows."
+  echo
+  echo "| Size | Database | Operation | Games | Time (s) | Peak memory (MB) | Status |"
+  echo "| --- | --- | --- | ---: | ---: | ---: | --- |"
+  awk -F '\t' 'NR > 1 { printf "| %s | %s | %s | %s | %s | %s | %s |\n", $1, $2, $3, $4, $5, $6, $7 }' "$results"
+  echo
+  echo "## Checks"
+  echo
+  sed 's/^/- /' "$checks"
+  echo
+  echo "$passed passed, $failed failed"
+} > "$report"
+
+echo
+echo "$passed passed, $failed failed. Results: ${report#"$repo"/}"
+[[ $failed -eq 0 ]]
