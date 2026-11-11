@@ -45,7 +45,7 @@ dir=$(cd "$dir" && pwd)
 # counts, and why.
 explained=(
   # Caissabase 2022-12-24, in 488 files.
-  "4d550e51bec1155dafd899abebb330363b7fbc280eb09a624007b76fdbc16575 5 0 5 Chess960 games, which scidtopgn skips (PGN_IMPORT.md #32)"
+  "4d550e51bec1155dafd899abebb330363b7fbc280eb09a624007b76fdbc16575 5 0 scidtopgn skips 5 Chess960 games, as PGN_IMPORT.md #32 says"
 )
 
 # --- Machine ----------------------------------------------------------------
@@ -355,7 +355,7 @@ for entry in ${explained[@]+"${explained[@]}"}; do
 done
 diff_games=$((scid_games - files_games))
 if [[ $diff_games -eq $expected_games ]]; then
-  check PASS "pgnscid stores $scid_games games, and scidtopgn $files_games${reason:+ ($reason)}"
+  check PASS "pgnscid stores $scid_games games, and scidtopgn $files_games${reason:+: $reason}"
 else
   check FAIL "pgnscid stores $scid_games games, and scidtopgn $files_games: $diff_games more, where $expected_games are explained"
 fi
@@ -383,7 +383,7 @@ e4_scid=$(e4 scid-e4.txt)
 if [[ $e4_files_status -ne 0 || $e4_scid_status -ne 0 || -z $e4_files || -z $e4_scid ]]; then
   check FAIL "SCID vs. PC can't search for 1.e4 in both databases (see ${run#"$repo"/}/full/*-e4.txt)"
 elif [[ $((e4_scid - e4_files)) -eq $expected_e4 ]]; then
-  check PASS "SCID vs. PC's tree search finds 1.e4 in $e4_scid games of the pgnscid database, and $e4_files of the scidtopgn database${reason:+ ($reason)}"
+  check PASS "SCID vs. PC's tree search finds 1.e4 in $e4_scid games of the pgnscid database, and $e4_files of the scidtopgn database"
 else
   check FAIL "SCID vs. PC's tree search finds 1.e4 in $e4_scid games of the pgnscid database, and $e4_files of the scidtopgn database"
 fi
