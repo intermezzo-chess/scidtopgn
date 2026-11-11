@@ -94,7 +94,8 @@ hash_stdin() {
   if command -v sha256sum > /dev/null; then sha256sum | cut -d' ' -f1; else shasum -a 256 | cut -d' ' -f1; fi
 }
 
-input_kb=$(du -k "${files[@]}" | awk '{ s += $1 } END { print s }')
+# The size of what each file holds, through any link, which du wouldn't follow.
+input_kb=$(for f in "${files[@]}"; do wc -c < "$f"; done | awk '{ s += $1 } END { printf "%d", s / 1024 }')
 echo "Hashing the inputs" >&2
 checksum=$(for f in "${files[@]}"; do hash_stdin < "$f"; done | hash_stdin)
 
@@ -306,10 +307,11 @@ field() {
 
 echo
 echo "Checks"
-# One check for each operation: it works, its time and peak memory at full
-# size are at most 1.5 times what linear growth from the sample predicts, and
-# its peak memory is within the limit. Results under 1 second or 64 MB are
-# too small to compare. pgnscid's import is the baseline, and isn't checked.
+# One check for each operation: it works at both sizes, its time and peak
+# memory at full size are at most 1.5 times what linear growth from the
+# sample predicts, and its peak memory is within the limit. Results under 1
+# second or 64 MB are too small to compare. pgnscid's import is the
+# baseline, and isn't checked.
 while IFS=$'\t' read -r verdict text; do
   check "$verdict" "$text"
 done < <(awk -F '\t' -v limit="$limit_mb" '
@@ -319,9 +321,10 @@ done < <(awk -F '\t' -v limit="$limit_mb" '
   {
     name = ($3 ~ /^import/) ? "scidtopgn " $3 : $3 " on the " $2 " database"
     if ($7 != "ok") { print "FAIL\t" name ": " $7; next }
+    if (st[key] != "ok") { print "FAIL\t" name ": " st[key] " in the sample"; next }
     fails = ""
     detail = sprintf("%s s and %s MB", $5, $6)
-    if (st[key] == "ok" && sg[key] > 0 && $4 > 0) {
+    if (sg[key] > 0 && $4 > 0) {
       g = $4 / sg[key]
       rs = ss[key] > 0 ? $5 / ss[key] : 0
       rm = sm[key] > 0 ? $6 / sm[key] : 0

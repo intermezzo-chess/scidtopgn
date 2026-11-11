@@ -50,7 +50,7 @@ Each operation's time is its wall time, and its memory its peak resident set siz
 
 | Check | Passes when |
 | --- | --- |
-| Each operation, on all the files | It exits with 0, and it isn't stopped at the memory limit. Its time and its memory are each at most 1.5 times what growing in proportion to the number of games from the sample predicts. A time under 1 second or a memory under 64 MB is too small to compare, and passes |
+| Each operation | It exits with 0, and it isn't stopped at the memory limit, on the sample and on all the files. On all the files, its time and its memory are each at most 1.5 times what growing in proportion to the number of games from the sample predicts. A time under 1 second or a memory under 64 MB is too small to compare, and passes |
 | Import all at once | It stores as many games as the import one at a time |
 | Game counts | `pgnscid` and scidtopgn store the same number of games, apart from the difference [explained](#explained-differences) for the input |
 | SCID vs. PC | It opens both databases after the append, and reads as many games in each as scidtopgn reported |
