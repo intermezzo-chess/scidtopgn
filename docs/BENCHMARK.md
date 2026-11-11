@@ -23,7 +23,7 @@ It reads every `*.pgn` file in `<pgn-dir>`, in the numeric order of their names 
 - **Work directory.** Everything is written under `target/bench`, or `$BENCH_WORK` if set. Each run replaces `run/` there. It needs free disk space of about 4 times the size of the input, and it refuses to start without it. For Caissabase, that's about 14 GB.
 - **SCID vs. PC.** `pgnscid` and `tcscid` are built by `compat/build-scidvspc` where `compat/run` keeps them, in `target/compat` or `$COMPAT_WORK`, so the two scripts share them. [SCID_COMPAT.md](SCID_COMPAT.md#prerequisites) lists what building them needs.
 - **Toolchain.** The workspace's `rust-version` applies. Set `CARGO` to choose a toolchain, such as `CARGO="cargo +1.99.1" bench/run <pgn-dir>`.
-- **Linux.** The measurements need GNU time at `/usr/bin/time`, such as from `apt-get install time`.
+- **Platforms.** It has been run on macOS. It has code for Linux, where the measurements need GNU time at `/usr/bin/time`, such as from `apt-get install time`, but it hasn't been run there yet. It doesn't run on Windows. #126 covers both.
 - **Duration.** All of Caissabase takes about half an hour on an Apple M1 Max. A run on a few of its files, such as a directory with links to `1.pgn`, `2.pgn`, and `3.pgn`, takes under a minute, and checks the script itself.
 
 ### Caissabase
