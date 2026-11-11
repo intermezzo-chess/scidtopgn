@@ -64,6 +64,7 @@ case $os in
     ;;
   *) echo "error: bench/run runs on macOS and Linux" >&2; exit 2 ;;
 esac
+[[ ${ram_mb:-0} -gt 0 ]] || { echo "error: can't read the machine's memory size" >&2; exit 2; }
 machine+=", $(uname -m)"
 limit_mb=${limit_mb:-$((ram_mb / 2))}
 [[ $limit_mb =~ ^[1-9][0-9]*$ ]] || { echo "error: --memory-limit must be a number of MB" >&2; exit 2; }
