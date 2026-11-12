@@ -403,9 +403,3 @@ pub enum InvalidMoveByte {
 
 /// A [`std::result::Result`] whose error is [`Error`](enum@Error).
 pub type Result<T> = std::result::Result<T, Error>;
-
-// Errors can cross threads and be stored, for example in `anyhow::Error`.
-const _: fn() = || {
-    fn assert_send_sync_static<T: Send + Sync + 'static>() {}
-    assert_send_sync_static::<Error>();
-};

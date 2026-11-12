@@ -66,6 +66,12 @@
 //! files hold, without reading their records. Chess rules come from
 //! [`shakmaty`], which is re-exported.
 //!
+//! # Threads
+//!
+//! Every public type is [`Send`] and [`Sync`]. A [`Database`] takes
+//! `&mut self` to read games, so to share one between threads, put it
+//! behind a [`Mutex`](std::sync::Mutex).
+//!
 //! Games are numbered from 0 in this API and from 1 in error messages. The
 //! [file format description] gives the binary layout of each file.
 //!
@@ -120,3 +126,37 @@ pub use twins::{DeleteTwin, TwinOptions};
 
 /// This crate's version, such as `0.1.0`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+// Every public type is `Send` and `Sync`, as the crate documentation
+// promises, and errors are also `'static`, so they can be stored, for example
+// in `anyhow::Error`. Losing either is a breaking change.
+const _: fn() = || {
+    fn send_sync<T: Send + Sync>() {}
+    fn send_sync_static<T: Send + Sync + 'static>() {}
+
+    send_sync::<Database>();
+    send_sync::<GameIterator<'_>>();
+    send_sync::<Game>();
+    send_sync::<MoveNode>();
+    send_sync::<Marker>();
+    send_sync::<Tag>();
+    send_sync::<GameMove>();
+    send_sync::<Date>();
+    send_sync::<Eco>();
+    send_sync::<IndexEntry>();
+    send_sync::<GameResult>();
+    send_sync::<RatingType>();
+    send_sync::<NameType>();
+    send_sync::<FlagMatch>();
+    send_sync::<HeaderFlags>();
+    send_sync::<HeaderSearch>();
+    send_sync::<DeleteTwin>();
+    send_sync::<TwinOptions>();
+    send_sync::<PgnParser>();
+    send_sync::<PgnWarning>();
+    send_sync::<PgnWarningKind>();
+    send_sync_static::<Error>();
+    send_sync_static::<DatabaseFile>();
+    send_sync_static::<CorruptGameKind>();
+    send_sync_static::<InvalidMoveByte>();
+};
