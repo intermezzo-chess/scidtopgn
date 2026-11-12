@@ -69,8 +69,8 @@ Import, append, update, delete, and merge are each a [scenario](SCID_COMPAT.md#s
 
 `scidtopgn merge`, and `Database::copy_game`.
 
-- **Kept:** each game's record, index entry, and flags, copied as stored, including logically deleted games (`test_copy_game_copies_the_record_and_entry_as_stored` and `test_copy_game_keeps_custom_and_user_flags`). The sources don't change.
-- **Changed:** names are rewritten as UTF-8, with frequencies that count the new database's games. The new database has no description and no custom flag names, as with SCID's `scmerge` (`test_cli_merge_gives_the_output_a_default_header`).
+- **Kept:** each game's record and flags, copied as stored, including logically deleted games, and its index entry apart from its name IDs and game file offset (`test_copy_game_copies_the_record_and_entry_as_stored` and `test_copy_game_keeps_custom_and_user_flags`). The sources don't change.
+- **Changed:** names are rewritten as UTF-8, with new IDs and with frequencies that count the new database's games. The new database has no description and no custom flag names, as with SCID's `scmerge` (`test_cli_merge_gives_the_output_a_default_header`).
 - **Matches SCID:** the entries, names, and games read back match `pgnscid`'s database from both PGN files (`merge` scenario).
 
 ### Names that aren't UTF-8
