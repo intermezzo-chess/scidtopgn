@@ -30,6 +30,7 @@ const MAX_SAME_MOVES: usize = 120;
 /// [`Database::delete_twins`](crate::Database::delete_twins) deletes, as
 /// SCID's `-delete` option chooses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[non_exhaustive]
 pub enum DeleteTwin {
     /// The game with fewer half-moves, or the lower-numbered game if they
     /// have as many.
@@ -68,13 +69,12 @@ pub enum DeleteTwin {
 /// ```
 /// use scidtopgn::TwinOptions;
 ///
-/// let options = TwinOptions {
-///     players: false,
-///     ..TwinOptions::default()
-/// };
+/// let mut options = TwinOptions::default();
+/// options.players = false;
 /// assert!(options.moves);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub struct TwinOptions {
     /// Twins have the same players. If `false`, only the first 4 bytes of
     /// each player's name must match, as SCID compares them through a hash.

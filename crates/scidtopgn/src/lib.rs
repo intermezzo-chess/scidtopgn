@@ -48,26 +48,29 @@
 //! # Ok::<(), scidtopgn::Error>(())
 //! ```
 //!
-//! # Architecture
+//! # How a database is stored
 //!
-//! A SCID database is three files that share a path without the extension.
-//! Each has its own module, and [`database`] ties them together:
+//! A SCID database is three files that share a path without the extension:
 //!
-//! - The index file, `.si4` ([`index`]), has a header and one fixed-size
-//!   [`IndexEntry`] per game. An entry gives the position and length of the
-//!   game's record in the game file, the IDs of its names, and its date,
-//!   result, ratings, ECO code, and flags, including the logical delete flag.
-//! - The name file, `.sn4` ([`nfile`] and [`namebase`]), stores the player,
-//!   event, site, and round names that index entries refer to by ID.
-//! - The game file, `.sg4` ([`gfile`]), stores each game's record: its other
-//!   tags, its starting position, its moves, and its comments.
+//! - The index file, `.si4`, has a header and one fixed-size entry per game,
+//!   which [`Database::get_entry`] returns as an [`IndexEntry`]. An entry
+//!   gives the game's date, result, ratings, ECO code, and flags, including
+//!   the logical delete flag, the IDs of its names, and where its record is
+//!   in the game file.
+//! - The name file, `.sn4`, stores the player, event, site, and round names
+//!   that index entries refer to by ID.
+//! - The game file, `.sg4`, stores each game's record: its other tags, its
+//!   starting position, its moves, and its comments.
 //!
-//! A game record is decoded into a [`Game`] by [`game`], using SCID's move
-//! encoding from [`mov`] and the piece numbering in [`position`].
-//! [`bytebuf`] reads and writes the record's bytes, and [`date`] SCID's packed
-//! dates. [`search`] chooses the games [`Database::search_header`] selects,
-//! and [`twins`] the twin games [`Database::delete_twins`] deletes. Chess rules come from [`shakmaty`], which is re-exported. [`pgn`]
-//! reads PGN, and [`error`] defines the errors.
+//! [`Database::search_header`] selects games by what the index and name
+//! files hold, without reading their records. Chess rules come from
+//! [`shakmaty`], which is re-exported.
+//!
+//! # Threads
+//!
+//! Every public type is [`Send`] and [`Sync`]. A [`Database`] takes
+//! `&mut self` to read games, so to share one between threads, put it
+//! behind a [`Mutex`](std::sync::Mutex).
 //!
 //! Games are numbered from 0 in this API and from 1 in error messages. The
 //! [file format description] gives the binary layout of each file.
@@ -75,54 +78,85 @@
 //! [file format description]: https://github.com/intermezzo-chess/scidtopgn/blob/main/SCID_DATABASE_FORMAT.md
 
 #![warn(missing_docs)]
+#![warn(unreachable_pub)]
 
-pub mod bytebuf;
-pub mod common;
-pub mod database;
-pub mod date;
-pub mod error;
-pub mod game;
-pub mod gfile;
-pub mod index;
-pub mod mov;
-pub mod namebase;
-pub mod nfile;
-pub mod pgn;
-pub mod position;
+// Each of a database's files has its own module, and `database` ties them
+// together: `index` reads and writes the index file, `nfile` and `namebase`
+// the name file, and `gfile` the game file. `game` decodes a game record
+// into a `Game`, using SCID's move encoding from `mov` and the piece
+// numbering in `position`; `database` encodes one. `bytebuf` reads and
+// writes a record's bytes, and `date` SCID's packed dates. `search` chooses
+// the games `Database::search_header` selects, `twins` the twin games
+// `Database::delete_twins` deletes, and `stored_line` the stored-line code
+// an index entry records. `replace` writes files beside a database and
+// moves them into place. `pgn` reads PGN, and `error` defines the errors.
+mod bytebuf;
+mod common;
+mod database;
+mod date;
+mod error;
+mod game;
+mod gfile;
+mod index;
+mod mov;
+mod namebase;
+mod nfile;
+mod pgn;
+mod position;
 mod replace;
-pub mod search;
+mod search;
 mod stored_line;
-pub mod twins;
+#[cfg(test)]
+mod tests;
+mod twins;
 
-pub use bytebuf::ByteBuffer;
 pub use common::{GameResult, RatingType};
 pub use database::{Database, GameIterator};
-pub use date::{
-    date_decode_to_string, date_encode_from_string, date_get_day, date_get_month, date_get_year,
-    date_make, date_valid_string, Date, YEAR_MAX,
-};
+pub use date::{Date, YEAR_MAX};
 pub use error::{CorruptGameKind, DatabaseFile, Error, InvalidMoveByte, Result};
-pub use game::{
-    nag_to_symbol, Game, Marker, MoveNode, Tag, GAME_DECODE_ALL, GAME_DECODE_COMMENTS,
-    GAME_DECODE_NONE, GAME_DECODE_TAGS, MAX_NAGS, MAX_TAGS,
-};
-pub use gfile::{FileMode, GFile, GFILE_SUFFIX, GF_BLOCKSIZE};
-pub use index::{
-    Eco, Index, IndexEntry, IndexHeader, INDEX_ENTRY_SIZE, INDEX_HEADER_SIZE, INDEX_MAGIC,
-    INDEX_SUFFIX, MAX_GAMES, SCID_VERSION,
-};
-pub use mov::{
-    decode_move, encode_move, make_move_byte, parse_move_byte, GameMove, ENCODE_COMMENT,
-    ENCODE_END_GAME, ENCODE_END_MARKER, ENCODE_FIRST, ENCODE_NAG, ENCODE_START_MARKER,
-};
-pub use namebase::{NameBase, NameEntry, NameType, NAMEBASE_MAGIC, NUM_NAME_TYPES};
-pub use nfile::NFile;
+pub use game::{nag_to_symbol, Game, Marker, MoveNode, Tag, MAX_TAGS};
+pub use index::{Eco, IndexEntry, MAX_ELO, MAX_GAMES, SCID_VERSION};
+pub use mov::GameMove;
+pub use namebase::NameType;
 pub use pgn::{parse_pgn, parse_single_game, PgnParser, PgnWarning, PgnWarningKind};
-pub use position::{PieceList, ScidPosition};
-pub use search::{FlagMatch, HeaderFlags, HeaderSearch};
+pub use search::{FlagMatch, HeaderFlags, HeaderSearch, DEFAULT_MAX_LENGTH};
 /// The chess library that provides the rules, positions, and moves.
 pub use shakmaty;
 pub use twins::{DeleteTwin, TwinOptions};
 
 /// This crate's version, such as `0.1.0`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+// Every public type is `Send` and `Sync`, as the crate documentation
+// promises, and errors are also `'static`, so they can be stored, for example
+// in `anyhow::Error`. Losing either is a breaking change.
+const _: fn() = || {
+    fn send_sync<T: Send + Sync>() {}
+    fn send_sync_static<T: Send + Sync + 'static>() {}
+
+    send_sync::<Database>();
+    send_sync::<GameIterator<'_>>();
+    send_sync::<Game>();
+    send_sync::<MoveNode>();
+    send_sync::<Marker>();
+    send_sync::<Tag>();
+    send_sync::<GameMove>();
+    send_sync::<Date>();
+    send_sync::<Eco>();
+    send_sync::<IndexEntry>();
+    send_sync::<GameResult>();
+    send_sync::<RatingType>();
+    send_sync::<NameType>();
+    send_sync::<FlagMatch>();
+    send_sync::<HeaderFlags>();
+    send_sync::<HeaderSearch>();
+    send_sync::<DeleteTwin>();
+    send_sync::<TwinOptions>();
+    send_sync::<PgnParser>();
+    send_sync::<PgnWarning>();
+    send_sync::<PgnWarningKind>();
+    send_sync_static::<Error>();
+    send_sync_static::<DatabaseFile>();
+    send_sync_static::<CorruptGameKind>();
+    send_sync_static::<InvalidMoveByte>();
+};

@@ -1,7 +1,7 @@
-use scidtopgn::shakmaty::fen::Fen;
-use scidtopgn::shakmaty::uci::UciMove;
-use scidtopgn::shakmaty::{CastlingMode, Chess, Color, Position, Square};
-use scidtopgn::{GameMove, PieceList, ScidPosition};
+use crate::shakmaty::fen::Fen;
+use crate::shakmaty::uci::UciMove;
+use crate::shakmaty::{CastlingMode, Chess, Color, Position, Square};
+use crate::{position::PieceList, position::ScidPosition, GameMove};
 
 fn position(fen: &str) -> ScidPosition {
     let chess: Chess = fen
@@ -199,8 +199,8 @@ fn test_null_move() {
 #[test]
 fn test_illegal_moves_are_rejected() {
     let mut pos = ScidPosition::standard();
-    let m = scidtopgn::shakmaty::Move::Normal {
-        role: scidtopgn::shakmaty::Role::Knight,
+    let m = crate::shakmaty::Move::Normal {
+        role: crate::shakmaty::Role::Knight,
         from: Square::B1,
         capture: None,
         to: Square::D2,
@@ -208,7 +208,7 @@ fn test_illegal_moves_are_rejected() {
     };
     assert!(matches!(
         pos.play(GameMove::Move(m)),
-        Err(scidtopgn::Error::InvalidMove { .. })
+        Err(crate::Error::InvalidMove { .. })
     ));
     assert_eq!(pos.pieces(), &PieceList::standard());
 }

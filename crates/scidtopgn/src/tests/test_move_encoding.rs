@@ -1,8 +1,9 @@
-use scidtopgn::shakmaty::uci::UciMove;
-use scidtopgn::{
-    decode_move, encode_move, parse_move_byte, ByteBuffer, Game, GameMove, ScidPosition,
-    ENCODE_COMMENT, ENCODE_END_GAME, ENCODE_END_MARKER, ENCODE_NAG, ENCODE_START_MARKER,
-    GAME_DECODE_COMMENTS, GAME_DECODE_NONE,
+use crate::shakmaty::uci::UciMove;
+use crate::{
+    bytebuf::ByteBuffer, game::GAME_DECODE_COMMENTS, game::GAME_DECODE_NONE, mov::decode_move,
+    mov::encode_move, mov::parse_move_byte, mov::ENCODE_COMMENT, mov::ENCODE_END_GAME,
+    mov::ENCODE_END_MARKER, mov::ENCODE_NAG, mov::ENCODE_START_MARKER, position::ScidPosition,
+    Game, GameMove,
 };
 
 /// Encodes the moves, given in UCI, from the standard starting position,

@@ -14,41 +14,9 @@ pub enum GameResult {
 }
 
 impl GameResult {
-    /// Reads SCID's one-character result: `1`, `0`, `=` (or `2`) for a
-    /// draw, and anything else for no result.
-    pub fn from_char(c: char) -> Self {
-        match c {
-            '1' => GameResult::White,
-            '0' => GameResult::Black,
-            '=' | '2' => GameResult::Draw,
-            _ => GameResult::None,
-        }
-    }
-
-    /// Returns SCID's one-character result: `1`, `0`, `=`, or `*`.
-    pub fn to_char(self) -> char {
-        match self {
-            GameResult::White => '1',
-            GameResult::Black => '0',
-            GameResult::Draw => '=',
-            GameResult::None => '*',
-        }
-    }
-
-    /// Reads the result from the low two bits of `b`, as an index entry
-    /// stores it.
-    pub fn from_byte(b: u8) -> Self {
-        match b & 3 {
-            1 => GameResult::White,
-            2 => GameResult::Black,
-            3 => GameResult::Draw,
-            _ => GameResult::None,
-        }
-    }
-
     /// Returns the result as an index entry stores it: 0 for none, 1 for
     /// White, 2 for Black, and 3 for a draw.
-    pub fn to_byte(self) -> u8 {
+    pub(crate) fn to_byte(self) -> u8 {
         match self {
             GameResult::None => 0,
             GameResult::White => 1,
@@ -108,7 +76,7 @@ impl RatingType {
 
     /// Reads the kind as an index entry stores it, from 0 for Elo to 6 for
     /// ECF. SCID names no kind above 6, so one is read as Elo.
-    pub fn from_byte(b: u8) -> Self {
+    pub(crate) fn from_byte(b: u8) -> Self {
         Self::ALL
             .get(usize::from(b))
             .copied()
@@ -117,7 +85,7 @@ impl RatingType {
 
     /// Returns the kind as an index entry stores it, from 0 for Elo to 6
     /// for ECF.
-    pub fn to_byte(self) -> u8 {
+    pub(crate) fn to_byte(self) -> u8 {
         self as u8
     }
 
@@ -169,21 +137,14 @@ mod tests {
     }
 
     #[test]
-    fn test_game_result_chars_and_bytes() {
-        for (result, ch, byte) in [
-            (GameResult::None, '*', 0),
-            (GameResult::White, '1', 1),
-            (GameResult::Black, '0', 2),
-            (GameResult::Draw, '=', 3),
+    fn test_game_result_bytes() {
+        for (result, byte) in [
+            (GameResult::None, 0),
+            (GameResult::White, 1),
+            (GameResult::Black, 2),
+            (GameResult::Draw, 3),
         ] {
-            assert_eq!(result.to_char(), ch);
-            assert_eq!(GameResult::from_char(ch), result);
             assert_eq!(result.to_byte(), byte);
-            assert_eq!(GameResult::from_byte(byte), result);
-            // Only the low two bits hold the result.
-            assert_eq!(GameResult::from_byte(byte | 0xFC), result);
         }
-        assert_eq!(GameResult::from_char('2'), GameResult::Draw);
-        assert_eq!(GameResult::from_char('x'), GameResult::None);
     }
 }

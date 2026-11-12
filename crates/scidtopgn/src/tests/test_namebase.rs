@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::io::BufReader;
 
-use scidtopgn::{NFile, NameBase, NameType};
+use crate::{namebase::NameBase, nfile::NFile, NameType};
 
 const TEST_DATA_PATH: &str = "../../tests/data";
 
@@ -217,7 +217,7 @@ fn test_accents_sn4_roundtrip() {
 
 #[test]
 fn test_name_type_conversions() {
-    use scidtopgn::Error;
+    use crate::Error;
 
     for (value, ntype, text) in [
         (0, NameType::Player, "player"),
@@ -259,7 +259,7 @@ fn test_clear_and_timestamp() {
 
 #[test]
 fn test_name_base_full() {
-    use scidtopgn::Error;
+    use crate::Error;
 
     // Round has the fewest IDs.
     let max = NameType::Round.max_id();

@@ -301,11 +301,45 @@ fn test_cli_pgn_roundtrip() {
     assert_eq!(reread.to_pgn(), source.to_pgn());
 }
 
+// The layout of a .si4 index file, as SCID_DATABASE_FORMAT.md describes
+// it. Numbers are big-endian.
+const INDEX_HEADER_SIZE: usize = 182;
+const INDEX_ENTRY_SIZE: usize = 47;
+// Byte offsets in the header of the base type (u32), the auto-load game
+// (u24), the description, and the custom flag descriptions, which end the
+// header.
+const HEADER_BASE_TYPE: usize = 10;
+const HEADER_AUTO_LOAD: usize = 17;
+const HEADER_DESCRIPTION: usize = 20;
+const HEADER_CUSTOM_FLAGS: usize = 128;
 // Byte offset of the low byte of an index entry's big-endian flags field
 // (offset u32, length u16, length-high u8, then flags u16).
 const ENTRY_FLAGS_LOW_BYTE: usize = 8;
+// The logical delete flag in that byte.
+const ENTRY_DELETE_FLAG: u8 = 1 << 3;
 // Byte offset of an index entry's big-endian game-file offset.
 const ENTRY_OFFSET: usize = 0;
+// Byte offsets of the byte whose low two bits are the high bits of an index
+// entry's round ID, and of the ID's low 16 bits.
+const ENTRY_ROUND_HIGH: usize = 14;
+const ENTRY_ROUND_LOW: usize = 19;
+
+/// The position of entry `n`, counting from 0, in an index file.
+fn entry_pos(n: u32) -> usize {
+    INDEX_HEADER_SIZE + n as usize * INDEX_ENTRY_SIZE
+}
+
+/// The offset and length of game `n`'s record in the game file of the
+/// database at `db`, read from its index entry.
+fn record_location(db: &Path, n: u32) -> (u32, u32) {
+    let index = std::fs::read(db.with_extension("si4")).expect("Failed to read index");
+    let entry = &index[entry_pos(n)..entry_pos(n + 1)];
+    let offset = u32::from_be_bytes(entry[ENTRY_OFFSET..ENTRY_OFFSET + 4].try_into().unwrap());
+    // The length's 17th bit is the top bit of the byte after its low 16.
+    let length =
+        u32::from(u16::from_be_bytes([entry[4], entry[5]])) | (u32::from(entry[6] & 0x80) << 9);
+    (offset, length)
+}
 
 /// Copies a test database into `dir` and sets the logical delete flag on the
 /// given entries directly in the copied .si4, leaving every record in place.
@@ -326,10 +360,7 @@ fn set_deleted(db: &Path, deleted: &[u32]) {
     let si4 = db.with_extension("si4");
     let mut bytes = std::fs::read(&si4).expect("Failed to read index");
     for &n in deleted {
-        let pos = scidtopgn::index::INDEX_HEADER_SIZE
-            + n as usize * scidtopgn::index::INDEX_ENTRY_SIZE
-            + ENTRY_FLAGS_LOW_BYTE;
-        bytes[pos] |= scidtopgn::index::IDX_MASK_DELETE as u8;
+        bytes[entry_pos(n) + ENTRY_FLAGS_LOW_BYTE] |= ENTRY_DELETE_FLAG;
     }
     std::fs::write(&si4, bytes).expect("Failed to write index");
 
@@ -677,22 +708,21 @@ fn test_cli_import_abort_leaves_the_database_as_it_was() {
     }
 }
 
-/// Moves `buf` past the tags at the start of a game record: the compact
-/// event date (255), common tags stored by code (241 to 254), and tags
-/// stored by name, up to the 0 that ends them.
-fn skip_tags(buf: &mut scidtopgn::ByteBuffer) {
+/// Returns the length of the tags at the start of game record `record`:
+/// the compact event date (255), common tags stored by code (241 to 254),
+/// and tags stored by name, up to and including the 0 that ends them.
+fn tags_len(record: &[u8]) -> usize {
+    let mut pos = 0;
     loop {
-        match buf.get_byte().unwrap() {
-            0 => break,
-            255 => buf.skip(3).unwrap(),
-            code if code > 240 => {
-                let len = buf.get_byte().unwrap();
-                buf.skip(usize::from(len)).unwrap();
-            }
+        let code = record[pos];
+        pos += 1;
+        match code {
+            0 => return pos,
+            255 => pos += 3,
+            code if code > 240 => pos += 1 + usize::from(record[pos]),
             name_len => {
-                buf.skip(usize::from(name_len)).unwrap();
-                let len = buf.get_byte().unwrap();
-                buf.skip(usize::from(len)).unwrap();
+                pos += usize::from(name_len);
+                pos += 1 + usize::from(record[pos]);
             }
         }
     }
@@ -702,17 +732,11 @@ fn skip_tags(buf: &mut scidtopgn::ByteBuffer) {
 /// with 1.e4 (piece 12, value 15), with the illegal exf3. Returns the
 /// position of the changed byte in the game's record.
 fn corrupt_first_move(db: &Path, game: u32) -> usize {
-    let offset = scidtopgn::Database::open(db)
-        .expect("Failed to open database")
-        .get_entry(game)
-        .expect("no such game")
-        .get_offset() as usize;
+    let offset = record_location(db, game).0 as usize;
     let sg4 = db.with_extension("sg4");
     let mut bytes = std::fs::read(&sg4).expect("Failed to read .sg4");
-    let mut record = scidtopgn::ByteBuffer::from_slice(&bytes[offset..]);
-    skip_tags(&mut record);
     // The flags byte comes before the first move.
-    let first_move = offset + record.position() + 1;
+    let first_move = offset + tags_len(&bytes[offset..]) + 1;
     assert_eq!(bytes[first_move], 0xCF, "game {game} starts with 1.e4");
     bytes[first_move] = 0xC2;
     std::fs::write(&sg4, bytes).expect("Failed to write .sg4");
@@ -1548,8 +1572,16 @@ fn test_cli_info_reads_only_the_index_and_name_files() {
     assert!(!output.status.success(), "export should fail");
     assert_eq!(info(&db), expected);
 
+    // Missing, so the database can't be opened.
     std::fs::remove_file(&sg4).expect("Failed to remove .sg4");
-    assert_eq!(info(&db), expected);
+    let output = cli()
+        .arg("info")
+        .arg(&db)
+        .output()
+        .expect("Failed to run CLI");
+    assert!(!output.status.success(), "info should fail");
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
+    assert!(stderr.contains("SCID game file (.sg4)"), "{stderr}");
 }
 
 /// Runs `validate` on `db` with `args`, checks that it writes nothing to
@@ -1621,11 +1653,7 @@ fn test_cli_validate_reports_damaged_active_and_deleted_games() {
 fn test_cli_validate_reports_records_past_the_end_of_the_game_file() {
     let temp = TempDir::new().expect("Failed to create temp dir");
     let db = copy_with_deleted(temp.path(), "five", &[]);
-    let (offset, length) = {
-        let db = scidtopgn::Database::open(&db).expect("Failed to open database");
-        let entry = db.get_entry(4).expect("five has five games");
-        (entry.get_offset(), entry.get_length())
-    };
+    let (offset, length) = record_location(&db, 4);
     std::fs::OpenOptions::new()
         .write(true)
         .open(db.with_extension("sg4"))
@@ -1657,16 +1685,11 @@ fn test_cli_validate_continues_past_a_record_past_the_end_of_the_game_file() {
         .len() as u32;
     let si4 = db.with_extension("si4");
     let mut index = std::fs::read(&si4).expect("Failed to read index");
-    let pos =
-        scidtopgn::index::INDEX_HEADER_SIZE + scidtopgn::index::INDEX_ENTRY_SIZE + ENTRY_OFFSET;
+    let pos = entry_pos(1) + ENTRY_OFFSET;
     index[pos..pos + 4].copy_from_slice(&end.to_be_bytes());
     std::fs::write(&si4, index).expect("Failed to write index");
-    let length = {
-        let db = scidtopgn::Database::open(&db).expect("Failed to open database");
-        let entry = db.get_entry(1).expect("five has five games");
-        assert_eq!(entry.get_offset(), end);
-        entry.get_length()
-    };
+    let (offset, length) = record_location(&db, 1);
+    assert_eq!(offset, end);
     assert!(length > 0);
 
     // The games after game 2 are still read: game 4's damage is reported.
@@ -2586,7 +2609,7 @@ fn test_cli_merge_copies_every_game_in_order() {
         .collect();
     assert_eq!(deleted, [1, 3]);
     // The names are stored as UTF-8, so exporting doesn't warn.
-    assert!(db.nfile().namebase().converted_names().is_empty());
+    assert!(db.converted_names().is_empty());
     for (db, before) in sources.iter().zip(&before) {
         assert_eq!(&database_bytes(db), before);
     }
@@ -2700,11 +2723,12 @@ fn test_cli_merge_failures_leave_no_database_behind() {
     let five = copy_fixture(temp.path(), "five");
     let damaged = copy_fixture(temp.path(), "one");
     let si4 = damaged.with_extension("si4");
-    let mut index = scidtopgn::Index::open(&si4).expect("Failed to open index");
-    index.get_entry_mut(0).unwrap().set_round(999);
-    index
-        .flush(&mut std::fs::File::create(&si4).unwrap())
-        .expect("Failed to write index");
+    // Give game 1 a round ID that the name file has no name for.
+    let mut index = std::fs::read(&si4).expect("Failed to read index");
+    index[entry_pos(0) + ENTRY_ROUND_HIGH] &= 0xFC;
+    let pos = entry_pos(0) + ENTRY_ROUND_LOW;
+    index[pos..pos + 2].copy_from_slice(&999u16.to_be_bytes());
+    std::fs::write(&si4, index).expect("Failed to write index");
     let missing = temp.path().join("missing");
     let existing = temp.path().join("existing");
     std::fs::copy(five.with_extension("si4"), existing.with_extension("si4")).unwrap();
@@ -2785,23 +2809,31 @@ fn test_cli_merge_gives_the_output_a_default_header() {
     let temp = TempDir::new().expect("Failed to create temp dir");
     let source = copy_fixture(temp.path(), "one");
     let si4 = source.with_extension("si4");
-    let mut index = scidtopgn::Index::open(&si4).unwrap();
-    index.set_description("source description");
-    index.header_mut().base_type = 7;
-    index.header_mut().auto_load = 1;
-    index.header_mut().custom_flag_desc[0][0] = b'X';
-    index
-        .flush(&mut std::fs::File::create(&si4).unwrap())
-        .unwrap();
+    let mut index = std::fs::read(&si4).unwrap();
+    index[HEADER_BASE_TYPE..HEADER_BASE_TYPE + 4].copy_from_slice(&7u32.to_be_bytes());
+    index[HEADER_AUTO_LOAD..HEADER_AUTO_LOAD + 3].copy_from_slice(&[0, 0, 1]);
+    let description = b"source description";
+    index[HEADER_DESCRIPTION..HEADER_DESCRIPTION + description.len()].copy_from_slice(description);
+    index[HEADER_CUSTOM_FLAGS] = b'X';
+    std::fs::write(&si4, index).unwrap();
     let target = temp.path().join("target");
     let (status, stderr) = merge(&[source.as_os_str(), "-o".as_ref(), target.as_os_str()]);
     assert_eq!(status, Some(0), "{stderr}");
-    let index = scidtopgn::Index::open(target.with_extension("si4")).unwrap();
-    let expected = scidtopgn::index::IndexHeader::default();
-    assert_eq!(index.header().base_type, expected.base_type);
-    assert_eq!(index.header().auto_load, expected.auto_load);
-    assert_eq!(index.header().description, expected.description);
-    assert_eq!(index.header().custom_flag_desc, expected.custom_flag_desc);
+
+    // The header from the base type on matches a new database's, apart
+    // from the game count.
+    let empty = temp.path().join("empty");
+    scidtopgn::Database::create(&empty)
+        .unwrap()
+        .close()
+        .unwrap();
+    let header = |db: &Path| {
+        let mut bytes = std::fs::read(db.with_extension("si4")).unwrap();
+        bytes.truncate(INDEX_HEADER_SIZE);
+        bytes.drain(HEADER_BASE_TYPE + 4..HEADER_AUTO_LOAD);
+        bytes
+    };
+    assert_eq!(header(&target), header(&empty));
 }
 
 #[test]
@@ -2823,7 +2855,7 @@ fn test_cli_merge_copies_from_empty_sources() {
         scidtopgn::NameType::Site,
         scidtopgn::NameType::Round,
     ] {
-        assert_eq!(db.nfile().namebase().count(kind), 0);
+        assert_eq!(db.name_count(kind), 0);
     }
     drop(db);
     let one = get_workspace_root().join("tests/data/one");

@@ -53,6 +53,7 @@ impl FlagMatch {
 /// derives them from the main line's moves, or from the whole game for
 /// comments, variations, and annotations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[non_exhaustive]
 pub struct HeaderFlags {
     /// The game starts from a position other than the standard one. SCID
     /// calls this option `fStdStart`, and its window "Non-standard start".
@@ -165,16 +166,16 @@ impl HeaderFlags {
 /// ```
 /// use scidtopgn::{Eco, HeaderSearch};
 ///
-/// let search = HeaderSearch {
-///     white: Some("Carlsen".into()),
-///     eco: "B20".parse::<Eco>()?..="B99".parse()?,
-///     with_no_eco: false,
-///     ..HeaderSearch::default()
-/// };
+/// let mut search = HeaderSearch::default();
 /// assert_eq!(search.length, 0..=999);
+///
+/// search.white = Some("Carlsen".into());
+/// search.eco = "B20".parse::<Eco>()?..="B99".parse()?;
+/// search.with_no_eco = false;
 /// # Ok::<(), scidtopgn::Error>(())
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub struct HeaderSearch {
     /// Text White's name must match.
     pub white: Option<String>,
@@ -463,7 +464,7 @@ impl Criteria<'_> {
             return Ok(false);
         }
 
-        let date = entry.get_date();
+        let date = entry.get_date_raw();
         if date < self.dates.0 || date > self.dates.1 {
             return Ok(false);
         }

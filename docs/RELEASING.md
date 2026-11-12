@@ -64,6 +64,27 @@ While the major version is `0`, Knope treats the minor number as the breaking-ch
 
 So `minor` and `patch` both bump the last number, and only `major` bumps the middle one. Still choose the type that describes the change: from `1.0.0` on, the three types bump the three numbers. Moving to `1.0.0` is a separate maintainer decision and isn't automated.
 
+### Compatibility from 1.0
+
+From 1.0.0 on, versions follow [Semantic Versioning](https://semver.org): a release that breaks the library's public API is a major release. Use this section to choose the type for a library change.
+
+The promise covers the items in the library's [API documentation](https://docs.rs/scidtopgn) and their documented behavior. Both crates share one version, so a breaking change to the CLI, as the table above describes, is also a major release.
+
+These changes are breaking and need `major`:
+
+- Removing or renaming a public item, or changing its signature or the type of a public field.
+- Adding a variant to an enum, or a public field to a struct, that isn't `#[non_exhaustive]`. For example, a new field of a `PgnWarningKind` variant is breaking.
+- A public type that stops being `Send` or `Sync`. Every public type is both, and `crates/scidtopgn/src/lib.rs` checks it at compile time.
+- Moving to a version of [shakmaty](https://crates.io/crates/shakmaty) that isn't semver-compatible with the current one, such as from 0.30 to 0.31. Its types are part of this crate's API: the re-exported `shakmaty` crate, `Game::start_position`, `GameMove::Move`, `HeaderSearch::to_move`, and `InvalidMoveByte::Illegal`. So 1.x stays on shakmaty 0.30.
+
+These changes aren't breaking:
+
+- Adding a public item, or a variant to a `#[non_exhaustive]` enum such as `Error` or `PgnWarningKind`, or a field to a `#[non_exhaustive]` struct or variant, such as `HeaderSearch`, `TwinOptions`, or a struct variant of `Error`. Use `minor`.
+- Changing the text of an error or warning message. Callers match on variants and fields. Use `patch`.
+- Changing behavior that differed from SCID's to match it, as a fix. Say what changes in the changeset. Use `patch`.
+
+The minimum supported Rust version is `rust-version` in the root `Cargo.toml`, and CI builds and tests with it. From 1.0.0 on, raising it isn't a breaking change, but only a `minor` or `major` release raises it, with a changeset that names the new version. A `patch` release never does.
+
 ## One-time setup
 
 ### Version PRs

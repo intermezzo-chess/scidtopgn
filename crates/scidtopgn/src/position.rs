@@ -26,7 +26,7 @@ const MAX_PIECES: usize = 16;
 /// that had it to the end. A capture gives the captured piece's number to its
 /// side's highest-numbered piece. A promoted pawn keeps its number.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PieceList {
+pub(crate) struct PieceList {
     squares: ByColor<[Option<Square>; MAX_PIECES]>,
     numbers: [Option<u8>; 64],
     counts: ByColor<u8>,
@@ -42,7 +42,7 @@ impl PieceList {
     }
 
     /// The numbering of the standard starting position.
-    pub fn standard() -> Self {
+    pub(crate) fn standard() -> Self {
         let mut list = PieceList::empty();
         for color in Color::ALL {
             let back = color.backrank();
@@ -66,7 +66,7 @@ impl PieceList {
     ///
     /// Returns [`Error::InvalidFen`] if a side has more than 16 pieces or
     /// no king.
-    pub fn from_board(board: &Board) -> Result<Self> {
+    pub(crate) fn from_board(board: &Board) -> Result<Self> {
         let mut list = PieceList::empty();
         for rank in Rank::ALL.into_iter().rev() {
             for file in File::ALL {
@@ -99,12 +99,12 @@ impl PieceList {
     }
 
     /// The number of pieces `color` has.
-    pub fn count(&self, color: Color) -> u8 {
+    pub(crate) fn count(&self, color: Color) -> u8 {
         *self.counts.get(color)
     }
 
     /// The square of `color`'s piece number `number`, if it has one.
-    pub fn square(&self, color: Color, number: u8) -> Option<Square> {
+    pub(crate) fn square(&self, color: Color, number: u8) -> Option<Square> {
         self.squares
             .get(color)
             .get(usize::from(number))
@@ -113,7 +113,7 @@ impl PieceList {
     }
 
     /// The number of the piece on `square`, if there is one.
-    pub fn number(&self, square: Square) -> Option<u8> {
+    pub(crate) fn number(&self, square: Square) -> Option<u8> {
         self.numbers[square.to_usize()]
     }
 
@@ -193,7 +193,7 @@ impl PieceList {
 
 /// A chess position together with SCID's numbering of its pieces.
 #[derive(Debug, Clone)]
-pub struct ScidPosition {
+pub(crate) struct ScidPosition {
     chess: Chess,
     pieces: PieceList,
 }
@@ -209,7 +209,7 @@ impl Default for ScidPosition {
 
 impl ScidPosition {
     /// The standard starting position.
-    pub fn standard() -> Self {
+    pub(crate) fn standard() -> Self {
         Self::default()
     }
 
@@ -218,18 +218,18 @@ impl ScidPosition {
     /// # Errors
     ///
     /// Returns [`Error::InvalidFen`] if a side has more than 16 pieces.
-    pub fn from_setup_position(chess: Chess) -> Result<Self> {
+    pub(crate) fn from_setup_position(chess: Chess) -> Result<Self> {
         let pieces = PieceList::from_board(chess.board())?;
         Ok(ScidPosition { chess, pieces })
     }
 
     /// Returns the chess position.
-    pub fn chess(&self) -> &Chess {
+    pub(crate) fn chess(&self) -> &Chess {
         &self.chess
     }
 
     /// Returns SCID's numbering of the pieces.
-    pub fn pieces(&self) -> &PieceList {
+    pub(crate) fn pieces(&self) -> &PieceList {
         &self.pieces
     }
 
@@ -238,7 +238,7 @@ impl ScidPosition {
     ///
     /// SCID plays castling after the king or rook has moved and returned,
     /// so databases it writes can contain such a move.
-    pub fn can_play(&self, m: Move) -> bool {
+    pub(crate) fn can_play(&self, m: Move) -> bool {
         self.chess.is_legal(m) || with_castling_right_for(&self.chess, m).is_some()
     }
 
@@ -246,7 +246,7 @@ impl ScidPosition {
     /// castling right but castling would otherwise be legal: the king and
     /// rook are on their original squares, the squares between them are
     /// empty, and the king isn't in or passing through check.
-    pub fn castle_without_right(&self, side: CastlingSide) -> Option<Move> {
+    pub(crate) fn castle_without_right(&self, side: CastlingSide) -> Option<Move> {
         castle_without_right(&self.chess, side).map(|(m, _)| m)
     }
 
@@ -259,7 +259,7 @@ impl ScidPosition {
     ///
     /// Returns [`Error::InvalidMove`] if the move is illegal, or if it is a
     /// null move while the side to move is in check.
-    pub fn play(&mut self, mv: GameMove) -> Result<SanPlus> {
+    pub(crate) fn play(&mut self, mv: GameMove) -> Result<SanPlus> {
         let color = self.chess.turn();
         match mv {
             GameMove::Move(m) => {

@@ -10,7 +10,7 @@ use crate::namebase::NameBase;
 
 /// A `.sn4` name file: the [`NameBase`] held in memory and the path it is
 /// written to.
-pub struct NFile {
+pub(crate) struct NFile {
     namebase: NameBase,
     path: std::path::PathBuf,
 }
@@ -22,7 +22,7 @@ impl NFile {
     /// # Errors
     ///
     /// This doesn't fail at present; it returns a [`Result`] so that it can.
-    pub fn create<P: AsRef<Path>>(path: P) -> Result<Self> {
+    pub(crate) fn create<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
         let sn4_path = path.with_extension("sn4");
         Ok(NFile {
@@ -38,7 +38,7 @@ impl NFile {
     ///
     /// Returns [`Error::File`](crate::Error::File) for
     /// [`DatabaseFile::Name`] if the file can't be read or is damaged.
-    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
+    pub(crate) fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
         let sn4_path = path.with_extension("sn4");
         let read = || -> Result<NameBase> {
@@ -56,12 +56,12 @@ impl NFile {
     }
 
     /// Returns the names.
-    pub fn namebase(&self) -> &NameBase {
+    pub(crate) fn namebase(&self) -> &NameBase {
         &self.namebase
     }
 
     /// Returns the names for changing.
-    pub fn namebase_mut(&mut self) -> &mut NameBase {
+    pub(crate) fn namebase_mut(&mut self) -> &mut NameBase {
         &mut self.namebase
     }
 
@@ -70,7 +70,7 @@ impl NFile {
     /// # Errors
     ///
     /// Returns [`Error::Io`](crate::Error::Io) if the file can't be written.
-    pub fn close(&mut self) -> Result<()> {
+    pub(crate) fn close(&mut self) -> Result<()> {
         let file = File::create(&self.path)?;
         let mut writer = BufWriter::new(file);
         self.namebase.write_sn4(&mut writer)?;

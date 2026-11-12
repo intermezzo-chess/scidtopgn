@@ -16,6 +16,10 @@ use crate::namebase::NameType;
 
 /// An error reading or writing a SCID database, or parsing PGN.
 ///
+/// Match on the variants and their fields, not on the messages: the text
+/// that `Display` writes can change in any release. New variants, and new
+/// fields of a variant, can be added in a minor release.
+///
 /// # Examples
 ///
 /// An error opening a database names the file that failed, with the cause as
@@ -26,7 +30,7 @@ use crate::namebase::NameType;
 ///
 /// let err = Database::open("no/such/database").err().unwrap();
 /// match &err {
-///     Error::File { file, source } => {
+///     Error::File { file, source, .. } => {
 ///         assert_eq!(*file, DatabaseFile::Index);
 ///         assert!(matches!(**source, Error::Io(_)));
 ///     }
@@ -44,6 +48,7 @@ pub enum Error {
     /// PGN text that can't be read, or a date with a part out of range.
     /// `line` is the PGN line where the problem was found, or 0 for a date.
     #[error("Parse error at line {line}: {message}")]
+    #[non_exhaustive]
     Parse {
         /// The line, counting from 1, or 0 when there is no line.
         line: u32,
@@ -53,6 +58,7 @@ pub enum Error {
 
     /// A PGN move that can't be read or played in its position.
     #[error("Invalid move {san:?} at line {line}")]
+    #[non_exhaustive]
     PgnMove {
         /// The line the move is on, counting from 1.
         line: u32,
@@ -65,6 +71,7 @@ pub enum Error {
 
     /// A game in a PGN file that failed to parse. Games are numbered from 1.
     #[error("PGN game {number}, starting at line {line}")]
+    #[non_exhaustive]
     PgnGame {
         /// The game's number, counting from 1.
         number: usize,
@@ -77,6 +84,7 @@ pub enum Error {
 
     /// An error reading or creating one of a SCID database's files.
     #[error("SCID {file}")]
+    #[non_exhaustive]
     File {
         /// The file that failed.
         file: DatabaseFile,
@@ -88,6 +96,7 @@ pub enum Error {
     /// A game in a SCID database that failed to read. Games are numbered
     /// from 1, so game 1 is [`Database::get_game(0)`](crate::Database::get_game).
     #[error("SCID game {number}")]
+    #[non_exhaustive]
     Game {
         /// The game's number, counting from 1.
         number: u64,
@@ -98,6 +107,7 @@ pub enum Error {
 
     /// A game number past the end of the database. Games are numbered from 1.
     #[error("No game {number} in the database")]
+    #[non_exhaustive]
     GameNotFound {
         /// The game's number, counting from 1.
         number: u64,
@@ -106,6 +116,7 @@ pub enum Error {
     /// A game record that can't be decoded. `offset` is the position of the
     /// byte where the problem was found, from the start of the record.
     #[error("Damaged game data at byte {offset}: {kind}")]
+    #[non_exhaustive]
     CorruptGame {
         /// The byte's position, counting from 0.
         offset: usize,
@@ -116,6 +127,7 @@ pub enum Error {
     /// An index entry whose game record extends past the end of the game
     /// file.
     #[error("Game data at byte {offset}, {length} bytes long, is past the end of the game file")]
+    #[non_exhaustive]
     GameOutOfRange {
         /// Where the record starts in the game file.
         offset: u32,
@@ -132,6 +144,7 @@ pub enum Error {
     #[error(
         "Unsupported SCID format version {version}: only SCID vs. PC 4 databases (version {SCID_VERSION}) are supported"
     )]
+    #[non_exhaustive]
     UnsupportedVersion {
         /// The version in the file.
         version: u16,
@@ -143,6 +156,7 @@ pub enum Error {
 
     /// A number that isn't one of the four [`NameType`]s.
     #[error("Invalid name type: {value}")]
+    #[non_exhaustive]
     InvalidNameType {
         /// The number.
         value: usize,
@@ -151,6 +165,7 @@ pub enum Error {
     /// A front-coded name that shares more bytes with the previous name than
     /// the name has.
     #[error("A {name_type} name shares {prefix} bytes with the previous name but is {length} bytes long")]
+    #[non_exhaustive]
     NamePrefixTooLong {
         /// The kind of name.
         name_type: NameType,
@@ -162,6 +177,7 @@ pub enum Error {
 
     /// A name ID in an index entry that the name file has no name for.
     #[error("No {name_type} name has ID {id}")]
+    #[non_exhaustive]
     NameNotFound {
         /// The kind of name.
         name_type: NameType,
@@ -179,10 +195,6 @@ pub enum Error {
     #[error("More than 255 variations of one move")]
     TooManyVariations,
 
-    /// A variation added to a game that has no current move.
-    #[error("No current move")]
-    NoCurrentMove,
-
     /// A game added to a database that already holds [`MAX_GAMES`] games.
     #[error("The index is full: a SCID database holds at most {MAX_GAMES} games")]
     IndexFull,
@@ -190,6 +202,7 @@ pub enum Error {
     /// A name added when the name file already holds as many names of its
     /// kind as SCID allows.
     #[error("Too many {name_type} names: a SCID database holds at most {}", name_type.max_id())]
+    #[non_exhaustive]
     NameBaseFull {
         /// The kind of name.
         name_type: NameType,
@@ -197,6 +210,7 @@ pub enum Error {
 
     /// A game whose record is too long to store.
     #[error("Game is {length} bytes long; at most {max} bytes fit")]
+    #[non_exhaustive]
     GameTooLarge {
         /// The record's length in bytes.
         length: usize,
@@ -211,6 +225,7 @@ pub enum Error {
 
     /// A tag whose value is too long to store in a game record.
     #[error("Tag {name} has a value {length} bytes long; at most {max} bytes fit")]
+    #[non_exhaustive]
     TagTooLong {
         /// The tag's name.
         name: String,
@@ -220,20 +235,22 @@ pub enum Error {
         max: usize,
     },
 
-    /// A game file used after it was closed.
+    /// A database whose game file is closed, because
+    /// [`Database::compact_games`](crate::Database::compact_games) replaced
+    /// it but couldn't open the new one.
     #[error("File not open")]
     FileNotOpen,
 
-    /// A change to a database or game file opened read-only, with
-    /// [`Database::open_read_only`](crate::Database::open_read_only) or
-    /// [`GFile::open_read_only`](crate::GFile::open_read_only). The files
-    /// themselves may be writable.
+    /// A change to a database opened with
+    /// [`Database::open_read_only`](crate::Database::open_read_only). The
+    /// files themselves may be writable.
     #[error("Database is open read-only")]
     ReadOnly,
 
     /// A PGN game for a chess variant other than standard chess, named by
     /// its `Variant` tag.
     #[error("Unsupported variant: {variant}")]
+    #[non_exhaustive]
     UnsupportedVariant {
         /// The value of the `Variant` tag.
         variant: String,
@@ -241,6 +258,7 @@ pub enum Error {
 
     /// A move that is illegal in its position, or a null move in check.
     #[error("Invalid move: {move_str}")]
+    #[non_exhaustive]
     InvalidMove {
         /// The move and the position, described in words.
         move_str: String,
@@ -248,6 +266,7 @@ pub enum Error {
 
     /// A FEN that can't be read, or a position SCID can't store.
     #[error("Invalid FEN: {fen}")]
+    #[non_exhaustive]
     InvalidFen {
         /// The FEN.
         fen: String,
@@ -255,11 +274,6 @@ pub enum Error {
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
     },
-
-    /// A write to a [`ByteBuffer`](crate::ByteBuffer) made from existing
-    /// data, which is read-only.
-    #[error("Buffer full")]
-    BufferFull,
 }
 
 impl Error {
@@ -310,6 +324,7 @@ pub enum CorruptGameKind {
     /// A move byte that doesn't describe a move in the position, given as a
     /// FEN.
     #[error("invalid move byte {byte:#04x} ({reason}) in {fen}")]
+    #[non_exhaustive]
     InvalidMove {
         /// The move byte.
         byte: u8,
@@ -334,6 +349,7 @@ pub enum CorruptGameKind {
     /// A starting position that can't be read or that SCID can't number.
     /// `reason` describes the problem.
     #[error("invalid starting position {fen:?}: {reason}")]
+    #[non_exhaustive]
     InvalidStartPosition {
         /// The starting position as stored.
         fen: String,
@@ -376,6 +392,7 @@ pub enum InvalidMoveByte {
 
     /// A move from `from` to `to` that isn't legal in the position.
     #[error("{from}{to} is illegal")]
+    #[non_exhaustive]
     Illegal {
         /// The square the piece moves from.
         from: Square,
@@ -386,9 +403,3 @@ pub enum InvalidMoveByte {
 
 /// A [`std::result::Result`] whose error is [`Error`](enum@Error).
 pub type Result<T> = std::result::Result<T, Error>;
-
-// Errors can cross threads and be stored, for example in `anyhow::Error`.
-const _: fn() = || {
-    fn assert_send_sync_static<T: Send + Sync + 'static>() {}
-    assert_send_sync_static::<Error>();
-};

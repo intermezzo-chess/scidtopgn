@@ -10,7 +10,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use scidtopgn::{parse_single_game, Database, Error, Index, NameBase, NameType};
+use crate::{index::Index, namebase::NameBase, parse_single_game, Database, Error, NameType};
 use tempfile::TempDir;
 
 const NAME_TYPES: [NameType; 4] = [
@@ -290,7 +290,7 @@ fn test_compacting_merges_names_stored_two_ways() {
     for (dir, compact) in [
         (
             "games",
-            &compact_games as &dyn Fn(&mut Database) -> scidtopgn::Result<()>,
+            &compact_games as &dyn Fn(&mut Database) -> crate::Result<()>,
         ),
         ("names", &compact_names),
     ] {

@@ -85,8 +85,8 @@ use shakmaty::{Board, Position, Role};
 /// a Latin-1 or Windows-1252 PGN file as they are, so a name file can hold
 /// names that aren't valid UTF-8. When the name file is read, the bytes of
 /// such a name that aren't valid UTF-8 are read as Windows-1252, and
-/// [`NameBase::converted_names`] lists the name. Games read with these
-/// names converted.
+/// [`converted_names`](Self::converted_names) lists the name. Games read
+/// with these names converted.
 ///
 /// **Writing the database stores the converted names as UTF-8**, as SCID
 /// vs. PC stores the names of PGN it imports. Two names of a kind can then
@@ -345,7 +345,7 @@ impl Database {
     /// # db.close()?;
     /// let mut db = Database::open(&path)?;
     /// assert_eq!(db.get_game(1)?.white, "Carlsen");
-    /// assert!(matches!(db.get_game(2), Err(Error::GameNotFound { number: 3 })));
+    /// assert!(matches!(db.get_game(2), Err(Error::GameNotFound { number: 3, .. })));
     /// # Ok::<(), scidtopgn::Error>(())
     /// ```
     pub fn get_game(&mut self, game_num: u32) -> Result<Game> {
@@ -400,7 +400,7 @@ impl Database {
             .unwrap_or("?")
             .to_string();
 
-        game.date = entry.get_date_obj();
+        game.date = entry.get_date();
 
         let event_date_raw = entry.get_event_date();
         if event_date_raw != 0 {
@@ -824,18 +824,13 @@ impl Database {
     ///     db.add_game(&parse_single_game(pgn)?)?;
     /// }
     ///
-    /// let wins_as_white = HeaderSearch {
-    ///     white: Some("carlsen".into()),
-    ///     results: vec![GameResult::White],
-    ///     ..HeaderSearch::default()
-    /// };
-    /// assert_eq!(db.search_header(&wins_as_white)?, [0]);
+    /// let mut wins = HeaderSearch::default();
+    /// wins.white = Some("carlsen".into());
+    /// wins.results = vec![GameResult::White];
+    /// assert_eq!(db.search_header(&wins)?, [0]);
     ///
     /// // With colors ignored, the wins as Black match too.
-    /// let wins = HeaderSearch {
-    ///     ignore_colors: true,
-    ///     ..wins_as_white
-    /// };
+    /// wins.ignore_colors = true;
     /// assert_eq!(db.search_header(&wins)?, [0, 1]);
     /// # Ok::<(), scidtopgn::Error>(())
     /// ```
@@ -930,13 +925,13 @@ impl Database {
 
         self.encode_tags(&mut buf, game)?;
 
-        buf.put_byte(0)?;
+        buf.put_byte(0);
 
         // The game flags depend on the moves, so they are set below.
         let flags_pos = buf.len();
-        buf.put_byte(0)?;
+        buf.put_byte(0);
         if let Some(ref start) = game.start_position {
-            buf.put_terminated_string(&fen(start))?;
+            buf.put_terminated_string(&fen(start));
         }
 
         let mut summary = MoveSummary::new(game);
@@ -951,7 +946,7 @@ impl Database {
             )?;
         }
 
-        buf.put_byte(crate::mov::ENCODE_END_GAME)?;
+        buf.put_byte(crate::mov::ENCODE_END_GAME);
 
         self.encode_comments(&mut buf, game, &mut summary.comments)?;
 
@@ -977,16 +972,16 @@ impl Database {
                 });
             }
             if let Some(code) = crate::game::common_tag_code(&tag.name) {
-                buf.put_byte(code)?;
+                buf.put_byte(code);
             } else {
                 let len = tag
                     .name
                     .floor_char_boundary(crate::game::MAX_TAG_LEN as usize);
-                buf.put_byte(len as u8)?;
-                buf.put_fixed_string(&tag.name, len)?;
+                buf.put_byte(len as u8);
+                buf.put_fixed_string(&tag.name, len);
             }
-            buf.put_byte(tag.value.len() as u8)?;
-            buf.put_fixed_string(&tag.value, tag.value.len())?;
+            buf.put_byte(tag.value.len() as u8);
+            buf.put_fixed_string(&tag.value, tag.value.len());
         }
 
         Ok(())
@@ -1030,20 +1025,20 @@ impl Database {
             // Only the NAGs SCID can hold, so that it reads back each one
             // written and counted.
             for nag in node.stored_nags() {
-                buf.put_byte(crate::mov::ENCODE_NAG)?;
-                buf.put_byte(nag)?;
+                buf.put_byte(crate::mov::ENCODE_NAG);
+                buf.put_byte(nag);
                 summary.nags += 1;
             }
 
             if node.comment.is_some() {
-                buf.put_byte(crate::mov::ENCODE_COMMENT)?;
+                buf.put_byte(crate::mov::ENCODE_COMMENT);
             }
 
             for var_start in game.variations(idx) {
-                buf.put_byte(crate::mov::ENCODE_START_MARKER)?;
+                buf.put_byte(crate::mov::ENCODE_START_MARKER);
                 summary.variations += 1;
                 Self::encode_moves(buf, game, var_start, before.clone(), summary, false)?;
-                buf.put_byte(crate::mov::ENCODE_END_MARKER)?;
+                buf.put_byte(crate::mov::ENCODE_END_MARKER);
             }
 
             current_idx = node.next;
@@ -1087,7 +1082,7 @@ impl Database {
             }
 
             if let Some(ref comment) = node.comment {
-                buf.put_terminated_string(comment)?;
+                buf.put_terminated_string(comment);
                 *count += 1;
             }
 
@@ -1327,7 +1322,8 @@ impl Database {
     /// unwritten changes were written, or before them if those couldn't be
     /// written, unless a file that was moved aside couldn't be put back; it
     /// is then left in the temporary directory. The `Database` can still be
-    /// used.
+    /// used, except that if the new game file can't be opened, reading or
+    /// adding a game returns [`Error::FileNotOpen`]; open the database again.
     ///
     /// # Examples
     ///
@@ -1448,11 +1444,11 @@ impl Database {
     /// # db.close()?;
     /// let mut db = Database::open(&path)?;
     /// db.update_game(0, &parse_single_game("[White \"Carlsen\"]\n\n1. d4 d5 *")?)?;
-    /// let players = |db: &Database| db.nfile().namebase().find_name(NameType::Player, "Anand");
-    /// assert!(players(&db).is_some());
+    /// let players = db.name_count(NameType::Player);
     ///
+    /// // Anand is no longer used.
     /// db.compact_names()?;
-    /// assert_eq!(players(&db), None);
+    /// assert_eq!(db.name_count(NameType::Player), players - 1);
     /// assert_eq!(db.get_game(0)?.white, "Carlsen");
     /// # Ok::<(), scidtopgn::Error>(())
     /// ```
@@ -1530,18 +1526,51 @@ impl Database {
         }
     }
 
+    /// Returns the number of names of kind `name_type` in the name file.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use scidtopgn::{parse_single_game, Database, NameType};
+    ///
+    /// # let dir = tempfile::tempdir()?;
+    /// # let path = dir.path().join("games");
+    /// let mut db = Database::create(&path)?;
+    /// db.add_game(&parse_single_game("[White \"Anand\"]\n[Black \"Carlsen\"]\n\n1. e4 e5 *")?)?;
+    /// assert_eq!(db.name_count(NameType::Player), 2);
+    /// # Ok::<(), scidtopgn::Error>(())
+    /// ```
+    pub fn name_count(&self, name_type: NameType) -> u32 {
+        self.nfile.namebase().count(name_type)
+    }
+
+    /// Returns the kind and text of each name that wasn't valid UTF-8 in
+    /// the name file and was read as Windows-1252, in the order the file
+    /// stores them. Older versions of SCID store the bytes of a Latin-1 or
+    /// Windows-1252 PGN file unchanged, so their name files can hold such
+    /// names.
+    ///
+    /// The list is empty once the database has written the names as UTF-8,
+    /// as described in [`Database`].
+    pub fn converted_names(&self) -> &[(NameType, String)] {
+        self.nfile.namebase().converted_names()
+    }
+
     /// Returns the index.
-    pub fn index(&self) -> &Index {
+    #[cfg(test)]
+    pub(crate) fn index(&self) -> &Index {
         &self.index
     }
 
     /// Returns the name file.
-    pub fn nfile(&self) -> &NFile {
+    #[cfg(test)]
+    pub(crate) fn nfile(&self) -> &NFile {
         &self.nfile
     }
 
     /// Returns the game file.
-    pub fn gfile(&self) -> &GFile {
+    #[cfg(test)]
+    pub(crate) fn gfile(&self) -> &GFile {
         &self.gfile
     }
 

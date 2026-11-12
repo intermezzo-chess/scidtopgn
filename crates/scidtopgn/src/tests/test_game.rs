@@ -1,4 +1,6 @@
-use scidtopgn::{parse_single_game, ByteBuffer, Game, Index, NFile, GAME_DECODE_ALL};
+use crate::{
+    bytebuf::ByteBuffer, game::GAME_DECODE_ALL, index::Index, nfile::NFile, parse_single_game, Game,
+};
 use std::path::Path;
 
 fn get_test_data_path(filename: &str) -> std::path::PathBuf {
@@ -32,19 +34,19 @@ fn test_game_decode_from_one_sg4() {
     let namebase = nfile.namebase();
 
     let white = namebase
-        .get_name(scidtopgn::NameType::Player, entry.get_white())
+        .get_name(crate::NameType::Player, entry.get_white())
         .unwrap_or("?");
     let black = namebase
-        .get_name(scidtopgn::NameType::Player, entry.get_black())
+        .get_name(crate::NameType::Player, entry.get_black())
         .unwrap_or("?");
     let event = namebase
-        .get_name(scidtopgn::NameType::Event, entry.get_event())
+        .get_name(crate::NameType::Event, entry.get_event())
         .unwrap_or("?");
     let site = namebase
-        .get_name(scidtopgn::NameType::Site, entry.get_site())
+        .get_name(crate::NameType::Site, entry.get_site())
         .unwrap_or("?");
     let round = namebase
-        .get_name(scidtopgn::NameType::Round, entry.get_round())
+        .get_name(crate::NameType::Round, entry.get_round())
         .unwrap_or("?");
 
     let sg4_data = std::fs::read(&sg4_path).expect("Failed to read sg4");
@@ -62,7 +64,7 @@ fn test_game_decode_from_one_sg4() {
         event,
         site,
         round,
-        entry.get_date_obj(),
+        entry.get_date(),
         entry.get_result(),
     );
 
@@ -86,19 +88,19 @@ fn test_game_to_pgn() {
     let namebase = nfile.namebase();
 
     let white = namebase
-        .get_name(scidtopgn::NameType::Player, entry.get_white())
+        .get_name(crate::NameType::Player, entry.get_white())
         .unwrap_or("?");
     let black = namebase
-        .get_name(scidtopgn::NameType::Player, entry.get_black())
+        .get_name(crate::NameType::Player, entry.get_black())
         .unwrap_or("?");
     let event = namebase
-        .get_name(scidtopgn::NameType::Event, entry.get_event())
+        .get_name(crate::NameType::Event, entry.get_event())
         .unwrap_or("?");
     let site = namebase
-        .get_name(scidtopgn::NameType::Site, entry.get_site())
+        .get_name(crate::NameType::Site, entry.get_site())
         .unwrap_or("?");
     let round = namebase
-        .get_name(scidtopgn::NameType::Round, entry.get_round())
+        .get_name(crate::NameType::Round, entry.get_round())
         .unwrap_or("?");
 
     let sg4_data = std::fs::read(&sg4_path).expect("Failed to read sg4");
@@ -116,7 +118,7 @@ fn test_game_to_pgn() {
         event,
         site,
         round,
-        entry.get_date_obj(),
+        entry.get_date(),
         entry.get_result(),
     );
 

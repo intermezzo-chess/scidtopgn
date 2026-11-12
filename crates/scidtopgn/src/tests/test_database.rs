@@ -1,4 +1,4 @@
-use scidtopgn::{Database, Date, Error, Game, GameResult, Index, NameType};
+use crate::{index::Index, Database, Date, Error, Game, GameResult, NameType};
 
 /// The path of the fixture `name`. Open it with `Database::open_read_only`:
 /// on Windows, opening it for writing fails while another test copies it.
@@ -227,7 +227,7 @@ fn test_open_and_close_without_changes() {
     let db = Database::open(&path).unwrap();
     assert_eq!(db.path(), path);
     assert_eq!(db.index().num_games(), 5);
-    assert!(db.nfile().namebase().count(scidtopgn::NameType::Player) > 0);
+    assert!(db.nfile().namebase().count(crate::NameType::Player) > 0);
     assert_eq!(db.gfile().file_size(), before[2].len() as u64);
     db.close().unwrap();
 
@@ -299,8 +299,7 @@ fn test_create_reads_back_games_from_written_blocks() {
     let games: Vec<Game> = (0..7)
         .map(|n| {
             let comment = format!("{n} {}", "x".repeat(60_000));
-            scidtopgn::parse_single_game(&format!("[Event \"x\"]\n\n1. e4 {{{comment}}} *\n"))
-                .unwrap()
+            crate::parse_single_game(&format!("[Event \"x\"]\n\n1. e4 {{{comment}}} *\n")).unwrap()
         })
         .collect();
     let expected: Vec<String> = games.iter().map(Game::to_pgn).collect();
@@ -311,7 +310,7 @@ fn test_create_reads_back_games_from_written_blocks() {
     for game in &games[..5] {
         db.add_game(game).unwrap();
     }
-    let last_block = 2 * scidtopgn::GF_BLOCKSIZE as u32;
+    let last_block = 2 * crate::gfile::GF_BLOCKSIZE as u32;
     assert_eq!(db.get_entry(4).unwrap().get_offset(), last_block);
     assert_eq!(first_pgn(&mut db, 5), expected[..5]);
     // Adds to the last block after reading the first.
@@ -339,8 +338,7 @@ fn test_discard_leaves_the_files_as_they_were() {
     // Each record is about 60,000 bytes, so adding a few writes full blocks.
     let game = |n: u32| {
         let comment = format!("{n} {}", "x".repeat(60_000));
-        scidtopgn::parse_single_game(&format!("[Event \"{n}\"]\n\n1. e4 {{{comment}}} *\n"))
-            .unwrap()
+        crate::parse_single_game(&format!("[Event \"{n}\"]\n\n1. e4 {{{comment}}} *\n")).unwrap()
     };
     let temp = tempfile::TempDir::new().unwrap();
     let path = temp.path().join("discard");
@@ -406,14 +404,14 @@ fn test_games_without_moves_round_trip() {
         (fen, "1/2-1/2", "1/2-1/2", "1/2-1/2\n"),
     ] {
         let pgn = format!("[Event \"x\"]\n[Result \"{result}\"]\n{tags}\n{moves}\n");
-        let game = scidtopgn::parse_single_game(&pgn).unwrap();
+        let game = crate::parse_single_game(&pgn).unwrap();
         assert!(game.warnings.is_empty(), "{pgn}");
         let pgn = scid_round_trip(&game).to_pgn();
         assert!(pgn.contains(&format!("[Result \"{result}\"]\n")), "{pgn}");
         assert!(pgn.contains(tags), "{pgn}");
         assert_eq!(movetext(&pgn), exported, "{pgn}");
 
-        let reread = scidtopgn::parse_single_game(&pgn).unwrap();
+        let reread = crate::parse_single_game(&pgn).unwrap();
         assert_eq!(scid_round_trip(&reread).to_pgn(), pgn);
     }
 }
@@ -436,21 +434,21 @@ fn test_comment_text_round_trips() {
         "变化 \"q\" \\ [x] (y) ; $2",
         "ends with \\",
     ];
-    let game = scidtopgn::parse_single_game(pgn).unwrap();
+    let game = crate::parse_single_game(pgn).unwrap();
     assert!(game.warnings.is_empty(), "{:?}", game.warnings);
     assert_eq!(comments(&game), expected, "after PGN import");
 
     let reread = scid_round_trip(&game);
     assert_eq!(comments(&reread), expected, "after a SCID round trip");
     let exported = reread.to_pgn();
-    let reimported = scidtopgn::parse_single_game(&exported).unwrap();
+    let reimported = crate::parse_single_game(&exported).unwrap();
     assert_eq!(comments(&reimported), expected, "after PGN to SCID to PGN");
     assert_eq!(reimported.moves.len(), game.moves.len());
 }
 
 #[test]
 fn test_comments_keep_their_whitespace_in_the_database() {
-    let mut game = scidtopgn::parse_single_game("[Event \"x\"]\n\n1. e4 e5 *\n").unwrap();
+    let mut game = crate::parse_single_game("[Event \"x\"]\n\n1. e4 e5 *\n").unwrap();
     let multi_line = "line one\nline two\n\n  indented\ttab ";
     game.moves[1].comment = Some(multi_line.to_string());
 
@@ -475,7 +473,7 @@ fn test_long_comment_round_trips() {
     ] {
         let expected = [(san.to_string(), long.clone())];
         let pgn = format!("[Event \"x\"]\n\n{movetext}\n");
-        let game = scidtopgn::parse_single_game(&pgn).unwrap();
+        let game = crate::parse_single_game(&pgn).unwrap();
         assert_eq!(move_comments(&game), expected, "{san}: after PGN import");
 
         let reread = scid_round_trip(&game);
@@ -484,7 +482,7 @@ fn test_long_comment_round_trips() {
             expected,
             "{san}: after a SCID round trip"
         );
-        let reimported = scidtopgn::parse_single_game(&reread.to_pgn()).unwrap();
+        let reimported = crate::parse_single_game(&reread.to_pgn()).unwrap();
         assert_eq!(
             move_comments(&reimported),
             expected,
@@ -498,7 +496,7 @@ fn test_long_comment_round_trips() {
 fn game_with_record_length(length: usize) -> Game {
     let game = |comment: usize| {
         let comment = "x".repeat(comment);
-        scidtopgn::parse_single_game(&format!("[Event \"x\"]\n\n1. e4 {{{comment}}} *\n")).unwrap()
+        crate::parse_single_game(&format!("[Event \"x\"]\n\n1. e4 {{{comment}}} *\n")).unwrap()
     };
     let temp = tempfile::TempDir::new().unwrap();
     let mut db = Database::create(temp.path().join("measure")).unwrap();
@@ -527,7 +525,7 @@ fn test_records_up_to_the_longest_the_index_can_record_round_trip() {
     let mut db = Database::create(temp.path().join("too_long")).unwrap();
     assert!(matches!(
         db.add_game(&game_with_record_length(131_072)),
-        Err(scidtopgn::Error::GameTooLarge {
+        Err(crate::Error::GameTooLarge {
             length: 131_072,
             max: 131_071
         })
@@ -537,7 +535,7 @@ fn test_records_up_to_the_longest_the_index_can_record_round_trip() {
 #[test]
 fn test_a_comment_with_a_tag_line_stays_in_its_game() {
     let pgn = "[Event \"a\"]\n\n1. e4 {note\n\n[Event \"b\"]\n} e5 *\n";
-    let games: Vec<_> = scidtopgn::PgnParser::new(pgn).collect();
+    let games: Vec<_> = crate::PgnParser::new(pgn).collect();
     assert_eq!(games.len(), 1);
     let game = games[0].as_ref().unwrap();
     assert_eq!(game.event, "a");
@@ -563,7 +561,7 @@ fn test_many_nags_round_trip() {
         movetext.push(' ');
     }
     let pgn = format!("[Event \"x\"]\n\n{movetext}*\n");
-    let game = scidtopgn::parse_single_game(&pgn).unwrap();
+    let game = crate::parse_single_game(&pgn).unwrap();
     assert_eq!(game.num_half_moves, 300);
 
     let main_line_nags = |game: &Game| -> Vec<Vec<u8>> {
@@ -577,7 +575,7 @@ fn test_many_nags_round_trip() {
 
     let reread = scid_round_trip(&game);
     assert_eq!(main_line_nags(&reread), expected, "after a SCID round trip");
-    let reimported = scidtopgn::parse_single_game(&reread.to_pgn()).unwrap();
+    let reimported = crate::parse_single_game(&reread.to_pgn()).unwrap();
     assert_eq!(
         main_line_nags(&reimported),
         expected,
@@ -589,7 +587,7 @@ fn test_many_nags_round_trip() {
 fn test_a_move_with_more_than_7_nags_round_trips_as_scid_reads_it() {
     // The reproduction in #57: SCID keeps the first 7 NAGs.
     let pgn = "[Event \"x\"]\n\n1. e4 $1 $2 $3 $4 $5 $6 $7 $8 $9 $10 *\n";
-    let game = scidtopgn::parse_single_game(pgn).unwrap();
+    let game = crate::parse_single_game(pgn).unwrap();
     assert_eq!(game.warnings.len(), 3);
     let exported = scid_round_trip(&game).to_pgn();
     assert_eq!(movetext(&exported), "1. e4 ! ? !! ?? !? ?! $7\n*\n");
@@ -600,7 +598,7 @@ fn test_nags_set_directly_are_stored_as_scid_holds_them() {
     // NAGs set directly on a move can be more than 7, or 0. The game is
     // stored and exported with the first 7 that aren't 0, the NAGs SCID
     // holds, and the index counts only those, as SCID's encoder does.
-    let mut game = scidtopgn::parse_single_game("[Event \"x\"]\n\n1. e4 e5 *\n").unwrap();
+    let mut game = crate::parse_single_game("[Event \"x\"]\n\n1. e4 e5 *\n").unwrap();
     game.moves[1].nags = vec![0, 1, 2, 0, 3, 4, 5, 6, 7, 8, 9];
     let kept = [1, 2, 3, 4, 5, 6, 7];
     let exported = "1. e4 ! ? !! ?? !? ?! $7 e5\n*\n";
@@ -689,7 +687,7 @@ fn test_event_date_is_stored_only_in_the_index() {
         ("????.??.??", "2022.05.20", false),
     ] {
         let pgn = format!("[Date \"{date}\"]\n[EventDate \"{event_date}\"]\n\n1. e4 *\n");
-        let game = scidtopgn::parse_single_game(&pgn).unwrap();
+        let game = crate::parse_single_game(&pgn).unwrap();
         let expected = kept.then(|| Date::from_string(event_date));
 
         let temp = tempfile::TempDir::new().unwrap();
@@ -720,7 +718,7 @@ fn test_reads_the_event_date_from_earlier_records() {
     // and three bytes, where it is the only copy of one the index can't
     // hold. Replace a 3-byte tag and a 3-byte value with one.
     let game =
-        scidtopgn::parse_single_game("[Date \"2022.06.01\"]\n[Foo \"abc\"]\n\n1. e4 *\n").unwrap();
+        crate::parse_single_game("[Date \"2022.06.01\"]\n[Foo \"abc\"]\n\n1. e4 *\n").unwrap();
     let temp = tempfile::TempDir::new().unwrap();
     let path = temp.path().join("earlier");
     let mut db = Database::create(&path).unwrap();
@@ -839,12 +837,12 @@ fn five_with_tree_cache(
 
 #[test]
 fn test_writing_an_updated_game_deletes_the_tree_cache() {
-    let writes: [fn(&mut Database) -> scidtopgn::Result<()>; 3] = [
+    let writes: [fn(&mut Database) -> crate::Result<()>; 3] = [
         Database::flush,
         Database::compact_names,
         Database::compact_games,
     ];
-    let game = scidtopgn::parse_single_game(NEW_GAME).unwrap();
+    let game = crate::parse_single_game(NEW_GAME).unwrap();
     for write in writes {
         let temp = tempfile::TempDir::new().unwrap();
         let (path, stc) = five_with_tree_cache(temp.path(), &[]);
@@ -869,7 +867,7 @@ fn test_writing_an_update_without_a_tree_cache_succeeds() {
     let temp = tempfile::TempDir::new().unwrap();
     let path = five_with_deleted(temp.path(), &[]);
     let mut db = Database::open(&path).unwrap();
-    db.update_game(0, &scidtopgn::parse_single_game(NEW_GAME).unwrap())
+    db.update_game(0, &crate::parse_single_game(NEW_GAME).unwrap())
         .unwrap();
     db.close().unwrap();
 
@@ -879,7 +877,7 @@ fn test_writing_an_update_without_a_tree_cache_succeeds() {
 
 #[test]
 fn test_updating_a_deleted_or_added_game_deletes_the_tree_cache() {
-    let game = scidtopgn::parse_single_game(NEW_GAME).unwrap();
+    let game = crate::parse_single_game(NEW_GAME).unwrap();
     let temp = tempfile::TempDir::new().unwrap();
     let (path, stc) = five_with_tree_cache(temp.path(), &[0]);
     let mut db = Database::open(&path).unwrap();
@@ -900,7 +898,7 @@ fn test_updating_a_deleted_or_added_game_deletes_the_tree_cache() {
 fn test_other_changes_keep_the_tree_cache() {
     let changes: [fn(&mut Database); 4] = [
         |db| {
-            db.add_game(&scidtopgn::parse_single_game(NEW_GAME).unwrap())
+            db.add_game(&crate::parse_single_game(NEW_GAME).unwrap())
                 .unwrap();
         },
         |db| {
@@ -922,7 +920,7 @@ fn test_other_changes_keep_the_tree_cache() {
 
 #[test]
 fn test_an_update_not_written_keeps_the_tree_cache() {
-    let game = scidtopgn::parse_single_game(NEW_GAME).unwrap();
+    let game = crate::parse_single_game(NEW_GAME).unwrap();
     let temp = tempfile::TempDir::new().unwrap();
     let (path, stc) = five_with_tree_cache(temp.path(), &[]);
 
@@ -954,7 +952,7 @@ fn test_an_update_not_written_keeps_the_tree_cache() {
 fn test_later_writes_keep_a_rebuilt_tree_cache() {
     let temp = tempfile::TempDir::new().unwrap();
     let (path, stc) = five_with_tree_cache(temp.path(), &[]);
-    let game = scidtopgn::parse_single_game(NEW_GAME).unwrap();
+    let game = crate::parse_single_game(NEW_GAME).unwrap();
 
     let mut db = Database::open(&path).unwrap();
     db.update_game(0, &game).unwrap();
@@ -978,7 +976,7 @@ fn test_a_tree_cache_that_cant_be_deleted_leaves_the_update_unwritten() {
     let indexes = ["si4", "sn4"].map(|ext| std::fs::read(path.with_extension(ext)).unwrap());
 
     let mut db = Database::open(&path).unwrap();
-    db.update_game(0, &scidtopgn::parse_single_game(NEW_GAME).unwrap())
+    db.update_game(0, &crate::parse_single_game(NEW_GAME).unwrap())
         .unwrap();
     let err = db.flush().unwrap_err();
     assert!(matches!(err, Error::Io(_)), "{err:?}");
@@ -1005,7 +1003,7 @@ fn test_files_that_cant_be_replaced_leave_the_tree_cache_deleted() {
     let aside = temp.path().join("aside");
 
     let mut db = Database::open(&path).unwrap();
-    db.update_game(0, &scidtopgn::parse_single_game(NEW_GAME).unwrap())
+    db.update_game(0, &crate::parse_single_game(NEW_GAME).unwrap())
         .unwrap();
     std::fs::rename(&si4, &aside).unwrap();
     assert!(matches!(db.flush(), Err(Error::Io(_))));
@@ -1056,8 +1054,8 @@ fn test_create_under_a_file_names_the_index_file() {
 /// The raw index entries of the database at `path`.
 fn raw_entries(path: &std::path::Path) -> Vec<Vec<u8>> {
     let si4 = std::fs::read(path.with_extension("si4")).unwrap();
-    si4[scidtopgn::INDEX_HEADER_SIZE..]
-        .chunks(scidtopgn::INDEX_ENTRY_SIZE)
+    si4[crate::index::INDEX_HEADER_SIZE..]
+        .chunks(crate::index::INDEX_ENTRY_SIZE)
         .map(<[u8]>::to_vec)
         .collect()
 }
@@ -1093,7 +1091,7 @@ fn test_changes_keep_scids_other_entries() {
     let db = Database::open_read_only(get_test_data_path("derived")).unwrap();
     assert_eq!(db.get_entry(0).unwrap().get_num_half_moves(), 302);
 
-    let new_game = scidtopgn::parse_single_game(NEW_GAME).unwrap();
+    let new_game = crate::parse_single_game(NEW_GAME).unwrap();
     assert_keeps_scids_entries(&[1], &[&|db| db.delete_game(1).unwrap()]);
     assert_keeps_scids_entries(
         &[],
@@ -1152,7 +1150,7 @@ fn test_changing_a_game_past_the_last() {
     let temp = tempfile::TempDir::new().unwrap();
     let path = five_with_deleted(temp.path(), &[]);
     let before = database_bytes(&path);
-    let game = scidtopgn::parse_single_game(NEW_GAME).unwrap();
+    let game = crate::parse_single_game(NEW_GAME).unwrap();
 
     let mut db = Database::open(&path).unwrap();
     let not_found = |result| matches!(result, Err(Error::GameNotFound { number: 6 }));
@@ -1181,7 +1179,7 @@ fn test_update_game() {
     let players = db.nfile().namebase().count(NameType::Player);
     let size = db.gfile().file_size();
 
-    let game = scidtopgn::parse_single_game(NEW_GAME).unwrap();
+    let game = crate::parse_single_game(NEW_GAME).unwrap();
     let expected = scid_round_trip(&game).to_pgn();
     db.update_game(2, &game).unwrap();
 
@@ -1230,7 +1228,7 @@ fn test_update_game_with_the_same_names() {
 
 #[test]
 fn test_update_game_keeps_user_flags_and_sets_the_start_flag() {
-    use scidtopgn::index::{IDX_MASK_DELETE, IDX_MASK_NOVELTY};
+    use crate::index::{IDX_MASK_DELETE, IDX_MASK_NOVELTY};
 
     let temp = tempfile::TempDir::new().unwrap();
     let path = five_with_deleted(temp.path(), &[1]);
@@ -1255,11 +1253,11 @@ fn test_update_game_keeps_user_flags_and_sets_the_start_flag() {
 
     let mut db = Database::open(&path).unwrap();
     let setup = "[FEN \"4k3/8/8/8/8/8/4P3/4K3 w - - 0 1\"]\n[SetUp \"1\"]\n\n1. e4 *\n";
-    db.update_game(1, &scidtopgn::parse_single_game(setup).unwrap())
+    db.update_game(1, &crate::parse_single_game(setup).unwrap())
         .unwrap();
     assert_eq!(flags(&db), (true, true, true));
 
-    db.update_game(1, &scidtopgn::parse_single_game(NEW_GAME).unwrap())
+    db.update_game(1, &crate::parse_single_game(NEW_GAME).unwrap())
         .unwrap();
     assert_eq!(flags(&db), (true, true, false));
     db.close().unwrap();
@@ -1269,8 +1267,8 @@ fn test_update_game_keeps_user_flags_and_sets_the_start_flag() {
 
 /// The fields of `entry` that SCID derives from the game's moves, except
 /// the stored line code.
-fn derived_fields(entry: &scidtopgn::IndexEntry) -> (u16, [u8; 9], u32, bool, bool, [u16; 3]) {
-    use scidtopgn::index::{IDX_MASK_PROMO, IDX_MASK_UPROMO};
+fn derived_fields(entry: &crate::IndexEntry) -> (u16, [u8; 9], u32, bool, bool, [u16; 3]) {
+    use crate::index::{IDX_MASK_PROMO, IDX_MASK_UPROMO};
     (
         entry.get_num_half_moves(),
         *entry.get_home_pawn_data(),
@@ -1298,7 +1296,7 @@ fn test_update_game_sets_the_derived_fields() {
         std::fs::copy(src.with_extension(ext), path.with_extension(ext)).unwrap();
     }
     let games =
-        scidtopgn::parse_pgn(&std::fs::read_to_string(src.with_extension("pgn")).unwrap()).unwrap();
+        crate::parse_pgn(&std::fs::read_to_string(src.with_extension("pgn")).unwrap()).unwrap();
 
     let mut db = Database::open(&path).unwrap();
     db.update_game(2, &games[5]).unwrap();
@@ -1322,7 +1320,7 @@ fn test_update_game_sets_the_stored_line_code() {
         std::fs::copy(src.with_extension(ext), path.with_extension(ext)).unwrap();
     }
     let games =
-        scidtopgn::parse_pgn(&std::fs::read_to_string(src.with_extension("pgn")).unwrap()).unwrap();
+        crate::parse_pgn(&std::fs::read_to_string(src.with_extension("pgn")).unwrap()).unwrap();
 
     let mut db = Database::open(&path).unwrap();
     db.update_game(6, &games[1]).unwrap();
@@ -1338,9 +1336,9 @@ fn test_update_game_sets_the_stored_line_code() {
 fn test_games_without_moves_have_the_starting_material() {
     let temp = tempfile::TempDir::new().unwrap();
     let mut db = Database::create(temp.path().join("games")).unwrap();
-    let standard = scidtopgn::parse_single_game("[Event \"x\"]\n\n*\n").unwrap();
+    let standard = crate::parse_single_game("[Event \"x\"]\n\n*\n").unwrap();
     let setup = "[FEN \"4k3/8/8/8/8/8/4P3/4K3 w - - 0 1\"]\n[SetUp \"1\"]\n\n*\n";
-    let setup = scidtopgn::parse_single_game(setup).unwrap();
+    let setup = crate::parse_single_game(setup).unwrap();
     db.add_game(&standard).unwrap();
     db.add_game(&setup).unwrap();
 
@@ -1357,7 +1355,7 @@ fn test_update_game_before_flush_in_new_database() {
     let temp = tempfile::TempDir::new().unwrap();
     let path = temp.path().join("new");
     let parse = |white: &str| {
-        scidtopgn::parse_single_game(&format!("[White \"{white}\"]\n\n1. e4 *\n")).unwrap()
+        crate::parse_single_game(&format!("[White \"{white}\"]\n\n1. e4 *\n")).unwrap()
     };
 
     let mut db = Database::create(&path).unwrap();
@@ -1392,7 +1390,7 @@ fn test_update_damaged_game_with_missing_names() {
 
     let mut db = Database::open(&path).unwrap();
     assert!(db.get_game(0).is_err());
-    let game = scidtopgn::parse_single_game(NEW_GAME).unwrap();
+    let game = crate::parse_single_game(NEW_GAME).unwrap();
     db.update_game(0, &game).unwrap();
     db.close().unwrap();
 
@@ -1425,7 +1423,7 @@ fn test_update_game_too_large_changes_nothing() {
 
 /// A game with tag `name` set to `value`.
 fn game_with_tag(name: &str, value: &str) -> Game {
-    let mut game = scidtopgn::parse_single_game("[Event \"x\"]\n\n1. e4 *\n").unwrap();
+    let mut game = crate::parse_single_game("[Event \"x\"]\n\n1. e4 *\n").unwrap();
     game.add_tag(name, value);
     game
 }
@@ -1445,7 +1443,7 @@ fn test_pgn_tag_value_longer_than_255_bytes_is_dropped_on_import() {
         "[Event \"x\"]\n[Annotator \"{}\"]\n\n1. e4 *\n",
         "a".repeat(300)
     );
-    let game = scid_round_trip(&scidtopgn::parse_single_game(&pgn).unwrap());
+    let game = scid_round_trip(&crate::parse_single_game(&pgn).unwrap());
     assert!(game.tags.is_empty());
     assert_eq!(game.event, "x");
 }
@@ -1548,7 +1546,7 @@ fn test_names_longer_than_255_bytes_are_cut() {
     let mut db = Database::create(&path).unwrap();
     // Names that differ only after byte 255 are one name, as in SCID.
     for (white, black) in [(accented, a(255) + "b"), (a(300), a(255) + "c")] {
-        let mut game = scidtopgn::parse_single_game("[Event \"x\"]\n\n1. e4 *\n").unwrap();
+        let mut game = crate::parse_single_game("[Event \"x\"]\n\n1. e4 *\n").unwrap();
         game.white = white;
         game.black = black;
         db.add_game(&game).unwrap();
@@ -1602,7 +1600,7 @@ impl Drop for ReadOnlyFiles {
     }
 }
 
-fn is_read_only<T>(result: scidtopgn::Result<T>) -> bool {
+fn is_read_only<T>(result: crate::Result<T>) -> bool {
     matches!(result, Err(Error::ReadOnly))
 }
 
@@ -1611,7 +1609,7 @@ fn test_read_only_open_refuses_changes() {
     let temp = tempfile::TempDir::new().unwrap();
     let path = five_with_deleted(temp.path(), &[1]);
     let before = database_bytes(&path);
-    let game = scidtopgn::parse_single_game(NEW_GAME).unwrap();
+    let game = crate::parse_single_game(NEW_GAME).unwrap();
 
     let mut db = Database::open_read_only(&path).unwrap();
     let stored = all_pgn(&mut db);
@@ -1647,7 +1645,7 @@ fn test_read_only_open_needs_no_write_permission() {
 
     let mut db = Database::open_read_only(&path).unwrap();
     assert_eq!(all_pgn(&mut db), stored);
-    let game = scidtopgn::parse_single_game(NEW_GAME).unwrap();
+    let game = crate::parse_single_game(NEW_GAME).unwrap();
     assert!(is_read_only(db.add_game(&game)));
     db.close().unwrap();
 
@@ -1665,7 +1663,7 @@ fn copy_fixture(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
 }
 
 /// The five names `entry` refers to in `db`.
-fn entry_names(db: &Database, entry: &scidtopgn::IndexEntry) -> [String; 5] {
+fn entry_names(db: &Database, entry: &crate::IndexEntry) -> [String; 5] {
     let nb = db.nfile().namebase();
     [
         (NameType::Player, entry.get_white()),
@@ -1805,7 +1803,7 @@ const ENTRY_CUSTOM_FLAGS_BYTE: usize = 6;
 
 #[test]
 fn test_copy_game_keeps_custom_and_user_flags() {
-    use scidtopgn::index::{IDX_MASK_BRILLIANCY, IDX_MASK_TACTICS, IDX_MASK_USER};
+    use crate::index::{IDX_MASK_BRILLIANCY, IDX_MASK_TACTICS, IDX_MASK_USER};
 
     let temp = tempfile::TempDir::new().unwrap();
     let path = copy_fixture(temp.path(), "one");
@@ -1820,7 +1818,7 @@ fn test_copy_game_keeps_custom_and_user_flags() {
         .unwrap();
     // No method sets the custom flags, so set all six in the file.
     let mut bytes = std::fs::read(&si4).unwrap();
-    bytes[scidtopgn::index::INDEX_HEADER_SIZE + ENTRY_CUSTOM_FLAGS_BYTE] |= 0x3f;
+    bytes[crate::index::INDEX_HEADER_SIZE + ENTRY_CUSTOM_FLAGS_BYTE] |= 0x3f;
     std::fs::write(&si4, bytes).unwrap();
 
     let mut source = Database::open_read_only(&path).unwrap();
@@ -1883,7 +1881,7 @@ fn test_rating_types_are_stored_and_exported() {
     let temp = tempfile::TempDir::new().unwrap();
     let path = temp.path().join("ratings");
     let pgn = "[White \"W\"]\n[WhiteUSCF \"2400\"]\n[Black \"B\"]\n[BlackDWZ \"?\"]\n\n1. e4 *\n";
-    let game = scidtopgn::parse_single_game(pgn).unwrap();
+    let game = crate::parse_single_game(pgn).unwrap();
     let mut db = Database::create(&path).unwrap();
     db.add_game(&game).unwrap();
     db.close().unwrap();
@@ -1903,9 +1901,9 @@ fn test_rating_types_are_stored_and_exported() {
 
     let read = db.get_game(0).unwrap();
     assert_eq!(read.white_elo, Some(2400));
-    assert_eq!(read.white_rating_type, scidtopgn::RatingType::Uscf);
+    assert_eq!(read.white_rating_type, crate::RatingType::Uscf);
     assert_eq!(read.black_elo, None);
-    assert_eq!(read.black_rating_type, scidtopgn::RatingType::Dwz);
+    assert_eq!(read.black_rating_type, crate::RatingType::Dwz);
     let exported = read.to_pgn();
     assert!(exported.contains("[WhiteUSCF \"2400\"]\n"), "{exported}");
     assert!(!exported.contains("DWZ"), "{exported}");
@@ -1945,7 +1943,7 @@ fn test_writing_nothing_touches_no_file() {
 
 #[test]
 fn test_flush_refuses_a_read_only_name_or_index_file() {
-    let game = scidtopgn::parse_single_game(NEW_GAME).unwrap();
+    let game = crate::parse_single_game(NEW_GAME).unwrap();
     for ext in ["si4", "sn4"] {
         let temp = tempfile::TempDir::new().unwrap();
         let path = five_with_deleted(temp.path(), &[]);
@@ -1976,7 +1974,7 @@ fn test_flush_refuses_a_read_only_name_or_index_file() {
 #[cfg(unix)]
 #[test]
 fn test_flush_refuses_a_linked_name_or_index_file() {
-    let game = scidtopgn::parse_single_game(NEW_GAME).unwrap();
+    let game = crate::parse_single_game(NEW_GAME).unwrap();
     for ext in ["si4", "sn4"] {
         let temp = tempfile::TempDir::new().unwrap();
         let path = five_with_deleted(temp.path(), &[]);
@@ -2013,7 +2011,7 @@ fn test_flush_keeps_the_files_permissions() {
     }
 
     let mut db = Database::open(&path).unwrap();
-    db.add_game(&scidtopgn::parse_single_game(NEW_GAME).unwrap())
+    db.add_game(&crate::parse_single_game(NEW_GAME).unwrap())
         .unwrap();
     db.close().unwrap();
 

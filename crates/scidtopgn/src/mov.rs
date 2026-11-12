@@ -13,18 +13,16 @@ use crate::error::{CorruptGameKind, Error, InvalidMoveByte, Result};
 use crate::position::{fen, ScidPosition};
 
 /// Marks a NAG. The NAG's number is the next byte.
-pub const ENCODE_NAG: u8 = 11;
+pub(crate) const ENCODE_NAG: u8 = 11;
 /// Marks a comment on the previous move. The comments' text follows the
 /// moves, in the order of their markers.
-pub const ENCODE_COMMENT: u8 = 12;
+pub(crate) const ENCODE_COMMENT: u8 = 12;
 /// Starts a variation of the previous move.
-pub const ENCODE_START_MARKER: u8 = 13;
+pub(crate) const ENCODE_START_MARKER: u8 = 13;
 /// Ends a variation.
-pub const ENCODE_END_MARKER: u8 = 14;
+pub(crate) const ENCODE_END_MARKER: u8 = 14;
 /// Ends the moves of the game.
-pub const ENCODE_END_GAME: u8 = 15;
-/// The lowest marker byte. Bytes below it are moves of piece 0, the king.
-pub const ENCODE_FIRST: u8 = 11;
+pub(crate) const ENCODE_END_GAME: u8 = 15;
 
 /// A move in a SCID game: a chess move, or the null move that passes the
 /// turn, which SCID allows in analysis.
@@ -37,22 +35,12 @@ pub enum GameMove {
 }
 
 /// Packs a piece number and a move value into a move byte.
-///
-/// # Examples
-///
-/// ```
-/// use scidtopgn::{make_move_byte, parse_move_byte};
-///
-/// let byte = make_move_byte(12, 15);
-/// assert_eq!(byte, 0xCF);
-/// assert_eq!(parse_move_byte(byte), (12, 15));
-/// ```
-pub fn make_move_byte(piece_num: u8, move_value: u8) -> u8 {
+pub(crate) fn make_move_byte(piece_num: u8, move_value: u8) -> u8 {
     (piece_num << 4) | (move_value & 0x0F)
 }
 
 /// Splits a move byte into its piece number and move value.
-pub fn parse_move_byte(byte: u8) -> (u8, u8) {
+pub(crate) fn parse_move_byte(byte: u8) -> (u8, u8) {
     (byte >> 4, byte & 0x0F)
 }
 
@@ -106,7 +94,7 @@ fn square_diff(from: Square, to: Square) -> i32 {
 /// Returns [`Error::CorruptGame`] if the piece number or value is invalid, if
 /// the move can't be played in `pos` (see [`ScidPosition::can_play`]), or if
 /// it is a null move in check. Its offset is the offset of `byte`.
-pub fn decode_move(buf: &mut ByteBuffer, pos: &ScidPosition, byte: u8) -> Result<GameMove> {
+pub(crate) fn decode_move(buf: &mut ByteBuffer, pos: &ScidPosition, byte: u8) -> Result<GameMove> {
     let (number, value) = parse_move_byte(byte);
     let chess = pos.chess();
     let color = chess.turn();
@@ -203,7 +191,7 @@ fn rook_destination(from: Square, value: u8) -> Square {
 /// # Errors
 ///
 /// Returns [`Error::InvalidMove`] if the move can't be played in `pos`.
-pub fn encode_move(buf: &mut ByteBuffer, pos: &ScidPosition, mv: GameMove) -> Result<()> {
+pub(crate) fn encode_move(buf: &mut ByteBuffer, pos: &ScidPosition, mv: GameMove) -> Result<()> {
     let chess = pos.chess();
     let illegal = |m: &str| Error::InvalidMove {
         move_str: format!("{m} is illegal in {}", fen(chess)),
@@ -211,7 +199,10 @@ pub fn encode_move(buf: &mut ByteBuffer, pos: &ScidPosition, mv: GameMove) -> Re
     let m = match mv {
         GameMove::Null if chess.is_check() => return Err(illegal("a null move")),
         // A null move is a king move to its own square.
-        GameMove::Null => return buf.put_byte(make_move_byte(0, 0)),
+        GameMove::Null => {
+            buf.put_byte(make_move_byte(0, 0));
+            return Ok(());
+        }
         GameMove::Move(m) => m,
     };
     let (Some(from), true) = (m.from(), pos.can_play(m)) else {
@@ -237,8 +228,9 @@ pub fn encode_move(buf: &mut ByteBuffer, pos: &ScidPosition, mv: GameMove) -> Re
         Role::Rook | Role::Queen if same_file => 8 + to.rank().to_u32() as u8,
         Role::Rook => unreachable!("a legal rook move stays on its rank or file"),
         Role::Queen => {
-            buf.put_byte(make_move_byte(number, from.file().to_u32() as u8))?;
-            return buf.put_byte(to.to_u32() as u8 + 64);
+            buf.put_byte(make_move_byte(number, from.file().to_u32() as u8));
+            buf.put_byte(to.to_u32() as u8 + 64);
+            return Ok(());
         }
         Role::Bishop => {
             let file_diff = to.file().to_u32() as i32 - from.file().to_u32() as i32;
@@ -262,7 +254,8 @@ pub fn encode_move(buf: &mut ByteBuffer, pos: &ScidPosition, mv: GameMove) -> Re
             (diff.unsigned_abs() - 7) as u8 + promotion
         }
     };
-    buf.put_byte(make_move_byte(number, value))
+    buf.put_byte(make_move_byte(number, value));
+    Ok(())
 }
 
 #[cfg(test)]

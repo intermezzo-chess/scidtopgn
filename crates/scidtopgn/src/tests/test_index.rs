@@ -1,5 +1,6 @@
-use scidtopgn::{
-    Index, IndexEntry, INDEX_ENTRY_SIZE, INDEX_HEADER_SIZE, INDEX_MAGIC, SCID_VERSION,
+use crate::{
+    index::Index, index::INDEX_ENTRY_SIZE, index::INDEX_HEADER_SIZE, index::INDEX_MAGIC,
+    IndexEntry, SCID_VERSION,
 };
 use std::path::PathBuf;
 
@@ -72,7 +73,7 @@ fn test_one_si4_detailed_values() {
 
     assert_eq!(
         entry.get_result(),
-        scidtopgn::GameResult::Draw,
+        crate::GameResult::Draw,
         "Result should be Draw"
     );
 
@@ -86,7 +87,7 @@ fn test_one_si4_date() {
 
     let entry = index.get_entry(0).expect("Entry 0 should exist");
 
-    let date = entry.get_date_obj();
+    let date = entry.get_date();
     assert!(date.is_valid(), "Date should be valid");
 
     let year = date.year();
@@ -131,7 +132,7 @@ fn test_index_header_size() {
 
 #[test]
 fn test_entry_roundtrip() {
-    use scidtopgn::{date_make, GameResult};
+    use crate::{date::date_make, GameResult};
     use std::io::Cursor;
 
     let mut entry = IndexEntry::new();
@@ -175,7 +176,7 @@ fn test_entry_roundtrip() {
 
 #[test]
 fn test_index_full() {
-    use scidtopgn::{Error, MAX_GAMES};
+    use crate::{Error, MAX_GAMES};
 
     // Sets the count instead of adding millions of entries.
     let mut index = Index::new();
@@ -196,7 +197,7 @@ fn test_index_full() {
 
 #[test]
 fn test_index_description() {
-    use scidtopgn::index::SCID_DESC_LENGTH;
+    use crate::index::SCID_DESC_LENGTH;
 
     let mut index = Index::default();
     assert!(!index.is_dirty());
@@ -217,7 +218,7 @@ fn test_index_description() {
 
 #[test]
 fn test_write_entry_rewrites_one_entry() {
-    use scidtopgn::Error;
+    use crate::Error;
     use std::io::Cursor;
 
     let mut index = Index::new();
@@ -260,7 +261,7 @@ fn reread(entry: &IndexEntry) -> IndexEntry {
 
 #[test]
 fn test_entry_flags() {
-    use scidtopgn::index::{IDX_MASK_DELETE, IDX_MASK_PROMO, IDX_MASK_USER};
+    use crate::index::{IDX_MASK_DELETE, IDX_MASK_PROMO, IDX_MASK_USER};
 
     let mut entry = IndexEntry::new();
     entry.set_delete_flag(true);
@@ -393,7 +394,7 @@ fn test_entry_half_move_count_above_255_survives_a_rewrite() {
 
 #[test]
 fn test_event_date_must_be_near_the_game_date() {
-    use scidtopgn::date_make;
+    use crate::date::date_make;
 
     // SCID stores the event year as an offset of -3 to +3 from the game's
     // year. Other event dates aren't stored.
@@ -408,7 +409,7 @@ fn test_event_date_must_be_near_the_game_date() {
 
 #[test]
 fn test_event_date_needs_known_years() {
-    use scidtopgn::date_make;
+    use crate::date::date_make;
 
     // An event date without a year isn't stored. Nor is any event date when
     // the game's year is below 3, as SCID's unsigned arithmetic gives.
@@ -437,7 +438,7 @@ fn test_event_date_needs_known_years() {
 
 #[test]
 fn test_eco_codes() {
-    use scidtopgn::index::{eco_from_string, eco_to_string};
+    use crate::index::{eco_from_string, eco_to_string};
 
     for (text, written) in [
         ("A00", "A00"),
@@ -465,7 +466,7 @@ fn test_eco_codes() {
 
 #[test]
 fn test_entry_init_clears_every_field() {
-    use scidtopgn::{date_make, GameResult};
+    use crate::{date::date_make, GameResult};
 
     let mut entry = IndexEntry::new();
     entry.set_offset(1);
