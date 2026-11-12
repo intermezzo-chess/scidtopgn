@@ -1,6 +1,8 @@
 ![scidtopgn](https://raw.githubusercontent.com/intermezzo-chess/scidtopgn/main/assets/scidtopgn.png)
 
-A Rust library and CLI for converting between SCID (.si4/.sn4/.sg4) and PGN formats. Fast, accurate, and functional on Windows, Mac, and Linux.
+A Rust library and CLI for converting between SCID vs. PC 4 databases (.si4/.sn4/.sg4) and PGN. Fast, accurate, and functional on Windows, Mac, and Linux.
+
+scidtopgn reads the databases SCID vs. PC writes, and writes or appends games so that SCID vs. PC still reads the database. It isn't a replacement for the SCID application. [docs/SCID_COMPATIBILITY.md](docs/SCID_COMPATIBILITY.md) says what it is compatible with, what it keeps when it changes a database, and where it deliberately differs from SCID.
 
 ![animation showing scidtopgn in the terminal](https://raw.githubusercontent.com/intermezzo-chess/scidtopgn/main/assets/scidtopgn.gif)
 
