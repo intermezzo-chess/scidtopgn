@@ -8,8 +8,8 @@
 
 use std::path::{Path, PathBuf};
 
-use scidtopgn::{
-    parse_single_game, Database, DeleteTwin, Error, Game, Index, IndexEntry, TwinOptions,
+use crate::{
+    index::Index, parse_single_game, Database, DeleteTwin, Error, Game, IndexEntry, TwinOptions,
 };
 use tempfile::TempDir;
 

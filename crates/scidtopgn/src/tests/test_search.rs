@@ -7,8 +7,8 @@
 
 use std::path::{Path, PathBuf};
 
-use scidtopgn::shakmaty::Color;
-use scidtopgn::{Database, Date, Eco, FlagMatch, GameResult, HeaderFlags, HeaderSearch};
+use crate::shakmaty::Color;
+use crate::{Database, Date, Eco, FlagMatch, GameResult, HeaderFlags, HeaderSearch};
 use tempfile::TempDir;
 
 fn data_path(name: &str) -> PathBuf {
@@ -916,7 +916,7 @@ fn finds_names_and_ratings_past_a_gap_in_the_ids() {
         "[White \"A\"]\n[Black \"B\"]\n[BlackElo \"2800\"]\n\n1. e4 *\n",
         "[White \"A\"]\n[Black \"B\"]\n\n1. d4 *\n",
     ] {
-        db.add_game(&scidtopgn::parse_single_game(pgn).unwrap())
+        db.add_game(&crate::parse_single_game(pgn).unwrap())
             .unwrap();
     }
     db.close().unwrap();
@@ -930,7 +930,7 @@ fn finds_names_and_ratings_past_a_gap_in_the_ids() {
     sn4[42] = 2;
     std::fs::write(&sn4_path, sn4).unwrap();
     let si4_path = path.with_extension("si4");
-    let mut index = scidtopgn::Index::open(&si4_path).unwrap();
+    let mut index = crate::index::Index::open(&si4_path).unwrap();
     for game in 0..2 {
         index.get_entry_mut(game).unwrap().set_black(2);
     }

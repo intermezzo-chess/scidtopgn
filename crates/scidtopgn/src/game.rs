@@ -19,27 +19,28 @@ use crate::Date;
 pub const MAX_TAGS: usize = 40;
 /// The longest tag name a game record stores, in bytes. Bytes above it in a
 /// record's tags stand for common tags or the event date.
-pub const MAX_TAG_LEN: u8 = 240;
+pub(crate) const MAX_TAG_LEN: u8 = 240;
 /// The longest tag value a game record stores, in bytes. SCID's PGN parser
 /// reads no longer tag name or value.
 pub(crate) const MAX_TAG_VALUE_LEN: usize = 255;
 /// The size of SCID's array of a move's NAGs. SCID ends the array with a 0,
 /// so a move keeps at most `MAX_NAGS - 1` NAGs, and never NAG 0, which means
 /// no annotation.
-pub const MAX_NAGS: usize = 8;
+pub(crate) const MAX_NAGS: usize = 8;
 /// The deepest a variation can be nested, counting a variation of the main
 /// line as 1. Reading and writing a game recurse once per level, so deeper
 /// nesting could overflow the stack.
 pub(crate) const MAX_VARIATION_DEPTH: u32 = 100;
 
 /// For [`Game::decode`]: read only the moves, NAGs, and variations.
-pub const GAME_DECODE_NONE: u8 = 0;
+#[cfg(test)]
+pub(crate) const GAME_DECODE_NONE: u8 = 0;
 /// For [`Game::decode`]: also read the tags stored in the record.
-pub const GAME_DECODE_TAGS: u8 = 1;
+pub(crate) const GAME_DECODE_TAGS: u8 = 1;
 /// For [`Game::decode`]: also read the comments.
-pub const GAME_DECODE_COMMENTS: u8 = 2;
+pub(crate) const GAME_DECODE_COMMENTS: u8 = 2;
 /// For [`Game::decode`]: read everything.
-pub const GAME_DECODE_ALL: u8 = 3;
+pub(crate) const GAME_DECODE_ALL: u8 = 3;
 
 static COMMON_TAGS: [&str; 14] = [
     "WhiteCountry",
@@ -108,8 +109,8 @@ pub struct MoveNode {
     /// the line's first move.
     pub comment: Option<String>,
     /// The move's NAGs, such as 1 for `!`. See [`nag_to_symbol`]. A game is
-    /// stored and exported with only the first `MAX_NAGS - 1` that aren't 0,
-    /// the NAGs SCID keeps; see [`MAX_NAGS`].
+    /// stored and exported with only the first 7 that aren't 0, the NAGs
+    /// SCID keeps: 0 means no annotation.
     pub nags: Vec<u8>,
     /// The index of the previous node in the line.
     pub prev: Option<usize>,
@@ -240,7 +241,7 @@ pub struct Game {
     pub first_move: Option<usize>,
     /// The index in [`moves`](Self::moves) of the node that new moves,
     /// variations, and annotations are added after while a game is built.
-    pub current_move: Option<usize>,
+    pub(crate) current_move: Option<usize>,
     /// The tags that have no field of their own, in the order they were
     /// read, up to [`MAX_TAGS`].
     pub tags: Vec<Tag>,
@@ -339,7 +340,7 @@ impl Game {
     /// # Errors
     ///
     /// Returns [`Error::CorruptGame`] if the record is damaged.
-    pub fn decode_start(&mut self, buf: &mut ByteBuffer) -> Result<()> {
+    pub(crate) fn decode_start(&mut self, buf: &mut ByteBuffer) -> Result<()> {
         self.decode_tags(buf, false)?;
         self.decode_start_position(buf)?;
         Ok(())
@@ -382,7 +383,7 @@ impl Game {
     ///
     /// Returns [`Error::InvalidFen`] if `start_position` has more than 16
     /// pieces of one color.
-    pub fn initial_position(&self) -> Result<ScidPosition> {
+    pub(crate) fn initial_position(&self) -> Result<ScidPosition> {
         match &self.start_position {
             Some(chess) => ScidPosition::from_setup_position(chess.clone()),
             None => Ok(ScidPosition::standard()),
@@ -396,7 +397,7 @@ impl Game {
     /// # Errors
     ///
     /// Returns [`Error::CorruptGame`] if the record is damaged.
-    pub fn decode_tags(&mut self, buf: &mut ByteBuffer, store_tags: bool) -> Result<()> {
+    pub(crate) fn decode_tags(&mut self, buf: &mut ByteBuffer, store_tags: bool) -> Result<()> {
         let mut b = buf.get_byte()?;
 
         while b != 0 {
@@ -454,7 +455,7 @@ impl Game {
     /// Returns [`Error::CorruptGame`] if the record is damaged, and
     /// [`Error::VariationTooDeep`] or [`Error::TooManyVariations`] if its
     /// variations exceed what this crate reads.
-    pub fn decode(&mut self, buf: &mut ByteBuffer, flags: u8) -> Result<()> {
+    pub(crate) fn decode(&mut self, buf: &mut ByteBuffer, flags: u8) -> Result<()> {
         self.clear();
 
         if flags & GAME_DECODE_TAGS != 0 {
@@ -599,11 +600,12 @@ impl Game {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::NoCurrentMove`] if there is no current move, or
-    /// [`Error::TooManyVariations`] if it already has 255 variations, the
-    /// most SCID can read back.
-    pub fn add_variation(&mut self) -> Result<()> {
-        let current_idx = self.current_move.ok_or(Error::NoCurrentMove)?;
+    /// Returns [`Error::TooManyVariations`] if the current move already has
+    /// 255 variations, the most SCID can read back.
+    pub(crate) fn add_variation(&mut self) -> Result<()> {
+        let current_idx = self
+            .current_move
+            .expect("a variation is added only after a move");
         if self.moves[current_idx].num_variations == u8::MAX {
             return Err(Error::TooManyVariations);
         }
@@ -736,7 +738,8 @@ impl Game {
     // public API.
     #[allow(clippy::too_many_arguments)]
     /// Sets the Seven Tag Roster tags.
-    pub fn load_standard_tags(
+    #[cfg(test)]
+    pub(crate) fn load_standard_tags(
         &mut self,
         white: &str,
         black: &str,

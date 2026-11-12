@@ -10,9 +10,9 @@ use crate::error::{Error, Result};
 use crate::pgn::windows_1252_char;
 
 /// The first eight bytes of a `.sn4` file.
-pub const NAMEBASE_MAGIC: &[u8; 8] = b"Scid.sn\0";
+pub(crate) const NAMEBASE_MAGIC: &[u8; 8] = b"Scid.sn\0";
 /// The number of kinds of name: [`NameType`] has one variant per kind.
-pub const NUM_NAME_TYPES: usize = 4;
+pub(crate) const NUM_NAME_TYPES: usize = 4;
 /// The longest name the name file stores, in bytes.
 const MAX_NAME_LEN: usize = 255;
 
@@ -42,12 +42,13 @@ impl NameType {
     }
 
     /// Returns the kind's number, from 0 to 3, as the name file orders them.
-    pub fn as_usize(self) -> usize {
+    pub(crate) fn as_usize(self) -> usize {
         self as usize
     }
 }
 
-/// Converts a kind's number, as [`NameType::as_usize`] returns it.
+/// Converts a kind's number, from 0 to 3, in the order the name file
+/// stores the kinds: player, event, site, and round.
 ///
 /// Fails with [`Error::InvalidNameType`] for a number above 3.
 impl TryFrom<usize> for NameType {
@@ -82,7 +83,7 @@ pub(crate) type NewIds = [Vec<Option<u32>>; NUM_NAME_TYPES];
 
 /// A name and how many games use it.
 #[derive(Debug, Clone)]
-pub struct NameEntry {
+pub(crate) struct NameEntry {
     /// The ID index entries use to refer to the name.
     pub id: u32,
     /// The name.
@@ -93,21 +94,8 @@ pub struct NameEntry {
 
 /// The names of a database, by kind, with the IDs index entries refer to
 /// them by.
-///
-/// # Examples
-///
-/// ```
-/// use scidtopgn::{NameBase, NameType};
-///
-/// let mut names = NameBase::new();
-/// let id = names.add_name(NameType::Player, "Carlsen, Magnus")?;
-/// assert_eq!(names.add_name(NameType::Player, "Carlsen, Magnus")?, id);
-/// assert_eq!(names.get_name(NameType::Player, id), Some("Carlsen, Magnus"));
-/// assert_eq!(names.find_name(NameType::Event, "Carlsen, Magnus"), None);
-/// # Ok::<(), scidtopgn::Error>(())
-/// ```
 #[derive(Clone)]
-pub struct NameBase {
+pub(crate) struct NameBase {
     trees: [BTreeMap<String, u32>; NUM_NAME_TYPES],
     by_id: [Vec<Option<NameEntry>>; NUM_NAME_TYPES],
     num_names: [u32; NUM_NAME_TYPES],
@@ -128,7 +116,7 @@ impl Default for NameBase {
 
 impl NameBase {
     /// Makes an empty name base.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         NameBase {
             trees: [
                 BTreeMap::new(),
@@ -146,7 +134,8 @@ impl NameBase {
     }
 
     /// Removes every name and resets the timestamp.
-    pub fn clear(&mut self) {
+    #[cfg(test)]
+    pub(crate) fn clear(&mut self) {
         for i in 0..NUM_NAME_TYPES {
             self.trees[i].clear();
             self.by_id[i].clear();
@@ -158,17 +147,19 @@ impl NameBase {
     }
 
     /// Sets the timestamp written to the file's header.
-    pub fn set_timestamp(&mut self, ts: u32) {
+    #[cfg(test)]
+    pub(crate) fn set_timestamp(&mut self, ts: u32) {
         self.timestamp = ts;
     }
 
     /// Returns the timestamp from the file's header.
-    pub fn timestamp(&self) -> u32 {
+    #[cfg(test)]
+    pub(crate) fn timestamp(&self) -> u32 {
         self.timestamp
     }
 
     /// Returns the number of names of kind `ntype`.
-    pub fn count(&self, ntype: NameType) -> u32 {
+    pub(crate) fn count(&self, ntype: NameType) -> u32 {
         self.num_names[ntype.as_usize()]
     }
 
@@ -186,7 +177,7 @@ impl NameBase {
     ///
     /// Older versions of SCID store the bytes of a Latin-1 or Windows-1252
     /// PGN file unchanged, so their name files can hold such names.
-    pub fn converted_names(&self) -> &[(NameType, String)] {
+    pub(crate) fn converted_names(&self) -> &[(NameType, String)] {
         &self.converted
     }
 
@@ -210,7 +201,8 @@ impl NameBase {
     }
 
     /// Returns the highest frequency of any name of kind `ntype`.
-    pub fn max_frequency(&self, ntype: NameType) -> u32 {
+    #[cfg(test)]
+    pub(crate) fn max_frequency(&self, ntype: NameType) -> u32 {
         self.max_frequency[ntype.as_usize()]
     }
 
@@ -225,7 +217,7 @@ impl NameBase {
     ///
     /// Returns [`Error::NameBaseFull`] if there are already
     /// [`ntype.max_id()`](NameType::max_id) names of kind `ntype`.
-    pub fn add_name(&mut self, ntype: NameType, name: &str) -> Result<u32> {
+    pub(crate) fn add_name(&mut self, ntype: NameType, name: &str) -> Result<u32> {
         let idx = ntype.as_usize();
         let name = stored_name(name);
 
@@ -258,12 +250,13 @@ impl NameBase {
 
     /// Returns the ID of `name`, or `None` if it isn't present. A name
     /// longer than 255 bytes is cut as [`add_name`](Self::add_name) cuts it.
-    pub fn find_name(&self, ntype: NameType, name: &str) -> Option<u32> {
+    #[cfg(test)]
+    pub(crate) fn find_name(&self, ntype: NameType, name: &str) -> Option<u32> {
         self.trees[ntype.as_usize()].get(stored_name(name)).copied()
     }
 
     /// Returns the name with ID `id`, or `None` if there is none.
-    pub fn get_name(&self, ntype: NameType, id: u32) -> Option<&str> {
+    pub(crate) fn get_name(&self, ntype: NameType, id: u32) -> Option<&str> {
         self.by_id[ntype.as_usize()]
             .get(id as usize)?
             .as_ref()
@@ -271,7 +264,8 @@ impl NameBase {
     }
 
     /// Returns the frequency of the name with ID `id`, or 0 if there is none.
-    pub fn get_frequency(&self, ntype: NameType, id: u32) -> u32 {
+    #[cfg(test)]
+    pub(crate) fn get_frequency(&self, ntype: NameType, id: u32) -> u32 {
         self.by_id[ntype.as_usize()]
             .get(id as usize)
             .and_then(|e| e.as_ref().map(|e| e.frequency))
@@ -279,7 +273,7 @@ impl NameBase {
     }
 
     /// Adds 1 to the frequency of the name with ID `id`, if there is one.
-    pub fn increment_frequency(&mut self, ntype: NameType, id: u32) {
+    pub(crate) fn increment_frequency(&mut self, ntype: NameType, id: u32) {
         let idx = ntype.as_usize();
         if let Some(Some(entry)) = self.by_id[idx].get_mut(id as usize) {
             entry.frequency += 1;
@@ -394,7 +388,8 @@ impl NameBase {
 
     /// Returns the ID, name, and frequency of every name of kind `ntype`, in
     /// ID order.
-    pub fn get_all_names(&self, ntype: NameType) -> Vec<(u32, String, u32)> {
+    #[cfg(test)]
+    pub(crate) fn get_all_names(&self, ntype: NameType) -> Vec<(u32, String, u32)> {
         self.by_id[ntype.as_usize()]
             .iter()
             .filter_map(|opt| opt.as_ref().map(|e| (e.id, e.name.clone(), e.frequency)))
@@ -526,7 +521,7 @@ impl NameBase {
     /// Returns [`Error::InvalidMagic`] if the data doesn't start with
     /// [`NAMEBASE_MAGIC`], [`Error::NamePrefixTooLong`] for a damaged name,
     /// and [`Error::Io`] if the data can't be read or ends early.
-    pub fn read_sn4<R: Read>(&mut self, reader: &mut R) -> Result<()> {
+    pub(crate) fn read_sn4<R: Read>(&mut self, reader: &mut R) -> Result<()> {
         let mut magic = [0u8; 8];
         reader.read_exact(&mut magic)?;
         if &magic != NAMEBASE_MAGIC {
@@ -632,7 +627,7 @@ impl NameBase {
     /// # Errors
     ///
     /// Returns [`Error::Io`] if the data can't be written.
-    pub fn write_sn4<W: Write>(&self, writer: &mut W) -> Result<()> {
+    pub(crate) fn write_sn4<W: Write>(&self, writer: &mut W) -> Result<()> {
         writer.write_all(NAMEBASE_MAGIC)?;
         write_four_bytes(writer, self.timestamp)?;
 

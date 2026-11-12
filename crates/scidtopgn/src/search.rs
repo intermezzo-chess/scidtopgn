@@ -463,7 +463,7 @@ impl Criteria<'_> {
             return Ok(false);
         }
 
-        let date = entry.get_date();
+        let date = entry.get_date_raw();
         if date < self.dates.0 || date > self.dates.1 {
             return Ok(false);
         }

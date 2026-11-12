@@ -4,11 +4,12 @@
 use std::error::Error as _;
 use std::path::{Path, PathBuf};
 
-use scidtopgn::index::INDEX_HEADER_SIZE;
-use scidtopgn::{
-    decode_move, parse_single_game, ByteBuffer, CorruptGameKind, Database, DatabaseFile, Error,
-    GFile, Game, InvalidMoveByte, NameBase, NameType, ScidPosition, ENCODE_COMMENT,
-    ENCODE_END_GAME, ENCODE_END_MARKER, ENCODE_START_MARKER, GAME_DECODE_ALL, GF_BLOCKSIZE,
+use crate::index::INDEX_HEADER_SIZE;
+use crate::{
+    bytebuf::ByteBuffer, game::GAME_DECODE_ALL, gfile::GFile, gfile::GF_BLOCKSIZE,
+    mov::decode_move, mov::ENCODE_COMMENT, mov::ENCODE_END_GAME, mov::ENCODE_END_MARKER,
+    mov::ENCODE_START_MARKER, namebase::NameBase, parse_single_game, position::ScidPosition,
+    CorruptGameKind, Database, DatabaseFile, Error, Game, InvalidMoveByte, NameType,
 };
 use tempfile::TempDir;
 
@@ -63,7 +64,7 @@ fn first_game_error(db: &Path) -> Error {
     }
 }
 
-fn decode(record: &[u8]) -> scidtopgn::Result<Game> {
+fn decode(record: &[u8]) -> crate::Result<Game> {
     let mut game = Game::new();
     game.decode(&mut ByteBuffer::from_slice(record), GAME_DECODE_ALL)?;
     Ok(game)
@@ -144,7 +145,7 @@ fn test_open_rejects_other_versions() {
         set_version(&db, version);
         let before = database_bytes(&db);
 
-        let opens: [fn(&Path) -> scidtopgn::Result<Database>; 2] =
+        let opens: [fn(&Path) -> crate::Result<Database>; 2] =
             [|p| Database::open(p), |p| Database::open_read_only(p)];
         for open in opens {
             match open(&db) {
@@ -160,7 +161,7 @@ fn test_open_rejects_other_versions() {
             }
         }
         assert!(matches!(
-            scidtopgn::Index::open(db.with_extension("si4")),
+            crate::index::Index::open(db.with_extension("si4")),
             Err(Error::File {
                 file: DatabaseFile::Index,
                 source,
@@ -454,16 +455,6 @@ fn test_invalid_move_byte_reasons() {
     ] {
         assert_eq!(reason.to_string(), text);
     }
-}
-
-#[test]
-fn test_add_variation_needs_a_current_move() {
-    let mut game = Game::new();
-    match game.add_variation() {
-        Err(error @ Error::NoCurrentMove) => assert_eq!(error.to_string(), "No current move"),
-        other => panic!("expected no current move, got {other:?}"),
-    }
-    assert!(game.moves.is_empty());
 }
 
 #[test]

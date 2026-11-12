@@ -2,9 +2,8 @@ use std::ops::RangeInclusive;
 use std::str::FromStr;
 
 use clap::{Args, ValueEnum};
-use scidtopgn::index::MAX_ELO;
 use scidtopgn::shakmaty::Color;
-use scidtopgn::{Date, Eco, FlagMatch, GameResult, HeaderSearch, YEAR_MAX};
+use scidtopgn::{Date, Eco, FlagMatch, GameResult, HeaderSearch, MAX_ELO, YEAR_MAX};
 
 /// The options that search games by their header, shared by the default
 /// invocation and `export`. Each is an option of SCID's header search.

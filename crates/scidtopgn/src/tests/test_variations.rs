@@ -1,11 +1,11 @@
 //! Nested variations, and the limits on how deep variations nest and how
 //! many one move can have.
 
-use scidtopgn::shakmaty::uci::UciMove;
-use scidtopgn::{
-    encode_move, parse_single_game, ByteBuffer, Database, Error, Game, GameMove, Marker, MoveNode,
-    PgnParser, ScidPosition, ENCODE_COMMENT, ENCODE_END_GAME, ENCODE_END_MARKER,
-    ENCODE_START_MARKER, GAME_DECODE_ALL,
+use crate::shakmaty::uci::UciMove;
+use crate::{
+    bytebuf::ByteBuffer, game::GAME_DECODE_ALL, mov::encode_move, mov::ENCODE_COMMENT,
+    mov::ENCODE_END_GAME, mov::ENCODE_END_MARKER, mov::ENCODE_START_MARKER, parse_single_game,
+    position::ScidPosition, Database, Error, Game, GameMove, Marker, MoveNode, PgnParser,
 };
 use tempfile::TempDir;
 
@@ -155,7 +155,7 @@ fn move_byte(uci: &str) -> u8 {
 
 /// Decodes a game record with no tags, the standard starting position, the
 /// encoded `moves`, and `comments`.
-fn decode(moves: &[u8], comments: &[&str]) -> scidtopgn::Result<Game> {
+fn decode(moves: &[u8], comments: &[&str]) -> crate::Result<Game> {
     let mut record = vec![0, 0];
     record.extend(moves);
     record.push(ENCODE_END_GAME);

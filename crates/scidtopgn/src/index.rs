@@ -5,111 +5,109 @@
 //! file, and its date, result, ratings, ECO code, and flags.
 
 use crate::common::GameResult;
+use crate::date::{date_get_day, date_get_month, date_get_year, date_make, Date};
 use crate::error::{DatabaseFile, Error, Result};
-use crate::{date_get_day, date_get_month, date_get_year, date_make, Date};
 use shakmaty::{Bitboard, Board, Color, Rank, Role};
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 /// The first eight bytes of a `.si4` file.
-pub const INDEX_MAGIC: &[u8; 8] = b"Scid.si\0";
-/// The extension of an index file.
-pub const INDEX_SUFFIX: &str = ".si4";
+pub(crate) const INDEX_MAGIC: &[u8; 8] = b"Scid.si\0";
 /// The size of the index file's header, in bytes.
-pub const INDEX_HEADER_SIZE: usize = 182;
+pub(crate) const INDEX_HEADER_SIZE: usize = 182;
 /// The size of an index entry, in bytes.
-pub const INDEX_ENTRY_SIZE: usize = 47;
+pub(crate) const INDEX_ENTRY_SIZE: usize = 47;
 /// The most games a SCID database can hold.
 pub const MAX_GAMES: u32 = 16_777_214;
 /// The longest database description the header holds, in bytes.
-pub const SCID_DESC_LENGTH: usize = 107;
+pub(crate) const SCID_DESC_LENGTH: usize = 107;
 /// The longest description of a custom flag the header holds, in bytes.
-pub const CUSTOM_FLAG_DESC_LENGTH: usize = 8;
+pub(crate) const CUSTOM_FLAG_DESC_LENGTH: usize = 8;
 /// The number of custom flags the header describes.
-pub const CUSTOM_FLAG_MAX: usize = 6;
+pub(crate) const CUSTOM_FLAG_MAX: usize = 6;
 /// The highest rating an index entry stores. Higher ratings are stored as
 /// this.
 pub const MAX_ELO: u16 = 4000;
 /// The size of an index entry's home pawn data, in bytes.
-pub const HPSIG_SIZE: usize = 9;
+pub(crate) const HPSIG_SIZE: usize = 9;
 /// The highest half-move count an index entry stores. Higher counts are
 /// stored modulo 1,024.
-pub const MAX_HALF_MOVES: u16 = 1023;
+pub(crate) const MAX_HALF_MOVES: u16 = 1023;
 
 /// The SCID format version this crate reads and writes: 400, for SCID 4.
 pub const SCID_VERSION: u16 = 400;
 
 /// The bit of the flag [`IDX_MASK_START`] tests.
-pub const IDX_FLAG_START: u16 = 0;
+pub(crate) const IDX_FLAG_START: u16 = 0;
 /// The bit of the flag [`IDX_MASK_PROMO`] tests.
-pub const IDX_FLAG_PROMO: u16 = 1;
+pub(crate) const IDX_FLAG_PROMO: u16 = 1;
 /// The bit of the flag [`IDX_MASK_UPROMO`] tests.
-pub const IDX_FLAG_UPROMO: u16 = 2;
+pub(crate) const IDX_FLAG_UPROMO: u16 = 2;
 /// The bit of the flag [`IDX_MASK_DELETE`] tests.
-pub const IDX_FLAG_DELETE: u16 = 3;
+pub(crate) const IDX_FLAG_DELETE: u16 = 3;
 /// The bit of the flag [`IDX_MASK_WHITE_OP`] tests.
-pub const IDX_FLAG_WHITE_OP: u16 = 4;
+pub(crate) const IDX_FLAG_WHITE_OP: u16 = 4;
 /// The bit of the flag [`IDX_MASK_BLACK_OP`] tests.
-pub const IDX_FLAG_BLACK_OP: u16 = 5;
+pub(crate) const IDX_FLAG_BLACK_OP: u16 = 5;
 /// The bit of the flag [`IDX_MASK_MIDDLEGAME`] tests.
-pub const IDX_FLAG_MIDDLEGAME: u16 = 6;
+pub(crate) const IDX_FLAG_MIDDLEGAME: u16 = 6;
 /// The bit of the flag [`IDX_MASK_ENDGAME`] tests.
-pub const IDX_FLAG_ENDGAME: u16 = 7;
+pub(crate) const IDX_FLAG_ENDGAME: u16 = 7;
 /// The bit of the flag [`IDX_MASK_NOVELTY`] tests.
-pub const IDX_FLAG_NOVELTY: u16 = 8;
+pub(crate) const IDX_FLAG_NOVELTY: u16 = 8;
 /// The bit of the flag [`IDX_MASK_PAWN`] tests.
-pub const IDX_FLAG_PAWN: u16 = 9;
+pub(crate) const IDX_FLAG_PAWN: u16 = 9;
 /// The bit of the flag [`IDX_MASK_TACTICS`] tests.
-pub const IDX_FLAG_TACTICS: u16 = 10;
+pub(crate) const IDX_FLAG_TACTICS: u16 = 10;
 /// The bit of the flag [`IDX_MASK_KSIDE`] tests.
-pub const IDX_FLAG_KSIDE: u16 = 11;
+pub(crate) const IDX_FLAG_KSIDE: u16 = 11;
 /// The bit of the flag [`IDX_MASK_QSIDE`] tests.
-pub const IDX_FLAG_QSIDE: u16 = 12;
+pub(crate) const IDX_FLAG_QSIDE: u16 = 12;
 /// The bit of the flag [`IDX_MASK_BRILLIANCY`] tests.
-pub const IDX_FLAG_BRILLIANCY: u16 = 13;
+pub(crate) const IDX_FLAG_BRILLIANCY: u16 = 13;
 /// The bit of the flag [`IDX_MASK_BLUNDER`] tests.
-pub const IDX_FLAG_BLUNDER: u16 = 14;
+pub(crate) const IDX_FLAG_BLUNDER: u16 = 14;
 /// The bit of the flag [`IDX_MASK_USER`] tests.
-pub const IDX_FLAG_USER: u16 = 15;
+pub(crate) const IDX_FLAG_USER: u16 = 15;
 
 /// The game starts from a position other than the standard one.
-pub const IDX_MASK_START: u16 = 1 << IDX_FLAG_START;
+pub(crate) const IDX_MASK_START: u16 = 1 << IDX_FLAG_START;
 /// The game has a promotion.
-pub const IDX_MASK_PROMO: u16 = 1 << IDX_FLAG_PROMO;
+pub(crate) const IDX_MASK_PROMO: u16 = 1 << IDX_FLAG_PROMO;
 /// The game has an underpromotion.
-pub const IDX_MASK_UPROMO: u16 = 1 << IDX_FLAG_UPROMO;
+pub(crate) const IDX_MASK_UPROMO: u16 = 1 << IDX_FLAG_UPROMO;
 /// The game is logically deleted: SCID hides it, but its record stays in
 /// the database until the database is compacted.
-pub const IDX_MASK_DELETE: u16 = 1 << IDX_FLAG_DELETE;
+pub(crate) const IDX_MASK_DELETE: u16 = 1 << IDX_FLAG_DELETE;
 /// User flag: a White opening.
-pub const IDX_MASK_WHITE_OP: u16 = 1 << IDX_FLAG_WHITE_OP;
+pub(crate) const IDX_MASK_WHITE_OP: u16 = 1 << IDX_FLAG_WHITE_OP;
 /// User flag: a Black opening.
-pub const IDX_MASK_BLACK_OP: u16 = 1 << IDX_FLAG_BLACK_OP;
+pub(crate) const IDX_MASK_BLACK_OP: u16 = 1 << IDX_FLAG_BLACK_OP;
 /// User flag: a middlegame.
-pub const IDX_MASK_MIDDLEGAME: u16 = 1 << IDX_FLAG_MIDDLEGAME;
+pub(crate) const IDX_MASK_MIDDLEGAME: u16 = 1 << IDX_FLAG_MIDDLEGAME;
 /// User flag: an endgame.
-pub const IDX_MASK_ENDGAME: u16 = 1 << IDX_FLAG_ENDGAME;
+pub(crate) const IDX_MASK_ENDGAME: u16 = 1 << IDX_FLAG_ENDGAME;
 /// User flag: a novelty.
-pub const IDX_MASK_NOVELTY: u16 = 1 << IDX_FLAG_NOVELTY;
+pub(crate) const IDX_MASK_NOVELTY: u16 = 1 << IDX_FLAG_NOVELTY;
 /// User flag: pawn structure.
-pub const IDX_MASK_PAWN: u16 = 1 << IDX_FLAG_PAWN;
+pub(crate) const IDX_MASK_PAWN: u16 = 1 << IDX_FLAG_PAWN;
 /// User flag: tactics.
-pub const IDX_MASK_TACTICS: u16 = 1 << IDX_FLAG_TACTICS;
+pub(crate) const IDX_MASK_TACTICS: u16 = 1 << IDX_FLAG_TACTICS;
 /// User flag: kingside play.
-pub const IDX_MASK_KSIDE: u16 = 1 << IDX_FLAG_KSIDE;
+pub(crate) const IDX_MASK_KSIDE: u16 = 1 << IDX_FLAG_KSIDE;
 /// User flag: queenside play.
-pub const IDX_MASK_QSIDE: u16 = 1 << IDX_FLAG_QSIDE;
+pub(crate) const IDX_MASK_QSIDE: u16 = 1 << IDX_FLAG_QSIDE;
 /// User flag: a brilliancy or good play.
-pub const IDX_MASK_BRILLIANCY: u16 = 1 << IDX_FLAG_BRILLIANCY;
+pub(crate) const IDX_MASK_BRILLIANCY: u16 = 1 << IDX_FLAG_BRILLIANCY;
 /// User flag: a blunder or bad play.
-pub const IDX_MASK_BLUNDER: u16 = 1 << IDX_FLAG_BLUNDER;
+pub(crate) const IDX_MASK_BLUNDER: u16 = 1 << IDX_FLAG_BLUNDER;
 /// User flag: user-defined.
-pub const IDX_MASK_USER: u16 = 1 << IDX_FLAG_USER;
+pub(crate) const IDX_MASK_USER: u16 = 1 << IDX_FLAG_USER;
 
 /// The header of a `.si4` index file.
 #[derive(Debug, Clone)]
-pub struct IndexHeader {
+pub(crate) struct IndexHeader {
     /// [`INDEX_MAGIC`].
     pub magic: [u8; 8],
     /// The SCID format version: [`SCID_VERSION`] in a header that was read.
@@ -151,7 +149,7 @@ impl Default for IndexHeader {
 
 impl IndexHeader {
     /// The header of an empty database.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
@@ -162,7 +160,7 @@ impl IndexHeader {
     /// Returns [`Error::InvalidMagic`] if the data doesn't start with
     /// [`INDEX_MAGIC`], [`Error::UnsupportedVersion`] if its version isn't
     /// [`SCID_VERSION`], and [`Error::Io`] if it can't be read or ends early.
-    pub fn read<R: Read + Seek>(reader: &mut R) -> Result<Self> {
+    pub(crate) fn read<R: Read + Seek>(reader: &mut R) -> Result<Self> {
         let mut header = Self::default();
 
         reader.read_exact(&mut header.magic)?;
@@ -196,7 +194,7 @@ impl IndexHeader {
     /// # Errors
     ///
     /// Returns [`Error::Io`] if it can't be written.
-    pub fn write<W: Write>(&self, writer: &mut W) -> Result<()> {
+    pub(crate) fn write<W: Write>(&self, writer: &mut W) -> Result<()> {
         writer.write_all(&self.magic)?;
         write_u16_be(writer, self.version)?;
         write_u32_be(writer, self.base_type)?;
@@ -212,7 +210,8 @@ impl IndexHeader {
     }
 
     /// Returns the description, or `""` if it isn't valid UTF-8.
-    pub fn description_str(&self) -> &str {
+    #[cfg(test)]
+    pub(crate) fn description_str(&self) -> &str {
         let end = self
             .description
             .iter()
@@ -222,7 +221,8 @@ impl IndexHeader {
     }
 
     /// Sets the description, cutting it to [`SCID_DESC_LENGTH`] bytes.
-    pub fn set_description(&mut self, desc: &str) {
+    #[cfg(test)]
+    pub(crate) fn set_description(&mut self, desc: &str) {
         let bytes = desc.as_bytes();
         let len = bytes.len().min(SCID_DESC_LENGTH);
         self.description[..len].copy_from_slice(&bytes[..len]);
@@ -232,11 +232,13 @@ impl IndexHeader {
     }
 }
 
-/// A game's entry in the index: where its record is in the game file, the IDs
-/// of its names, and its date, result, ratings, ECO code, and flags.
+/// A game's entry in the index: its date, result, ratings, ECO code, and
+/// flags, the IDs of its names, and where its record is in the game file.
+/// [`Database::get_entry`](crate::Database::get_entry) returns it, so these
+/// can be read without decoding the game.
 ///
-/// The fields are packed as SCID stores them, so they are read and set
-/// through methods.
+/// The fields are packed as SCID stores them, so they are read through
+/// methods.
 #[derive(Debug, Clone)]
 pub struct IndexEntry {
     offset: u32,
@@ -260,8 +262,9 @@ pub struct IndexEntry {
     home_pawn_data: [u8; HPSIG_SIZE],
 }
 
-impl Default for IndexEntry {
-    fn default() -> Self {
+impl IndexEntry {
+    /// An entry with every field 0.
+    pub(crate) fn new() -> Self {
         Self {
             offset: 0,
             length_low: 0,
@@ -284,16 +287,10 @@ impl Default for IndexEntry {
             home_pawn_data: [0; HPSIG_SIZE],
         }
     }
-}
-
-impl IndexEntry {
-    /// An entry with every field 0.
-    pub fn new() -> Self {
-        Self::default()
-    }
 
     /// Sets every field to 0.
-    pub fn init(&mut self) {
+    #[cfg(test)]
+    pub(crate) fn init(&mut self) {
         self.offset = 0;
         self.length_low = 0;
         self.length_high = 0;
@@ -316,120 +313,120 @@ impl IndexEntry {
     }
 
     /// Returns the length of the game's record, in bytes.
-    pub fn get_length(&self) -> u32 {
+    pub(crate) fn get_length(&self) -> u32 {
         (self.length_low as u32) | (((self.length_high & 0x80) as u32) << 9)
     }
 
     /// Sets the length of the game's record. It must be less than 131,072.
-    pub fn set_length(&mut self, length: u32) {
+    pub(crate) fn set_length(&mut self, length: u32) {
         debug_assert!(length < 131072);
         self.length_low = (length & 0xFFFF) as u16;
         self.length_high = (self.length_high & 0x7F) | (((length >> 16) << 7) as u8);
     }
 
     /// Returns where the game's record starts in the game file.
-    pub fn get_offset(&self) -> u32 {
+    pub(crate) fn get_offset(&self) -> u32 {
         self.offset
     }
 
     /// Sets where the game's record starts in the game file.
-    pub fn set_offset(&mut self, offset: u32) {
+    pub(crate) fn set_offset(&mut self, offset: u32) {
         self.offset = offset;
     }
 
     /// Returns the ID of the White player's name.
-    pub fn get_white(&self) -> u32 {
+    pub(crate) fn get_white(&self) -> u32 {
         let id = (self.white_black_high >> 4) as u32;
         (id << 16) | (self.white_id_low as u32)
     }
 
     /// Sets the ID of the White player's name.
-    pub fn set_white(&mut self, id: u32) {
+    pub(crate) fn set_white(&mut self, id: u32) {
         self.white_id_low = (id & 0xFFFF) as u16;
         self.white_black_high = (self.white_black_high & 0x0F) | (((id >> 16) << 4) as u8);
     }
 
     /// Returns the ID of the Black player's name.
-    pub fn get_black(&self) -> u32 {
+    pub(crate) fn get_black(&self) -> u32 {
         let id = (self.white_black_high & 0x0F) as u32;
         (id << 16) | (self.black_id_low as u32)
     }
 
     /// Sets the ID of the Black player's name.
-    pub fn set_black(&mut self, id: u32) {
+    pub(crate) fn set_black(&mut self, id: u32) {
         self.black_id_low = (id & 0xFFFF) as u16;
         self.white_black_high = (self.white_black_high & 0xF0) | ((id >> 16) as u8);
     }
 
     /// Returns the ID of the event's name.
-    pub fn get_event(&self) -> u32 {
+    pub(crate) fn get_event(&self) -> u32 {
         let id = (self.event_site_rnd_high >> 5) as u32;
         (id << 16) | (self.event_id_low as u32)
     }
 
     /// Sets the ID of the event's name.
-    pub fn set_event(&mut self, id: u32) {
+    pub(crate) fn set_event(&mut self, id: u32) {
         self.event_id_low = (id & 0xFFFF) as u16;
         self.event_site_rnd_high = (self.event_site_rnd_high & 0x1F) | (((id >> 16) << 5) as u8);
     }
 
     /// Returns the ID of the site's name.
-    pub fn get_site(&self) -> u32 {
+    pub(crate) fn get_site(&self) -> u32 {
         let id = ((self.event_site_rnd_high >> 2) & 0x07) as u32;
         (id << 16) | (self.site_id_low as u32)
     }
 
     /// Sets the ID of the site's name.
-    pub fn set_site(&mut self, id: u32) {
+    pub(crate) fn set_site(&mut self, id: u32) {
         self.site_id_low = (id & 0xFFFF) as u16;
         self.event_site_rnd_high = (self.event_site_rnd_high & 0xE3) | (((id >> 16) << 2) as u8);
     }
 
     /// Returns the ID of the round's name.
-    pub fn get_round(&self) -> u32 {
+    pub(crate) fn get_round(&self) -> u32 {
         let id = (self.event_site_rnd_high & 0x03) as u32;
         (id << 16) | (self.round_id_low as u32)
     }
 
     /// Sets the ID of the round's name.
-    pub fn set_round(&mut self, id: u32) {
+    pub(crate) fn set_round(&mut self, id: u32) {
         self.round_id_low = (id & 0xFFFF) as u16;
         self.event_site_rnd_high = (self.event_site_rnd_high & 0xFC) | ((id >> 16) as u8);
     }
 
     /// Returns the game's date, packed. See [`Date`].
-    pub fn get_date(&self) -> u32 {
+    pub(crate) fn get_date_raw(&self) -> u32 {
         self.dates & 0x000FFFFF
     }
 
     /// Sets the game's date, packed.
-    pub fn set_date(&mut self, date: u32) {
+    pub(crate) fn set_date(&mut self, date: u32) {
         self.dates = (self.dates & 0xFFF00000) | (date & 0x000FFFFF);
     }
 
     /// Returns the game's date.
-    pub fn get_date_obj(&self) -> Date {
-        Date::from_raw(self.get_date())
+    pub fn get_date(&self) -> Date {
+        Date::from_raw(self.get_date_raw())
     }
 
     /// Returns the year of the game's date, or 0 if it is unknown.
     pub fn get_year(&self) -> u16 {
-        date_get_year(self.get_date())
+        date_get_year(self.get_date_raw())
     }
 
     /// Returns the month of the game's date, or 0 if it is unknown.
     pub fn get_month(&self) -> u8 {
-        date_get_month(self.get_date())
+        date_get_month(self.get_date_raw())
     }
 
     /// Returns the day of the game's date, or 0 if it is unknown.
     pub fn get_day(&self) -> u8 {
-        date_get_day(self.get_date())
+        date_get_day(self.get_date_raw())
     }
 
     /// Returns the event date, packed, or 0 if there is none.
-    pub fn get_event_date(&self) -> u32 {
-        let game_year = date_get_year(self.get_date()) as i32;
+    pub(crate) fn get_event_date(&self) -> u32 {
+        let game_year = date_get_year(self.get_date_raw()) as i32;
         let edate = (self.dates >> 20) & 0xFFF;
         let month = date_get_month(edate);
         let day = date_get_day(edate);
@@ -450,12 +447,12 @@ impl IndexEntry {
     /// game's, so set the game's date first. An event date more than three
     /// years from the game's date is stored as none, and so is any event date
     /// when the game's year is below 3, as SCID's unsigned arithmetic gives.
-    pub fn set_event_date(&mut self, edate: u32) {
+    pub(crate) fn set_event_date(&mut self, edate: u32) {
         let mut coded_date = (date_get_month(edate) as u32) << 5;
         coded_date |= date_get_day(edate) as u32;
 
         let eyear = date_get_year(edate) as i32;
-        let dyear = date_get_year(self.get_date()) as i32;
+        let dyear = date_get_year(self.get_date_raw()) as i32;
         let mut eyear = eyear;
 
         if dyear < 3 || eyear < (dyear - 3) || eyear > (dyear + 3) {
@@ -482,7 +479,7 @@ impl IndexEntry {
     }
 
     /// Sets the game's result.
-    pub fn set_result(&mut self, result: GameResult) {
+    pub(crate) fn set_result(&mut self, result: GameResult) {
         let res = result.to_byte() as u16;
         self.var_counts = (self.var_counts & 0x0FFF) | (res << 12);
     }
@@ -493,7 +490,7 @@ impl IndexEntry {
     }
 
     /// Sets White's rating, up to [`MAX_ELO`].
-    pub fn set_white_elo(&mut self, elo: u16) {
+    pub(crate) fn set_white_elo(&mut self, elo: u16) {
         let elo = elo.min(MAX_ELO);
         self.white_elo = (self.white_elo & 0xF000) | (elo & 0x0FFF);
     }
@@ -504,39 +501,39 @@ impl IndexEntry {
     }
 
     /// Sets Black's rating, up to [`MAX_ELO`].
-    pub fn set_black_elo(&mut self, elo: u16) {
+    pub(crate) fn set_black_elo(&mut self, elo: u16) {
         let elo = elo.min(MAX_ELO);
         self.black_elo = (self.black_elo & 0xF000) | (elo & 0x0FFF);
     }
 
     /// Returns the kind of White's rating, such as Elo, as SCID numbers them.
-    pub fn get_white_rating_type(&self) -> u8 {
+    pub(crate) fn get_white_rating_type(&self) -> u8 {
         (self.white_elo >> 12) as u8
     }
 
     /// Sets the kind of White's rating.
-    pub fn set_white_rating_type(&mut self, rating_type: u8) {
+    pub(crate) fn set_white_rating_type(&mut self, rating_type: u8) {
         self.white_elo = (self.white_elo & 0x0FFF) | ((rating_type as u16) << 12);
     }
 
     /// Returns the kind of Black's rating, such as Elo, as SCID numbers them.
-    pub fn get_black_rating_type(&self) -> u8 {
+    pub(crate) fn get_black_rating_type(&self) -> u8 {
         (self.black_elo >> 12) as u8
     }
 
     /// Sets the kind of Black's rating.
-    pub fn set_black_rating_type(&mut self, rating_type: u8) {
+    pub(crate) fn set_black_rating_type(&mut self, rating_type: u8) {
         self.black_elo = (self.black_elo & 0x0FFF) | ((rating_type as u16) << 12);
     }
 
     /// Returns the ECO code in SCID's numbering, or 0 if there is none. See
     /// [`eco_to_string`].
-    pub fn get_eco_code(&self) -> u16 {
+    pub(crate) fn get_eco_code(&self) -> u16 {
         self.eco_code
     }
 
     /// Sets the ECO code in SCID's numbering. See [`eco_from_string`].
-    pub fn set_eco_code(&mut self, eco: u16) {
+    pub(crate) fn set_eco_code(&mut self, eco: u16) {
         self.eco_code = eco;
     }
 
@@ -552,18 +549,18 @@ impl IndexEntry {
 
     /// Sets the number of half-moves in the main line. SCID stores 10 bits,
     /// so a count above [`MAX_HALF_MOVES`] is stored modulo 1,024.
-    pub fn set_num_half_moves(&mut self, moves: u16) {
+    pub(crate) fn set_num_half_moves(&mut self, moves: u16) {
         self.num_half_moves = moves & MAX_HALF_MOVES;
     }
 
     /// Returns whether any flag in `mask` is set, such as
     /// [`IDX_MASK_DELETE`].
-    pub fn get_flag(&self, mask: u16) -> bool {
+    pub(crate) fn get_flag(&self, mask: u16) -> bool {
         (self.flags & mask) != 0
     }
 
     /// Sets or clears the flags in `mask`.
-    pub fn set_flag(&mut self, mask: u16, value: bool) {
+    pub(crate) fn set_flag(&mut self, mask: u16, value: bool) {
         if value {
             self.flags |= mask;
         } else {
@@ -579,7 +576,7 @@ impl IndexEntry {
 
     /// Sets whether the game starts from a position other than the standard
     /// one.
-    pub fn set_start_flag(&mut self, value: bool) {
+    pub(crate) fn set_start_flag(&mut self, value: bool) {
         self.set_flag(IDX_MASK_START, value);
     }
 
@@ -599,13 +596,13 @@ impl IndexEntry {
 
     /// Marks the game as logically deleted, or not. Its record stays in the
     /// database.
-    pub fn set_delete_flag(&mut self, value: bool) {
+    pub(crate) fn set_delete_flag(&mut self, value: bool) {
         self.set_flag(IDX_MASK_DELETE, value);
     }
 
     /// Returns whether custom flag `flag` is set, numbered from 1 to
     /// [`CUSTOM_FLAG_MAX`]. Any other number returns `false`.
-    pub fn get_custom_flag(&self, flag: usize) -> bool {
+    pub(crate) fn get_custom_flag(&self, flag: usize) -> bool {
         // The custom flags are the low six bits of `length_high`, flag 1 in
         // bit 0.
         (1..=CUSTOM_FLAG_MAX).contains(&flag) && self.length_high & (1 << (flag - 1)) != 0
@@ -657,7 +654,7 @@ impl IndexEntry {
 
     /// Sets about how many variations the game has, rounded as
     /// [`get_variation_count`](Self::get_variation_count) returns it.
-    pub fn set_variation_count(&mut self, count: u16) {
+    pub(crate) fn set_variation_count(&mut self, count: u16) {
         self.var_counts = (self.var_counts & 0xFFF0) | Self::encode_count(count);
     }
 
@@ -668,7 +665,7 @@ impl IndexEntry {
     }
 
     /// Sets about how many comments the game has.
-    pub fn set_comment_count(&mut self, count: u16) {
+    pub(crate) fn set_comment_count(&mut self, count: u16) {
         self.var_counts = (self.var_counts & 0xFF0F) | (Self::encode_count(count) << 4);
     }
 
@@ -679,39 +676,41 @@ impl IndexEntry {
     }
 
     /// Sets about how many NAGs the game has.
-    pub fn set_nag_count(&mut self, count: u16) {
+    pub(crate) fn set_nag_count(&mut self, count: u16) {
         self.var_counts = (self.var_counts & 0xF0FF) | (Self::encode_count(count) << 8);
     }
 
     /// Returns SCID's signature of the material at the end of the game.
-    pub fn get_final_mat_sig(&self) -> u32 {
+    #[cfg(test)]
+    pub(crate) fn get_final_mat_sig(&self) -> u32 {
         self.final_mat_sig & 0x00FFFFFF
     }
 
     /// Sets SCID's signature of the material at the end of the game.
-    pub fn set_final_mat_sig(&mut self, sig: u32) {
+    pub(crate) fn set_final_mat_sig(&mut self, sig: u32) {
         self.final_mat_sig = (self.final_mat_sig & 0xFF000000) | (sig & 0x00FFFFFF);
     }
 
     /// Returns the number of the stored opening line the game follows, as
     /// SCID numbers them, or 0.
-    pub fn get_stored_line_code(&self) -> u8 {
+    #[cfg(test)]
+    pub(crate) fn get_stored_line_code(&self) -> u8 {
         (self.final_mat_sig >> 24) as u8
     }
 
     /// Sets the number of the stored opening line the game follows.
-    pub fn set_stored_line_code(&mut self, code: u8) {
+    pub(crate) fn set_stored_line_code(&mut self, code: u8) {
         self.final_mat_sig = (self.final_mat_sig & 0x00FFFFFF) | ((code as u32) << 24);
     }
 
     /// Returns SCID's record of when pawns leave their starting squares,
     /// which it uses to search for positions.
-    pub fn get_home_pawn_data(&self) -> &[u8; HPSIG_SIZE] {
+    pub(crate) fn get_home_pawn_data(&self) -> &[u8; HPSIG_SIZE] {
         &self.home_pawn_data
     }
 
     /// Sets SCID's record of when pawns leave their starting squares.
-    pub fn set_home_pawn_data(&mut self, data: &[u8; HPSIG_SIZE]) {
+    pub(crate) fn set_home_pawn_data(&mut self, data: &[u8; HPSIG_SIZE]) {
         self.home_pawn_data.copy_from_slice(data);
     }
 
@@ -720,7 +719,7 @@ impl IndexEntry {
     /// # Errors
     ///
     /// Returns [`Error::Io`] if it can't be read or ends early.
-    pub fn read<R: Read>(reader: &mut R) -> Result<Self> {
+    pub(crate) fn read<R: Read>(reader: &mut R) -> Result<Self> {
         let offset = read_u32_be(reader)?;
         let length_low = read_u16_be(reader)?;
         let length_high = read_u8(reader)?;
@@ -791,7 +790,7 @@ impl IndexEntry {
     /// # Errors
     ///
     /// Returns [`Error::Io`] if it can't be written.
-    pub fn write<W: Write>(&self, writer: &mut W) -> Result<()> {
+    pub(crate) fn write<W: Write>(&self, writer: &mut W) -> Result<()> {
         write_u32_be(writer, self.offset)?;
         write_u16_be(writer, self.length_low)?;
         write_u8(writer, self.length_high)?;
@@ -831,7 +830,7 @@ impl IndexEntry {
 /// A game's number is its position in the index, counting from 0.
 /// [`Database`](crate::Database) uses the index to find each game's record
 /// and names.
-pub struct Index {
+pub(crate) struct Index {
     header: IndexHeader,
     entries: Vec<IndexEntry>,
     dirty: bool,
@@ -845,7 +844,7 @@ impl Default for Index {
 
 impl Index {
     /// An empty index.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             header: IndexHeader::new(),
             entries: Vec::new(),
@@ -860,7 +859,7 @@ impl Index {
     /// Returns [`Error::File`] for [`DatabaseFile::Index`] if the file can't be
     /// read, doesn't start with [`INDEX_MAGIC`], isn't of [`SCID_VERSION`],
     /// or is shorter than its header says.
-    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
+    pub(crate) fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         Self::read_file(path.as_ref()).map_err(|e| e.in_file(DatabaseFile::Index))
     }
 
@@ -896,7 +895,7 @@ impl Index {
     ///
     /// Returns [`Error::File`] for [`DatabaseFile::Index`] if the file can't be
     /// written.
-    pub fn create<P: AsRef<Path>>(path: P) -> Result<Self> {
+    pub(crate) fn create<P: AsRef<Path>>(path: P) -> Result<Self> {
         Self::create_file(path.as_ref()).map_err(|e| e.in_file(DatabaseFile::Index))
     }
 
@@ -913,37 +912,40 @@ impl Index {
     }
 
     /// Returns the number of entries, counting logically deleted games.
-    pub fn num_games(&self) -> u32 {
+    pub(crate) fn num_games(&self) -> u32 {
         self.header.num_games
     }
 
     /// Returns the SCID format version from the header.
-    pub fn version(&self) -> u16 {
+    #[cfg(test)]
+    pub(crate) fn version(&self) -> u16 {
         self.header.version
     }
 
     /// Returns the database's description.
-    pub fn description(&self) -> &str {
+    #[cfg(test)]
+    pub(crate) fn description(&self) -> &str {
         self.header.description_str()
     }
 
     /// Sets the database's description, cutting it to [`SCID_DESC_LENGTH`]
     /// bytes.
-    pub fn set_description(&mut self, desc: &str) {
+    #[cfg(test)]
+    pub(crate) fn set_description(&mut self, desc: &str) {
         self.header.set_description(desc);
         self.dirty = true;
     }
 
     /// Returns the entry of game `game_num`, counting from 0, or `None` if there
     /// is no such game. Logically deleted games have entries.
-    pub fn get_entry(&self, game_num: u32) -> Option<&IndexEntry> {
+    pub(crate) fn get_entry(&self, game_num: u32) -> Option<&IndexEntry> {
         self.entries.get(game_num as usize)
     }
 
     /// Returns the entry of game `game_num` for changing. Write the index with
     /// [`flush`](Self::flush) or [`write_entry`](Self::write_entry) to keep the
     /// change.
-    pub fn get_entry_mut(&mut self, game_num: u32) -> Option<&mut IndexEntry> {
+    pub(crate) fn get_entry_mut(&mut self, game_num: u32) -> Option<&mut IndexEntry> {
         self.entries.get_mut(game_num as usize)
     }
 
@@ -953,7 +955,7 @@ impl Index {
     ///
     /// Returns [`Error::IndexFull`] if the index already has [`MAX_GAMES`]
     /// entries.
-    pub fn add_entry(&mut self, entry: IndexEntry) -> Result<u32> {
+    pub(crate) fn add_entry(&mut self, entry: IndexEntry) -> Result<u32> {
         if self.header.num_games >= MAX_GAMES {
             return Err(Error::IndexFull);
         }
@@ -973,7 +975,12 @@ impl Index {
     ///
     /// Returns [`Error::GameNotFound`] if there is no such game, and
     /// [`Error::Io`] if it can't be written.
-    pub fn write_entry<W: Write + Seek>(&mut self, writer: &mut W, game_num: u32) -> Result<()> {
+    #[cfg(test)]
+    pub(crate) fn write_entry<W: Write + Seek>(
+        &mut self,
+        writer: &mut W,
+        game_num: u32,
+    ) -> Result<()> {
         if game_num >= self.header.num_games {
             return Err(Error::GameNotFound {
                 number: u64::from(game_num) + 1,
@@ -993,7 +1000,8 @@ impl Index {
     /// # Errors
     ///
     /// Returns [`Error::Io`] if it can't be written.
-    pub fn flush<W: Write + Seek>(&mut self, writer: &mut W) -> Result<()> {
+    #[cfg(test)]
+    pub(crate) fn flush<W: Write + Seek>(&mut self, writer: &mut W) -> Result<()> {
         self.write_to(writer)?;
         self.mark_written();
 
@@ -1022,23 +1030,24 @@ impl Index {
     }
 
     /// Returns the header.
-    pub fn header(&self) -> &IndexHeader {
+    pub(crate) fn header(&self) -> &IndexHeader {
         &self.header
     }
 
     /// Returns the header for changing.
-    pub fn header_mut(&mut self) -> &mut IndexHeader {
+    pub(crate) fn header_mut(&mut self) -> &mut IndexHeader {
         self.dirty = true;
         &mut self.header
     }
 
     /// Returns every entry, in game order, counting logically deleted games.
-    pub fn entries(&self) -> &[IndexEntry] {
+    pub(crate) fn entries(&self) -> &[IndexEntry] {
         &self.entries
     }
 
     /// Returns whether the index has changed since it was read or last written.
-    pub fn is_dirty(&self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn is_dirty(&self) -> bool {
         self.dirty
     }
 }
@@ -1097,17 +1106,7 @@ fn write_u32_be<W: Write>(writer: &mut W, value: u32) -> Result<()> {
 ///
 /// SCID extends each ECO code, such as `B36`, with a letter from `a` to `z`
 /// and an optional digit from 1 to 4.
-///
-/// # Examples
-///
-/// ```
-/// use scidtopgn::index::{eco_from_string, eco_to_string};
-///
-/// let code = eco_from_string("B36f");
-/// assert_eq!(eco_to_string(code).as_deref(), Some("B36f"));
-/// assert_eq!(eco_to_string(0), None);
-/// ```
-pub fn eco_to_string(eco_code: u16) -> Option<String> {
+pub(crate) fn eco_to_string(eco_code: u16) -> Option<String> {
     if eco_code == 0 {
         return None;
     }
@@ -1141,7 +1140,7 @@ pub fn eco_to_string(eco_code: u16) -> Option<String> {
 /// Reads an ECO code, such as `B36` or `B36f`, into SCID's numbering.
 /// Returns 0 if `s` doesn't start with a letter from A to E, or has
 /// something other than a digit where the code's digits belong.
-pub fn eco_from_string(s: &str) -> u16 {
+pub(crate) fn eco_from_string(s: &str) -> u16 {
     let chars: Vec<char> = s.chars().collect();
     if chars.is_empty() {
         return 0;
@@ -1224,7 +1223,7 @@ impl Eco {
 
     /// Returns the code in SCID's numbering, as
     /// [`IndexEntry::get_eco_code`] returns it.
-    pub fn code(self) -> u16 {
+    pub(crate) fn code(self) -> u16 {
         self.0
     }
 

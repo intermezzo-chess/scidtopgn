@@ -19,8 +19,8 @@
 
 use std::path::PathBuf;
 
-use scidtopgn::shakmaty::{Color, Position};
-use scidtopgn::{parse_pgn, ByteBuffer, Database, Game, Marker, ENCODE_END_GAME};
+use crate::shakmaty::{Color, Position};
+use crate::{bytebuf::ByteBuffer, mov::ENCODE_END_GAME, parse_pgn, Database, Game, Marker};
 use tempfile::TempDir;
 
 const EDGE_MOVETEXT: [&str; 4] = [
@@ -327,7 +327,7 @@ fn read_database_record(record: &[u8]) -> Vec<String> {
     let mut game = Game::new();
     game.decode(
         &mut ByteBuffer::from_slice(record),
-        scidtopgn::GAME_DECODE_ALL,
+        crate::game::GAME_DECODE_ALL,
     )
     .unwrap();
     main_line(&game)
@@ -357,7 +357,7 @@ fn test_index_start_flags_match_scid() {
 /// The fields of each index entry in the database at `path` that SCID
 /// derives from the game's moves, except the stored line code.
 fn derived_fields(path: &std::path::Path) -> Vec<String> {
-    use scidtopgn::index::{IDX_MASK_PROMO, IDX_MASK_START, IDX_MASK_UPROMO};
+    use crate::index::{IDX_MASK_PROMO, IDX_MASK_START, IDX_MASK_UPROMO};
 
     let db = Database::open(path).unwrap();
     (0..db.num_games())

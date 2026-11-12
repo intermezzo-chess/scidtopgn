@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use scidtopgn::{
-    parse_single_game, Database, Error, Index, NameBase, NameType, GF_BLOCKSIZE, INDEX_ENTRY_SIZE,
-    INDEX_HEADER_SIZE,
+use crate::{
+    gfile::GF_BLOCKSIZE, index::Index, index::INDEX_ENTRY_SIZE, index::INDEX_HEADER_SIZE,
+    namebase::NameBase, parse_single_game, Database, Error, NameType,
 };
 
 const NAME_TYPES: [NameType; 4] = [

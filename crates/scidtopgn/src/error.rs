@@ -179,10 +179,6 @@ pub enum Error {
     #[error("More than 255 variations of one move")]
     TooManyVariations,
 
-    /// A variation added to a game that has no current move.
-    #[error("No current move")]
-    NoCurrentMove,
-
     /// A game added to a database that already holds [`MAX_GAMES`] games.
     #[error("The index is full: a SCID database holds at most {MAX_GAMES} games")]
     IndexFull,
@@ -220,14 +216,15 @@ pub enum Error {
         max: usize,
     },
 
-    /// A game file used after it was closed.
+    /// A database whose game file is closed, because
+    /// [`Database::compact_games`](crate::Database::compact_games) replaced
+    /// it but couldn't open the new one.
     #[error("File not open")]
     FileNotOpen,
 
-    /// A change to a database or game file opened read-only, with
-    /// [`Database::open_read_only`](crate::Database::open_read_only) or
-    /// [`GFile::open_read_only`](crate::GFile::open_read_only). The files
-    /// themselves may be writable.
+    /// A change to a database opened with
+    /// [`Database::open_read_only`](crate::Database::open_read_only). The
+    /// files themselves may be writable.
     #[error("Database is open read-only")]
     ReadOnly,
 
@@ -255,11 +252,6 @@ pub enum Error {
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
     },
-
-    /// A write to a [`ByteBuffer`](crate::ByteBuffer) made from existing
-    /// data, which is read-only.
-    #[error("Buffer full")]
-    BufferFull,
 }
 
 impl Error {

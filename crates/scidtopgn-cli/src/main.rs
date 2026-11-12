@@ -12,7 +12,7 @@ use anyhow::{Context, Result};
 
 use args::{Cli, Command, ExportArgs, ImportArgs, InfoArgs, MergeArgs, ValidateArgs};
 use report::{Log, Progress, Reporter};
-use scidtopgn::{Database, Error, Index, NFile, NameBase, NameType, PgnParser};
+use scidtopgn::{Database, Error, NameType, PgnParser};
 
 fn main() -> ExitCode {
     let cli = Cli::parse_args();
@@ -106,7 +106,7 @@ fn export_command(args: &ExportArgs, reporter: &Reporter) -> Result<()> {
 
     let mut db = Database::open_read_only(&args.database)
         .with_context(|| format!("Failed to open database '{}'", args.database))?;
-    warn_converted_names(reporter, db.nfile().namebase());
+    warn_converted_names(reporter, db.converted_names());
 
     let matches = match &search {
         Some(search) => {
@@ -225,7 +225,7 @@ fn import_command(args: &ImportArgs, reporter: &Reporter) -> Result<()> {
         ));
         let db = Database::open(&args.output)
             .with_context(|| format!("Failed to open database '{}'", args.output))?;
-        warn_converted_names(reporter, db.nfile().namebase());
+        warn_converted_names(reporter, db.converted_names());
         (db, None)
     } else {
         if si4_exists {
@@ -331,7 +331,7 @@ fn merge_command(args: &MergeArgs, reporter: &Reporter) -> Result<()> {
     for source_path in &args.databases {
         let mut source = Database::open_read_only(source_path)
             .with_context(|| format!("Failed to open database '{source_path}'"))?;
-        warn_converted_names(reporter, source.nfile().namebase());
+        warn_converted_names(reporter, source.converted_names());
 
         let count = source.num_games();
         reporter.info(format_args!("Copying {count} games from {source_path}"));
@@ -492,8 +492,8 @@ impl Staging {
 }
 
 /// Warns about each name that was read from bytes that weren't UTF-8.
-fn warn_converted_names(reporter: &Reporter, names: &NameBase) {
-    for (name_type, name) in names.converted_names() {
+fn warn_converted_names(reporter: &Reporter, names: &[(NameType, String)]) {
+    for (name_type, name) in names {
         reporter.warn(format_args!(
             "read {name_type} name \"{name}\" that isn't UTF-8 as Windows-1252"
         ));
@@ -501,19 +501,15 @@ fn warn_converted_names(reporter: &Reporter, names: &NameBase) {
 }
 
 fn info_command(args: &InfoArgs, reporter: &Reporter) -> Result<()> {
-    // Read only the index and name files, so the game file can be damaged,
-    // missing, or read-only.
-    let path = std::path::Path::new(&args.database);
-    let open = || -> scidtopgn::Result<(Index, NFile)> {
-        Ok((Index::open(path.with_extension("si4"))?, NFile::open(path)?))
-    };
-    let (index, nfile) =
-        open().with_context(|| format!("Failed to open database '{}'", args.database))?;
-    warn_converted_names(reporter, nfile.namebase());
+    // Read only the index and name files, so the game file can be damaged
+    // or read-only.
+    let db = Database::open_read_only(&args.database)
+        .with_context(|| format!("Failed to open database '{}'", args.database))?;
+    warn_converted_names(reporter, db.converted_names());
 
     let mut deleted = 0u32;
     let mut years: Option<(u16, u16)> = None;
-    for entry in index.entries() {
+    for entry in (0..db.num_games()).filter_map(|n| db.get_entry(n)) {
         if entry.get_delete_flag() {
             deleted += 1;
             continue;
@@ -527,16 +523,15 @@ fn info_command(args: &InfoArgs, reporter: &Reporter) -> Result<()> {
         }
     }
 
-    let total = index.num_games();
-    let names = nfile.namebase();
+    let total = db.num_games();
     let mut out = std::io::stdout().lock();
     writeln!(out, "Total games: {total}")?;
     writeln!(out, "Deleted games: {deleted}")?;
     writeln!(out, "Active games: {}", total - deleted)?;
-    writeln!(out, "Player names: {}", names.count(NameType::Player))?;
-    writeln!(out, "Event names: {}", names.count(NameType::Event))?;
-    writeln!(out, "Site names: {}", names.count(NameType::Site))?;
-    writeln!(out, "Round names: {}", names.count(NameType::Round))?;
+    writeln!(out, "Player names: {}", db.name_count(NameType::Player))?;
+    writeln!(out, "Event names: {}", db.name_count(NameType::Event))?;
+    writeln!(out, "Site names: {}", db.name_count(NameType::Site))?;
+    writeln!(out, "Round names: {}", db.name_count(NameType::Round))?;
     match years {
         Some((first, last)) => writeln!(out, "Years of active games: {first}-{last}")?,
         None => writeln!(out, "Years of active games: unknown")?,
@@ -550,7 +545,7 @@ fn info_command(args: &InfoArgs, reporter: &Reporter) -> Result<()> {
 fn validate_command(args: &ValidateArgs, reporter: &Reporter) -> Result<ExitCode> {
     let mut db = Database::open_read_only(&args.database)
         .with_context(|| format!("Failed to open database '{}'", args.database))?;
-    warn_converted_names(reporter, db.nfile().namebase());
+    warn_converted_names(reporter, db.converted_names());
 
     let total = db.num_games();
     let mut damaged = 0u32;

@@ -60,12 +60,12 @@ impl Date {
     }
 
     /// Makes a date from its packed form, as [`raw`](Self::raw) returns it.
-    pub fn from_raw(value: u32) -> Self {
+    pub(crate) fn from_raw(value: u32) -> Self {
         Date(value)
     }
 
     /// Returns the packed form SCID stores.
-    pub fn raw(self) -> u32 {
+    pub(crate) fn raw(self) -> u32 {
         self.0
     }
 
@@ -82,11 +82,6 @@ impl Date {
     /// Returns the day of the month, or 0 if it is unknown.
     pub fn day(self) -> u8 {
         (self.0 & 31) as u8
-    }
-
-    /// Returns the packed month and day without the year.
-    pub fn month_day(self) -> u16 {
-        (self.0 & 511) as u16
     }
 
     /// Reads a PGN date such as `2022.12.19`. A part that is missing, isn't
@@ -111,39 +106,6 @@ impl Date {
     /// Returns whether any part of the date is known.
     pub fn is_valid(self) -> bool {
         self.0 != 0
-    }
-
-    /// Moves the date `num_months` months later, or earlier if it is
-    /// negative, keeping the day. Returns [`Date::ZERO`] if the result isn't
-    /// a date this type can hold.
-    pub fn add_months(self, num_months: i32) -> Self {
-        let mut year = self.year() as i32;
-        let mut month = self.month() as i32;
-        let day = self.day();
-
-        let mut remaining = num_months;
-        while remaining < 0 {
-            if month <= 1 {
-                year -= 1;
-                month = 12;
-            } else {
-                month -= 1;
-            }
-            remaining += 1;
-        }
-        while remaining > 0 {
-            month += 1;
-            if month > 12 {
-                year += 1;
-                month = 1;
-            }
-            remaining -= 1;
-        }
-
-        let year = year.max(0) as u16;
-        let month = month.max(0) as u8;
-
-        Date::new(year, month, day).unwrap_or(Date::ZERO)
     }
 }
 
@@ -171,80 +133,23 @@ impl std::fmt::Display for Date {
 
 /// Packs a year, month, and day as SCID stores them, without checking their
 /// ranges. [`Date::new`] checks them.
-pub fn date_make(year: u16, month: u8, day: u8) -> u32 {
+pub(crate) fn date_make(year: u16, month: u8, day: u8) -> u32 {
     ((year as u32) << YEAR_SHIFT) | ((month as u32) << MONTH_SHIFT) | (day as u32)
 }
 
 /// Returns the year of a packed date. See [`Date::year`].
-pub fn date_get_year(date: u32) -> u16 {
+pub(crate) fn date_get_year(date: u32) -> u16 {
     (date >> YEAR_SHIFT) as u16
 }
 
 /// Returns the month of a packed date. See [`Date::month`].
-pub fn date_get_month(date: u32) -> u8 {
+pub(crate) fn date_get_month(date: u32) -> u8 {
     ((date >> MONTH_SHIFT) & 15) as u8
 }
 
 /// Returns the day of a packed date. See [`Date::day`].
-pub fn date_get_day(date: u32) -> u8 {
+pub(crate) fn date_get_day(date: u32) -> u8 {
     (date & 31) as u8
-}
-
-/// Formats a packed date as PGN writes it. See [`Date`]'s `Display`.
-pub fn date_decode_to_string(date: u32) -> String {
-    Date::from_raw(date).to_string()
-}
-
-/// Reads a PGN date into its packed form. See [`Date::from_string`].
-pub fn date_encode_from_string(s: &str) -> u32 {
-    Date::from_string(s).raw()
-}
-
-/// Returns whether `s` looks like a PGN date, as SCID's `date_ValidString`
-/// decides: at most three parts separated by dots, each empty or made of
-/// digits or of `?` but not both, with a year, month, and day no larger than
-/// [`YEAR_MAX`], 12, and 31. So `2022`, `2022..19`, and even an empty string
-/// are valid. The day isn't checked against the month.
-///
-/// A number too large for a `u32` is invalid. SCID gives different answers
-/// for these depending on the platform: on 64-bit macOS and Linux it cuts a
-/// number below 2^64 to 32 bits, and so accepts `4294967301.01.01` as year 5.
-pub fn date_valid_string(s: &str) -> bool {
-    let parts: Vec<&str> = s.split('.').collect();
-    if parts.len() > 3 {
-        return false;
-    }
-
-    let max_values = [YEAR_MAX as u32, 12, 31];
-
-    for (i, part) in parts.iter().enumerate() {
-        let max_val = max_values[i];
-        let mut seen_question = false;
-        let mut seen_digit = false;
-        let mut seen_other = false;
-
-        for ch in part.chars() {
-            if ch.is_ascii_digit() {
-                seen_digit = true;
-            } else if ch == '?' {
-                seen_question = true;
-            } else {
-                seen_other = true;
-            }
-        }
-
-        if seen_other {
-            return false;
-        }
-        if seen_question && seen_digit {
-            return false;
-        }
-        if seen_digit && !part.parse::<u32>().is_ok_and(|value| value <= max_val) {
-            return false;
-        }
-    }
-
-    true
 }
 
 #[cfg(test)]
@@ -296,100 +201,6 @@ mod tests {
     }
 
     #[test]
-    fn test_date_add_months() {
-        let date = Date::new(2022, 6, 15).unwrap();
-        assert_eq!(date.add_months(3), Date::new(2022, 9, 15).unwrap());
-        assert_eq!(date.add_months(8), Date::new(2023, 2, 15).unwrap());
-
-        let date = Date::new(2022, 12, 15).unwrap();
-        assert_eq!(date.add_months(1), Date::new(2023, 1, 15).unwrap());
-    }
-
-    #[test]
-    fn test_date_add_months_keeps_the_day() {
-        // An unknown day stays unknown.
-        let date = Date::new(2022, 6, 0).unwrap();
-        assert_eq!(date.add_months(3), Date::new(2022, 9, 0).unwrap());
-        assert_eq!(date.add_months(8), Date::new(2023, 2, 0).unwrap());
-
-        // As in SCID, the day isn't limited to the new month's length.
-        let date = Date::new(2022, 1, 31).unwrap();
-        assert_eq!(date.add_months(1), Date::new(2022, 2, 31).unwrap());
-    }
-
-    #[test]
-    fn test_date_add_months_past_the_last_year() {
-        let date = Date::new(YEAR_MAX, 12, 15).unwrap();
-        assert_eq!(date.add_months(1), Date::ZERO);
-    }
-
-    #[test]
-    fn test_date_valid_string() {
-        for s in [
-            // Full dates and unknown parts
-            "2022.12.19",
-            "2022.??.??",
-            "????.12.??",
-            // Short forms
-            "2022",
-            "2022.12",
-            "2047",
-            "?",
-            "?.?",
-            // Empty parts
-            "",
-            ".",
-            "..",
-            "2022.",
-            "2022.12.",
-            "2022..19",
-            ".12.19",
-            // Ranges, where leading zeros don't make a number too large
-            "0.0.0",
-            "00000000002022.012.019",
-            "2047.12.31",
-            // Only ranges are checked, not the day against the month
-            "2022.02.31",
-        ] {
-            assert!(date_valid_string(s), "{s:?} should be valid");
-        }
-
-        for s in [
-            // Short forms out of range
-            "2022.13",
-            "2048",
-            // Too many parts
-            "...",
-            "2022.12.19.",
-            "2022.12.19.5",
-            // Ranges
-            "2022.13.01",
-            "2022.12.32",
-            "2048.01.01",
-            "4294967295.01.01",
-            // Characters
-            "2022.1?.01",
-            "2022.Jan.01",
-            " 2022",
-            "+2022",
-            "2022.12.1a",
-            "2022.12.１９",
-            "2022\0.12",
-            // Too large for a u32, and out of range in SCID too
-            "99999999999.01.01",
-            "18446744073709551616.01.01",
-            // Too large for a u32, but in range once SCID cuts it to 32 bits
-            // on 64-bit macOS and Linux
-            "4294967296.01.01",
-            "4294967301.01.01",
-            "2022.4294967301.01",
-            "2022.12.4294967327",
-        ] {
-            assert!(!date_valid_string(s), "{s:?} should be invalid");
-        }
-    }
-
-    #[test]
     fn test_date_new_rejects_out_of_range_parts() {
         for (year, month, day, message) in [
             (2048, 1, 1, "Year 2048 exceeds maximum 2047"),
@@ -410,7 +221,6 @@ mod tests {
     #[test]
     fn test_date_parts() {
         let date = Date::new(2022, 12, 19).unwrap();
-        assert_eq!(date.month_day(), (12 << 5) | 19);
         assert!(date.is_valid());
         assert!(!Date::ZERO.is_valid());
         assert_eq!(date_get_year(date.raw()), 2022);
@@ -427,20 +237,11 @@ mod tests {
             ("2022.??.??", 2022, 0, 0),
             ("????.??.??", 0, 0, 0),
         ] {
-            let raw = date_encode_from_string(text);
-            assert_eq!(raw, date_make(year, month, day), "{text}");
-            assert_eq!(date_decode_to_string(raw), text);
+            let date = Date::from_string(text);
+            assert_eq!(date.raw(), date_make(year, month, day), "{text}");
+            assert_eq!(date.to_string(), text);
         }
         // Parts out of range read as unknown.
         assert_eq!(Date::from_string("2048.13.32"), Date::ZERO);
-    }
-
-    #[test]
-    fn test_date_subtract_months() {
-        let date = Date::new(2022, 2, 15).unwrap();
-        assert_eq!(date.add_months(-1), Date::new(2022, 1, 15).unwrap());
-        assert_eq!(date.add_months(-2), Date::new(2021, 12, 15).unwrap());
-        assert_eq!(date.add_months(-14), Date::new(2020, 12, 15).unwrap());
-        assert_eq!(date.add_months(0), date);
     }
 }
