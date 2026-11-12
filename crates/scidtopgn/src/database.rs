@@ -85,8 +85,8 @@ use shakmaty::{Board, Position, Role};
 /// a Latin-1 or Windows-1252 PGN file as they are, so a name file can hold
 /// names that aren't valid UTF-8. When the name file is read, the bytes of
 /// such a name that aren't valid UTF-8 are read as Windows-1252, and
-/// [`converted_names`](Self::converted_names) lists the name. Games read with these
-/// names converted.
+/// [`converted_names`](Self::converted_names) lists the name. Games read
+/// with these names converted.
 ///
 /// **Writing the database stores the converted names as UTF-8**, as SCID
 /// vs. PC stores the names of PGN it imports. Two names of a kind can then
