@@ -138,26 +138,36 @@ impl SearchArgs {
             return Ok(None);
         }
 
-        let default = HeaderSearch::default();
-        let mut search = HeaderSearch {
-            white,
-            black,
-            event,
-            site,
-            round,
-            dates: date.unwrap_or(default.dates),
-            results: result.map_or(default.results, |Results(results)| results),
-            white_elo: white_elo.unwrap_or(default.white_elo),
-            black_elo: black_elo.unwrap_or(default.black_elo),
-            elo_diff: elo_diff.unwrap_or(default.elo_diff),
-            eco: eco.unwrap_or(default.eco),
-            with_no_eco: eco_missing.is_none_or(|missing| missing == EcoMissing::Include),
-            length: length.unwrap_or(default.length),
-            to_move: to_move.map(Color::from),
-            game_numbers: default.game_numbers,
-            ignore_colors,
-            flags: default.flags,
-        };
+        let mut search = HeaderSearch::default();
+        search.white = white;
+        search.black = black;
+        search.event = event;
+        search.site = site;
+        search.round = round;
+        if let Some(date) = date {
+            search.dates = date;
+        }
+        if let Some(Results(results)) = result {
+            search.results = results;
+        }
+        if let Some(white_elo) = white_elo {
+            search.white_elo = white_elo;
+        }
+        if let Some(black_elo) = black_elo {
+            search.black_elo = black_elo;
+        }
+        if let Some(elo_diff) = elo_diff {
+            search.elo_diff = elo_diff;
+        }
+        if let Some(eco) = eco {
+            search.eco = eco;
+        }
+        search.with_no_eco = eco_missing.is_none_or(|missing| missing == EcoMissing::Include);
+        if let Some(length) = length {
+            search.length = length;
+        }
+        search.to_move = to_move.map(Color::from);
+        search.ignore_colors = ignore_colors;
         let mut seen = Vec::new();
         for (name, value) in flag {
             if seen.contains(&name) {
@@ -542,13 +552,11 @@ mod tests {
             ..SearchArgs::default()
         };
         let search = args.to_search().unwrap().unwrap();
-        let mut expected = HeaderSearch {
-            white: Some("Carlsen".into()),
-            eco: eco("B20")..=eco("B99"),
-            with_no_eco: false,
-            to_move: Some(Color::Black),
-            ..HeaderSearch::default()
-        };
+        let mut expected = HeaderSearch::default();
+        expected.white = Some("Carlsen".into());
+        expected.eco = eco("B20")..=eco("B99");
+        expected.with_no_eco = false;
+        expected.to_move = Some(Color::Black);
         expected.flags.deleted = FlagMatch::No;
         expected.flags.custom[1] = FlagMatch::Yes;
         assert_eq!(search, expected);

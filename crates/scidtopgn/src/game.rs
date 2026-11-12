@@ -100,6 +100,7 @@ pub enum Marker {
 ///
 /// See [`Game::moves`] for how nodes link together.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct MoveNode {
     /// The move, or `None` for a marker node.
     pub move_data: Option<GameMove>,
@@ -187,6 +188,7 @@ pub struct Tag {
 /// The moves are a tree stored in [`moves`](Self::moves). See that field for
 /// how to walk it.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Game {
     /// The `White` tag, or `?`.
     pub white: String,

@@ -345,7 +345,7 @@ impl Database {
     /// # db.close()?;
     /// let mut db = Database::open(&path)?;
     /// assert_eq!(db.get_game(1)?.white, "Carlsen");
-    /// assert!(matches!(db.get_game(2), Err(Error::GameNotFound { number: 3 })));
+    /// assert!(matches!(db.get_game(2), Err(Error::GameNotFound { number: 3, .. })));
     /// # Ok::<(), scidtopgn::Error>(())
     /// ```
     pub fn get_game(&mut self, game_num: u32) -> Result<Game> {
@@ -824,18 +824,13 @@ impl Database {
     ///     db.add_game(&parse_single_game(pgn)?)?;
     /// }
     ///
-    /// let wins_as_white = HeaderSearch {
-    ///     white: Some("carlsen".into()),
-    ///     results: vec![GameResult::White],
-    ///     ..HeaderSearch::default()
-    /// };
-    /// assert_eq!(db.search_header(&wins_as_white)?, [0]);
+    /// let mut wins = HeaderSearch::default();
+    /// wins.white = Some("carlsen".into());
+    /// wins.results = vec![GameResult::White];
+    /// assert_eq!(db.search_header(&wins)?, [0]);
     ///
     /// // With colors ignored, the wins as Black match too.
-    /// let wins = HeaderSearch {
-    ///     ignore_colors: true,
-    ///     ..wins_as_white
-    /// };
+    /// wins.ignore_colors = true;
     /// assert_eq!(db.search_header(&wins)?, [0, 1]);
     /// # Ok::<(), scidtopgn::Error>(())
     /// ```

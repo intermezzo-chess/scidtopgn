@@ -560,7 +560,7 @@ fn test_unsupported_variant_after_many_tags() {
         assert!(
             matches!(
                 parse_single_game(&pgn),
-                Err(Error::UnsupportedVariant { ref variant }) if variant == "Chess960"
+                Err(Error::UnsupportedVariant { ref variant, .. }) if variant == "Chess960"
             ),
             "{tags}"
         );
