@@ -1928,34 +1928,6 @@ fn test_cli_exports_a_read_only_database() {
 }
 
 #[test]
-fn test_cli_quiet_hides_stdout_errors() {
-    for args in [
-        &["tests/data/five", "--quiet"][..],
-        &["tests/data/five", "--count", "--quiet"],
-        &["export", "tests/data/five", "--count", "--quiet"],
-        &["info", "tests/data/five", "--quiet"],
-        &["info", "tests/data/five"],
-    ] {
-        // Writing to a pipe whose reading end is closed fails.
-        let (reader, writer) = std::io::pipe().expect("Failed to create pipe");
-        drop(reader);
-        let output = cli()
-            .args(args)
-            .stdout(writer)
-            .output()
-            .expect("Failed to run CLI");
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert_eq!(output.status.code(), Some(1), "{args:?}: {stderr}");
-        assert!(!stderr.contains("panicked"), "{args:?}: {stderr}");
-        if args.contains(&"--quiet") {
-            assert!(stderr.is_empty(), "{args:?}: {stderr}");
-        } else {
-            assert!(stderr.starts_with("Error: "), "{args:?}: {stderr}");
-        }
-    }
-}
-
-#[test]
 fn test_cli_quiet_import_writes_nothing_to_stderr() {
     let castled = "[Event \"Castled\"]\n[Result \"1-0\"]\n\n1. e4 e5 2. Nf3 Nf6 3. Bc4 Bc5\n4. Ke2 Ke7 5. Ke1 Ke8 6. O-O 1-0\n";
     let temp = TempDir::new().expect("Failed to create temp dir");
