@@ -15,5 +15,4 @@ PGN export writes each NAG as the symbol SCID writes when SCID and `scidtopgn` b
 Breaking changes to the library API:
 
 - `Game` has a new public field, `warnings: Vec<PgnWarning>`.
-- `ScidPosition::play`, `encode_move`, and `decode_move` accept castling without the castling right when castling would otherwise be legal. `ScidPosition::can_play` and `ScidPosition::castle_without_right` are new.
 - `PgnWarning` and `PgnWarningKind` are new.
