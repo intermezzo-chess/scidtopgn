@@ -18,8 +18,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # Bump deliberately, together with KNOPE_SHA256, docs/RELEASING.md, and
-  # CONTRIBUTING.md.
+  # Bump deliberately, together with KNOPE_SHA256, ci.yml, docs/RELEASING.md,
+  # and CONTRIBUTING.md.
   KNOPE_VERSION: "0.23.0"
   # SHA-256 of knope-x86_64-unknown-linux-musl.tgz for KNOPE_VERSION.
   KNOPE_SHA256: "76a970a5e237344abc14be3de37ed50c021b659a9b66b3f54afc77e6d48ac501"

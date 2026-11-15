@@ -178,3 +178,4 @@ See [docs/RELEASING.md](docs/RELEASING.md).
 | `cargo doc --workspace --no-deps --open`                | Builds and opens the API documentation.                                                     |
 | `knope document-change`                                 | Adds a changeset describing a change.                                                       |
 | `.github/scripts/run-tests`                             | Tests the release workflow's scripts in `.github/scripts/`.                                 |
+| `.github/scripts/check-changesets`                      | Checks the form of the changesets in `.changeset/`, as CI does.                             |

@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# Usage: check-changesets [<directory>]
+#
+# Checks that every file in <directory>, .changeset by default, is a changeset
+# in the form `knope document-change` writes: front matter with only
+# `default: major`, `minor`, or `patch`, then a `# ` heading with the summary.
+# Knope 0.23.0 accepts other forms without an error but doesn't release them as
+# meant: it ignores a changeset for another package name, and leaves one of
+# another type, such as `Patch`, out of the changelog. Exits 0 if every file
+# passes or the directory doesn't exist, 1 if any file doesn't pass, and 2 on
+# errors.
+set -euo pipefail
+
+if [ "$#" -gt 1 ]; then
+  echo "Usage: check-changesets [<directory>]" >&2
+  exit 2
+fi
+dir=${1:-.changeset}
+
+# Preparing a stable version deletes every changeset, and Git doesn't keep an
+# empty directory.
+if [ ! -e "$dir" ]; then
+  exit 0
+fi
+
+status=0
+shopt -s nullglob dotglob
+for file in "$dir"/*; do
+  if [[ "$file" != *.md ]] || [ ! -f "$file" ]; then
+    echo "$file: Only changesets, files ending in .md, belong in $dir." >&2
+    status=1
+    continue
+  fi
+  problem=$(awk '
+    function fail(text) { print text; done = 1; exit }
+    NR == 1 && $0 != "---" { fail("The first line must be ---, starting the front matter.") }
+    NR == 2 && $0 !~ /^default: (major|minor|patch)$/ {
+      fail("The second line must be default: major, default: minor, or default: patch, not \"" $0 "\".")
+    }
+    NR == 3 && $0 != "---" { fail("The third line must be ---, ending the front matter.") }
+    NR > 3 && /[^ \t]/ {
+      if ($0 !~ /^# [^ \t]/) {
+        fail("The first line after the front matter must be a heading: # and a one-line summary.")
+      }
+      done = 1
+      exit
+    }
+    END {
+      if (!done) {
+        print (NR < 3 ? "The front matter is incomplete." : "The summary is missing: add a heading, # and a one-line summary, after the front matter.")
+      }
+    }
+  ' "$file") || exit 2
+  if [ -n "$problem" ]; then
+    echo "$file: $problem" >&2
+    status=1
+  fi
+done
+exit "$status"
