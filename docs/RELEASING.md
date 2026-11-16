@@ -112,7 +112,7 @@ Keep publishing credentials out of repository and organization secrets. Every jo
 
 The first publish of a crate needs a crates.io API token.
 
-1. Sign in to [crates.io](https://crates.io) with the GitHub account that will own the crates, and verify your email address. crates.io doesn't accept publishes without one: the `release` job then fails at **Publish to crates.io** with `A verified email address is required`, after it has created the tag and published the GitHub release. Verify the address and [rerun the failed job](#recover-from-a-partial-failure).
+1. Sign in to [crates.io](https://crates.io) with the GitHub account that will own the crates, and verify your email address. crates.io doesn't accept publishes without one.
 2. Under **Account Settings → API Tokens**, create a token with an expiration date, the scopes **publish-new** and **publish-update**, and the crate scope `scidtopgn*`.
 3. Save it in the `release` environment as `CARGO_REGISTRY_TOKEN`.
 
