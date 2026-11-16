@@ -280,7 +280,7 @@ dependencies = [
 
 [[package]]
 name = "scidtopgn"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "pretty_assertions",
@@ -291,7 +291,7 @@ dependencies = [
 
 [[package]]
 name = "scidtopgn-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
