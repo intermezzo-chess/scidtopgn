@@ -2,7 +2,9 @@
 
 All notable changes to the `scidtopgn` library and the `scidtopgn-cli` crate are recorded here. Both crates share one version. Entries are generated from changesets by the Version workflow; see [docs/RELEASING.md](docs/RELEASING.md).
 
-## 0.1.0
+## 0.1.0 (not published)
+
+0.1.0 was prepared but never published. 0.2.0 is the first release on crates.io and GitHub.
 
 ### Features
 

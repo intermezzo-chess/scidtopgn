@@ -23,6 +23,9 @@ env:
   STABLE_TOOLCHAIN: "1.99.1"
   # Keep in sync with `rust-version` in the root Cargo.toml.
   MSRV: "1.97.0"
+  # Keep both in sync with version.yml.
+  KNOPE_VERSION: "0.23.0"
+  KNOPE_SHA256: "76a970a5e237344abc14be3de37ed50c021b659a9b66b3f54afc77e6d48ac501"
 
 jobs:
   lint:
@@ -83,6 +86,28 @@ jobs:
           persist-credentials: false
       - run: .github/scripts/run-tests
 
+  # Knope accepts some malformed changesets without an error, so their form is
+  # checked first. The dry run then shows the version and changelog section
+  # the Version workflow would prepare. See docs/RELEASING.md.
+  changesets:
+    name: changesets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Knope reads tags to find the last release.
+          fetch-depth: 0
+          persist-credentials: false
+      - run: .github/scripts/check-changesets
+      - name: Install Knope
+        run: |
+          archive="$RUNNER_TEMP/knope.tgz"
+          curl -fsSL -o "$archive" "https://github.com/knope-dev/knope/releases/download/knope%2Fv$KNOPE_VERSION/knope-x86_64-unknown-linux-musl.tgz"
+          echo "$KNOPE_SHA256  $archive" | sha256sum --check
+          tar -xzf "$archive" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/knope-x86_64-unknown-linux-musl" >> "$GITHUB_PATH"
+      - run: knope prepare-release --dry-run --verbose
+
   # Checks that SCID vs. PC reads what scidtopgn writes. See
   # docs/SCID_COMPAT.md. SourceForge is contacted only when the tarball isn't
   # cached, and the tools are rebuilt only when their cache misses.
@@ -126,7 +151,7 @@ jobs:
   ci-success:
     name: ci-success
     if: always()
-    needs: [lint, test, msrv, scripts, compat]
+    needs: [lint, test, msrv, scripts, changesets, compat]
     runs-on: ubuntu-latest
     steps:
       - name: Check that every job succeeded

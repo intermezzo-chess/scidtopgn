@@ -40,6 +40,8 @@ Optional details, in Markdown.
 
 A summary without details becomes a bullet in the changelog. A changeset with details gets its own heading. Only `.md` files belong in `.changeset/`, and each must have this front matter.
 
+The **changesets** job in CI checks this form with `.github/scripts/check-changesets`, because Knope accepts some mistakes without an error: it ignores a changeset for another package name, and leaves one whose type isn't `major`, `minor`, or `patch` out of the changelog. The job then runs `knope prepare-release --dry-run`, and its log shows the version and changelog section the Version workflow would prepare. `ci-success` needs it to pass.
+
 Add a changeset for changes that users of the library or the CLI can notice. Changes to tests, CI, or contributor documentation don't need one.
 
 ### Choosing patch, minor, or major
@@ -62,7 +64,7 @@ While the major version is `0`, Knope treats the minor number as the breaking-ch
 | `minor`              | `0.1.1`      |
 | `major`              | `0.2.0`      |
 
-So `minor` and `patch` both bump the last number, and only `major` bumps the middle one. Still choose the type that describes the change: from `1.0.0` on, the three types bump the three numbers. Moving to `1.0.0` is a separate maintainer decision and isn't automated.
+So `minor` and `patch` both bump the last number, and only `major` bumps the middle one. Still choose the type that describes the change: from `1.0.0` on, the three types bump the three numbers. To move to `1.0.0`, or to another version the changesets don't produce, [set the version explicitly](#set-the-version-explicitly).
 
 ### Compatibility from 1.0
 
@@ -140,7 +142,16 @@ If more changesets are merged to `main` while the version PR is open, run the wo
 
 If the push is rejected with `refusing to allow a GitHub App to create or update workflow`, `main` has changed a file under `.github/workflows/` since the version branch was last pushed. `GITHUB_TOKEN` can't be given permission to change workflow files. Delete the `knope/version` branch on GitHub, which closes the version PR, and run the workflow again.
 
-The first release, `0.1.0`, is already prepared in `Cargo.toml` and `CHANGELOG.md`, so it doesn't need a version PR.
+### Set the version explicitly
+
+The changesets decide the version unless a maintainer sets it. Set it only for a version that no changeset type reaches, such as `1.0.0` from a 0.x version. Checked against Knope 0.23.0:
+
+1. Make sure at least one changeset is pending on `main`. Without one, Knope writes an empty changelog section, and the Release workflow refuses it.
+2. Create a branch from an up-to-date `main`, and run `knope prepare-release --override-version X.Y.Z`. It makes the changes the Version workflow makes, with `X.Y.Z` as the version: it updates the version files and `CHANGELOG.md`, and deletes every pending changeset. To preview them, add `--dry-run`.
+3. Commit the result as `chore: prepare release vX.Y.Z`, push the branch, and open a PR with the same title.
+4. Continue with step 5 of [Prepare a release](#prepare-a-release), using your branch in place of `knope/version`. To change the changelog wording, fix the changesets on `main` and prepare the branch again. CI on a PR you open runs without approval, so skip step 8.
+
+Don't run the Version workflow while this PR is open. Its PR would prepare a different version from the same changesets.
 
 ## Publish a release
 
@@ -250,4 +261,4 @@ After the run succeeds, check each part. Replace `X.Y.Z` with the version.
 
 ## Updating Knope
 
-Bump Knope deliberately. Update `KNOPE_VERSION` and `KNOPE_SHA256` in `version.yml`, and the version in this document and in `CONTRIBUTING.md`. The hash is the SHA-256 of `knope-x86_64-unknown-linux-musl.tgz`, which GitHub shows as the asset's digest on the release page. Read Knope's release notes, then check the bump table above with `knope prepare-release --dry-run` and a temporary changeset of each type.
+Bump Knope deliberately. Update `KNOPE_VERSION` and `KNOPE_SHA256` in `version.yml` and `ci.yml`, and the version in this document and in `CONTRIBUTING.md`. The hash is the SHA-256 of `knope-x86_64-unknown-linux-musl.tgz`, which GitHub shows as the asset's digest on the release page. Read Knope's release notes, then check the bump table above with `knope prepare-release --dry-run` and a temporary changeset of each type.

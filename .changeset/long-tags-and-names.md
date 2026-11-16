@@ -9,5 +9,5 @@ SCID stores the lengths of tag names, tag values, and player, event, site, and r
 - PGN import drops a tag whose name or value is longer than 255 bytes, with a warning, and imports the rest of the game, as SCID does. This includes `White`, `Event`, and the other tags with their own fields, which then stay `?`.
 - `Database::add_game` and `update_game` return the new `Error::TagTooLong` for a tag value longer than 255 bytes, and change nothing.
 - A tag name longer than 240 bytes is cut to 240 when the game is stored, as in SCID. It used to be dropped.
-- `NameBase::add_name` cuts a name longer than 255 bytes to 255 before looking it up, as SCID does, so names that start with the same 255 bytes share one name. `find_name` cuts the same way.
+- A player, event, site, or round name longer than 255 bytes is cut to 255 before it is looked up, as SCID does, so names that start with the same 255 bytes share one name.
 - A cut ends before a character it would split.

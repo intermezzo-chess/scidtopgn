@@ -12,7 +12,7 @@ The library now uses [shakmaty](https://crates.io/crates/shakmaty) 0.30 for lega
 
 Breaking changes to the library API:
 
-- `Board`, `SimpleMove`, `Square`, `Piece`, `Color`, `piece_make`, `piece_color`, `piece_type`, the castling flag constants, and the per-piece `encode_*` and `decode_*` functions are removed. Use the re-exported `scidtopgn::shakmaty` types, `ScidPosition`, `PieceList`, `GameMove`, `encode_move`, and `decode_move`.
+- `Board`, `SimpleMove`, `Square`, `Piece`, `Color`, `piece_make`, `piece_color`, `piece_type`, the castling flag constants, and the per-piece `encode_*` and `decode_*` functions are removed. Use the re-exported `scidtopgn::shakmaty` types and `GameMove`.
 - `Game::start_board`, `current_board`, `non_standard_start`, and `var_depth` are replaced by `Game::start_position: Option<Chess>`. `Game::make_move_on_board` is removed.
 - `MoveNode::move_data` is an `Option<GameMove>`, `None` for marker nodes.
 - `Error::InvalidFen` has a `source`, and `Error::PgnMove`, `Error::PgnGame`, and `Error::UnsupportedVariant` are new.

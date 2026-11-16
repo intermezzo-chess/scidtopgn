@@ -113,6 +113,50 @@ expect_output "pending-changesets: lists the renamed changeset" ".changeset/fix-
 expect "pending-changesets: version never set" 2 pending 0.9.0-rc.0
 expect "pending-changesets: missing argument" 2 pending
 
+# check-changesets ------------------------------------------------------------
+
+changesets="$work/changesets"
+check_changesets() {
+  "$scripts/check-changesets" "$changesets"
+}
+
+expect "check-changesets: no directory" 0 check_changesets
+mkdir "$changesets"
+expect "check-changesets: none" 0 check_changesets
+printf -- '---\ndefault: patch\n---\n\n# Fix a thing\n\nDetails about the fix.\n' > "$changesets/fix-thing.md"
+printf -- '---\ndefault: minor\n---\n\n# Add a thing\n' > "$changesets/add-thing.md"
+printf -- '---\ndefault: major\n---\n# Break a thing\n' > "$changesets/break-thing.md"
+expect "check-changesets: valid changesets" 0 check_changesets
+
+# bad_changeset <name> <content> <message> expects a changeset with <content>
+# to fail with <message>.
+bad_changeset() {
+  printf -- "$2" > "$changesets/bad.md"
+  expect "check-changesets: $1" 1 check_changesets
+  expect_output "check-changesets: $1, message" "$3"
+  rm "$changesets/bad.md"
+}
+bad_changeset "unknown type" '---\ndefault: huge\n---\n\n# Thing\n' 'not "default: huge"'
+bad_changeset "capitalized type" '---\ndefault: Patch\n---\n\n# Thing\n' 'not "default: Patch"'
+bad_changeset "another package" '---\nscidtopgn: patch\n---\n\n# Thing\n' 'not "scidtopgn: patch"'
+bad_changeset "two packages" '---\ndefault: patch\nother: patch\n---\n\n# Thing\n' "The third line must be ---"
+bad_changeset "no front matter" '# Thing\n' "The first line must be ---"
+printf -- '# Thing\n' > "$changesets/bad.md"
+expect "check-changesets: setup for naming the file" 1 check_changesets
+expect_output "check-changesets: names the changeset" "$changesets/bad.md: The first line"
+rm "$changesets/bad.md"
+bad_changeset "unclosed front matter" '---\ndefault: patch\n' "The front matter is incomplete."
+bad_changeset "empty file" '' "The front matter is incomplete."
+bad_changeset "no summary" '---\ndefault: patch\n---\n\n' "The summary is missing"
+bad_changeset "summary not a heading" '---\ndefault: patch\n---\n\nFix a thing\n' "must be a heading"
+bad_changeset "empty heading" '---\ndefault: patch\n---\n\n#\n' "must be a heading"
+
+echo "notes" > "$changesets/notes.txt"
+expect "check-changesets: file that isn't a changeset" 1 check_changesets
+expect_output "check-changesets: names the file that isn't a changeset" "$changesets/notes.txt: Only changesets"
+rm "$changesets/notes.txt"
+expect "check-changesets: too many arguments" 2 "$scripts/check-changesets" "$changesets" extra
+
 # sync-release-assets ---------------------------------------------------------
 
 # A release whose assets are files in $FAKE_RELEASE/<state>/. Each upload is
