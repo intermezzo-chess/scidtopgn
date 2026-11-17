@@ -7,11 +7,13 @@ use std::fs::File;
 use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 
 use args::{Cli, Command, ExportArgs, ImportArgs, InfoArgs, MergeArgs, ValidateArgs};
-use report::{Log, Progress, Reporter};
+use report::{CountingReader, Log, Progress, ReadProgress, Reporter};
 use scidtopgn::{Database, Error, NameType, PgnParser};
 
 fn main() -> ExitCode {
@@ -176,41 +178,19 @@ fn export_command(args: &ExportArgs, reporter: &Reporter) -> Result<()> {
 }
 
 fn import_command(args: &ImportArgs, reporter: &Reporter) -> Result<()> {
-    // Read as bytes: the parser reads text that isn't UTF-8 as Windows-1252.
-    let pgn = if args.pgn_file == "-" {
-        let mut buf = Vec::new();
-        std::io::stdin().read_to_end(&mut buf)?;
-        buf
+    // The size of a file gives the progress. Read as bytes: the parser reads
+    // text that isn't UTF-8 as Windows-1252.
+    let (input, size): (Box<dyn Read + Send>, Option<u64>) = if args.pgn_file == "-" {
+        (Box::new(std::io::stdin()), None)
     } else {
-        std::fs::read(&args.pgn_file)?
+        let file = File::open(&args.pgn_file)?;
+        let metadata = file.metadata()?;
+        (Box::new(file), metadata.is_file().then_some(metadata.len()))
     };
+    let read = Arc::new(AtomicU64::new(0));
+    let mut parser = PgnParser::from_reader(CountingReader::new(input, Arc::clone(&read)));
 
     let abort_on_error = args.on_error == "abort";
-
-    // Parse every game before touching the database, so that aborting on a
-    // parse error leaves it unchanged. Each game keeps its number and first
-    // line, to name it if it can't be added.
-    let mut games = Vec::new();
-    let mut skipped = 0u32;
-    let mut parser = PgnParser::from_bytes(&pgn);
-    while let Some(result) = parser.next() {
-        match result {
-            Ok(game) => {
-                // Warnings don't stop the game from being imported.
-                for warning in &game.warnings {
-                    reporter.warn(format_args!("{warning}"));
-                }
-                games.push((parser.game_number(), parser.game_line(), game));
-            }
-            Err(e) if abort_on_error => return Err(e.into()),
-            Err(e) => {
-                reporter.warn(format_args!("skipping {:#}", anyhow::Error::new(e)));
-                skipped += 1;
-            }
-        }
-    }
-
-    reporter.info(format_args!("Parsed {} games from PGN", games.len()));
 
     let db_path = Path::new(&args.output);
     let si4_exists = db_path.with_extension("si4").exists();
@@ -244,30 +224,47 @@ fn import_command(args: &ImportArgs, reporter: &Reporter) -> Result<()> {
 
     let initial_count = db.num_games();
     let mut added = 0u32;
+    let mut skipped = 0u32;
 
-    let mut progress = Progress::new(reporter, games.len() as u64);
-    for (number, line, game) in &games {
-        if let Err(e) = db.add_game(game) {
-            let err = anyhow::Error::new(e)
-                .context(format!("PGN game {number}, starting at line {line}"));
-            if abort_on_error {
-                // Leave an existing database as it was. A new one is
-                // removed with `staging`.
-                if let Err(discard_err) = db.discard() {
-                    reporter.error(
-                        &anyhow::Error::new(discard_err)
-                            .context(format!("Failed to restore database '{}'", args.output)),
-                    );
+    // Each game is stored as it is read. Aborting discards the games added,
+    // which leaves an existing database as it was. A new one is removed with
+    // `staging`.
+    let mut progress = ReadProgress::new(reporter, size, read);
+    while let Some(result) = parser.next() {
+        let err = match result {
+            Ok(game) => {
+                // Warnings don't stop the game from being imported.
+                for warning in &game.warnings {
+                    reporter.warn(format_args!("{warning}"));
                 }
-                return Err(err);
+                match db.add_game(&game) {
+                    Ok(_) => None,
+                    Err(e) => Some(anyhow::Error::new(e).context(format!(
+                        "PGN game {}, starting at line {}",
+                        parser.game_number(),
+                        parser.game_line()
+                    ))),
+                }
             }
-            reporter.warn(format_args!("skipping {err:#}"));
-            skipped += 1;
-        } else {
-            added += 1;
+            // The rest of the input can't be read.
+            Err(e @ Error::Io(_)) => {
+                let err =
+                    anyhow::Error::new(e).context(format!("Failed to read '{}'", args.pgn_file));
+                return Err(discard(reporter, db, &args.output, err));
+            }
+            Err(e) => Some(anyhow::Error::new(e)),
+        };
+        match err {
+            None => added += 1,
+            Some(err) if abort_on_error => return Err(discard(reporter, db, &args.output, err)),
+            Some(err) => {
+                reporter.warn(format_args!("skipping {err:#}"));
+                skipped += 1;
+            }
         }
         progress.advance();
     }
+    progress.finish();
 
     let total = db.num_games();
     db.close()
@@ -284,6 +281,18 @@ fn import_command(args: &ImportArgs, reporter: &Reporter) -> Result<()> {
     ));
 
     Ok(())
+}
+
+/// Discards the changes to `db`, the database at `path`, because of `err`,
+/// and returns `err`. An error discarding them is reported.
+fn discard(reporter: &Reporter, db: Database, path: &str, err: anyhow::Error) -> anyhow::Error {
+    if let Err(discard_err) = db.discard() {
+        reporter.error(
+            &anyhow::Error::new(discard_err)
+                .context(format!("Failed to restore database '{path}'")),
+        );
+    }
+    err
 }
 
 /// The extensions of a database's index, name, and game files.

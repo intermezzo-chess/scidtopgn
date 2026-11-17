@@ -113,7 +113,7 @@ A game that fails to parse is reported by its error only, without its warnings.
 | `dropped a tag because its name is 300 bytes, more than 255` | A tag whose name is longer than 255 bytes. The tag is dropped, as in SCID. | #53 |
 | `read rating "4500" in tag "WhiteElo" as 4000, the highest rating SCID stores` | A rating above 4,000 in a rating tag, or at the end of a player name, for which the warning names the `White` or `Black` tag. 4,000 is used, as in SCID. | #43 |
 | `dropped NAG $8 because a move keeps at most 7` | A NAG after the first 7 on a move. The NAG is dropped, as in SCID, which drops it without a message. | #57 |
-| `read text that isn't UTF-8 as Windows-1252` | The game's text, including text before it that is kept as its first comment, has bytes that aren't valid UTF-8. Those bytes are read as Windows-1252. Given once per game, on the first line with such bytes. In the library, only `PgnParser::from_bytes` reads such input; the CLI uses it. | #42 |
+| `read text that isn't UTF-8 as Windows-1252` | The game's text, including text before it that is kept as its first comment, has bytes that aren't valid UTF-8. Those bytes are read as Windows-1252. Given once per game, on the first line with such bytes. In the library, only `PgnParser::from_bytes` and `PgnParser::from_reader` read such input; the CLI uses `from_reader`. | #42 |
 
 ## Already accepted by both
 

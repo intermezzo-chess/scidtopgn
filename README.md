@@ -62,7 +62,7 @@ Export skips games that SCID has logically deleted. `--count` counts every store
 | `--count` | - | No | - | Print the number of stored games, including logically deleted games, and exit. With [search options](#search-games-by-their-header), the number of games that match |
 | `--games` | - | No | all | Export only these games, such as `10-20` or `1-5,8`. With search options, a game must also match them. Can't be combined with `--count` |
 | `--overwrite` | - | No | - | Overwrite the output file if it already exists |
-| `--verbose` | `-v` | No | - | Show progress at each 10% of the games, and a summary |
+| `--verbose` | `-v` | No | - | Show progress at each 10% of the PGN file read, or, from stdin, the number of games read once a second, and a summary |
 | `--quiet` | `-q` | No | - | Write nothing to stderr, not even errors. Can be combined with `--verbose` only together with `--log` |
 | `--log` | - | No | - | Also append warnings and errors to this file, and with `--verbose` progress and a summary. See [Log file](#log-file) |
 
@@ -104,7 +104,7 @@ scidtopgn import - -o mydb                        # read from stdin
 scidtopgn import games.pgn -o mydb --on-error=abort  # strict mode
 ```
 
-By default, import appends to an existing database. Games that can't be read or stored, such as one whose record is longer than 131,071 bytes, get skipped with a warning unless you pass `--on-error=abort`. Then import stops at the first such game, and the database is left as it was, or isn't created.
+By default, import appends to an existing database. Games that can't be read or stored, such as one whose record is longer than 131,071 bytes, get skipped with a warning unless you pass `--on-error=abort`. Then import stops at the first such game, and the database is left as it was, or isn't created. If the PGN file or stdin can't be read part way, import stops the same way, whichever `--on-error` you pass.
 
 Appending writes the name and index files in a temporary directory beside the database, and replaces the originals only once both are complete. If that fails, for example because the disk is full, the two files are as they were and the database reads the same games as before. Running the import again doesn't duplicate any game. The new games' records may stay at the end of the game file as unused bytes, which SCID's Compact games command removes.
 
@@ -126,7 +126,7 @@ Import reads the same PGN notation as SCID, such as `0-0`, `ed` for `exd5`, `e2-
 | `--output` | `-o` | Yes | - | Output database path (without file extension) |
 | `--overwrite` | - | No | - | Overwrite existing database instead of appending. Also removes its SCID tree cache (`.stc`), which would be out of date |
 | `--on-error` | - | No | `skip` | Error handling strategy: `skip` or `abort` |
-| `--verbose` | `-v` | No | - | Show progress at each 10% of the games, and a summary |
+| `--verbose` | `-v` | No | - | Show progress at each 10% of the PGN file read, or, from stdin, the number of games read once a second, and a summary |
 | `--quiet` | `-q` | No | - | Write nothing to stderr, not even errors or skipped games. Can be combined with `--verbose` only together with `--log` |
 | `--log` | - | No | - | Also append warnings and errors to this file, and with `--verbose` progress and a summary. See [Log file](#log-file) |
 
@@ -238,9 +238,10 @@ Each command holds the database's index and names in memory, about 60 bytes for 
 | `info`, or a header search | under 1 second | 280 MB |
 | `validate` | 2.5 minutes | 280 MB |
 | Export every game | 3 minutes | 280 MB |
-| Append 10,000 games | 1.5 seconds | 750 MB |
+| Append 10,000 games | 1.5 seconds | 580 MB |
+| Import all of it as one 3.5 GB PGN file | 4.5 minutes | 340 MB |
 
-Import also holds every game of its PGN file in memory, about 25 KB for each game, so it needs about 250 MB for 10,000 games, and more memory than most machines have for a few million. Import a large PGN file in parts of up to about 100,000 games: each part appends to the database. Importing Caissabase in 488 parts of 10,000 games took 8 minutes. [docs/BENCHMARK_RESULTS_2026-11-11.md](https://github.com/intermezzo-chess/scidtopgn/blob/main/docs/BENCHMARK_RESULTS_2026-11-11.md) has the measurements.
+Import stores each game as it reads it, so it holds only the game it is reading, apart from the database's index and names, from a PGN file or from stdin. [docs/BENCHMARK_RESULTS_2026-11-17.md](https://github.com/intermezzo-chess/scidtopgn/blob/main/docs/BENCHMARK_RESULTS_2026-11-17.md) has the measurements.
 
 ## Use it as a library
 

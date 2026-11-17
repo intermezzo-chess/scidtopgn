@@ -656,16 +656,95 @@ fn test_cli_import_warns_about_games_too_large_to_store() {
 #[test]
 fn test_cli_import_abort_leaves_the_database_as_it_was() {
     let too_large = too_large_game();
-    let pgn = [VALID_GAME, &too_large, VALID_GAME].join("\n");
-    for args in [
-        &["--on-error", "abort"][..],
-        &["--on-error", "abort", "--overwrite"],
+    // A game that can't be stored, and one that can't be read, as the first,
+    // a middle, and the last game of the file.
+    for (bad, cause) in [
+        (&too_large[..], TOO_LARGE),
+        (ILLEGAL_GAME, "Invalid move \"Ke3\" at line"),
     ] {
+        for position in 0..3 {
+            let mut games = vec![VALID_GAME; 2];
+            games.insert(position, bad);
+            let pgn = games.join("\n");
+            let number = position + 1;
+            for args in [
+                &["--on-error", "abort"][..],
+                &["--on-error", "abort", "--overwrite"],
+            ] {
+                for existing in [false, true] {
+                    let case = format!("game {number}, {args:?}, existing {existing}");
+                    let temp = TempDir::new().expect("Failed to create temp dir");
+                    let db_path = temp.path().join("db");
+                    let pgn_path = temp.path().join("input.pgn");
+                    if existing {
+                        std::fs::write(&pgn_path, VALID_GAME).expect("Failed to write PGN");
+                        let output = cli()
+                            .arg("import")
+                            .arg(&pgn_path)
+                            .arg("-o")
+                            .arg(&db_path)
+                            .output()
+                            .expect("Failed to run CLI");
+                        assert!(output.status.success());
+                    }
+                    std::fs::write(&pgn_path, &pgn).expect("Failed to write PGN");
+                    let names = file_names(temp.path());
+                    let bytes = existing.then(|| database_bytes(&db_path));
+
+                    let output = cli()
+                        .arg("import")
+                        .arg(&pgn_path)
+                        .arg("-o")
+                        .arg(&db_path)
+                        .args(args)
+                        .output()
+                        .expect("Failed to run CLI");
+
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    assert_eq!(output.status.code(), Some(1), "{case}: {stderr}");
+                    assert!(
+                        stderr.starts_with(&format!("Error: PGN game {number}, ")),
+                        "{case}: {stderr}"
+                    );
+                    assert!(stderr.contains(cause), "{case}: {stderr}");
+                    assert_eq!(file_names(temp.path()), names, "{case}");
+                    if let Some(bytes) = bytes {
+                        assert_eq!(database_bytes(&db_path), bytes, "{case}");
+                    }
+                }
+            }
+        }
+    }
+
+    // The message for a game that can't be stored names it.
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let pgn_path = temp.path().join("input.pgn");
+    std::fs::write(&pgn_path, [VALID_GAME, &too_large, VALID_GAME].join("\n"))
+        .expect("Failed to write PGN");
+    let output = cli()
+        .arg("import")
+        .arg(&pgn_path)
+        .arg("-o")
+        .arg(temp.path().join("db"))
+        .args(["--on-error", "abort"])
+        .output()
+        .expect("Failed to run CLI");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        format!("Error: PGN game 2, starting at line 6\n\nCaused by:\n    {TOO_LARGE}\n")
+    );
+}
+
+#[test]
+fn test_cli_import_stops_when_the_input_cant_be_read() {
+    // On Unix, a directory opens, and reading it fails.
+    for mode in ["skip", "abort"] {
         for existing in [false, true] {
+            let case = format!("{mode}, existing {existing}");
             let temp = TempDir::new().expect("Failed to create temp dir");
             let db_path = temp.path().join("db");
-            let pgn_path = temp.path().join("input.pgn");
             if existing {
+                let pgn_path = temp.path().join("input.pgn");
                 std::fs::write(&pgn_path, VALID_GAME).expect("Failed to write PGN");
                 let output = cli()
                     .arg("import")
@@ -676,36 +755,77 @@ fn test_cli_import_abort_leaves_the_database_as_it_was() {
                     .expect("Failed to run CLI");
                 assert!(output.status.success());
             }
-            std::fs::write(&pgn_path, &pgn).expect("Failed to write PGN");
+            let input = temp.path().join("input");
+            std::fs::create_dir(&input).expect("Failed to create directory");
             let names = file_names(temp.path());
             let bytes = existing.then(|| database_bytes(&db_path));
 
             let output = cli()
                 .arg("import")
-                .arg(&pgn_path)
+                .arg(&input)
                 .arg("-o")
                 .arg(&db_path)
-                .args(args)
+                .args(["--on-error", mode])
                 .output()
                 .expect("Failed to run CLI");
 
             let stderr = String::from_utf8_lossy(&output.stderr);
-            assert_eq!(
-                output.status.code(),
-                Some(1),
-                "{args:?} {existing}: {stderr}"
+            assert_eq!(output.status.code(), Some(1), "{case}: {stderr}");
+            #[cfg(unix)]
+            assert!(
+                stderr.starts_with(&format!("Error: Failed to read '{}'", input.display())),
+                "{case}: {stderr}"
             );
-            assert_eq!(
-                stderr,
-                format!("Error: PGN game 2, starting at line 6\n\nCaused by:\n    {TOO_LARGE}\n"),
-                "{args:?} {existing}"
-            );
-            assert_eq!(file_names(temp.path()), names, "{args:?} {existing}");
+            assert_eq!(file_names(temp.path()), names, "{case}");
             if let Some(bytes) = bytes {
-                assert_eq!(database_bytes(&db_path), bytes, "{args:?}");
+                assert_eq!(database_bytes(&db_path), bytes, "{case}");
             }
         }
     }
+}
+
+#[test]
+fn test_cli_import_reads_stdin_as_it_reads_a_file() {
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let pgn_path = temp.path().join("input.pgn");
+    let pgn: String = [VALID_GAME, ILLEGAL_GAME, VALID_GAME].join("\n");
+    std::fs::write(&pgn_path, &pgn).expect("Failed to write PGN");
+    let mut stderrs = Vec::new();
+    for (input, name) in [(pgn_path.as_os_str(), "file"), ("-".as_ref(), "stdin")] {
+        let db_path = temp.path().join(name);
+        let output = cli()
+            .arg("import")
+            .arg(input)
+            .arg("-o")
+            .arg(&db_path)
+            .arg("--verbose")
+            .stdin(std::fs::File::open(&pgn_path).expect("Failed to open PGN"))
+            .output()
+            .expect("Failed to run CLI");
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        assert!(output.status.success(), "{name}: {stderr}");
+        assert_eq!(imported_events(&db_path), ["Valid", "Valid"], "{name}");
+        // Progress aside, the messages are the same.
+        let messages: Vec<_> = stderr
+            .lines()
+            .filter(|line| !line.starts_with("Processed "))
+            .map(str::to_owned)
+            .collect();
+        stderrs.push((messages, stderr));
+    }
+    let (file, stdin) = (&stderrs[0], &stderrs[1]);
+    assert_eq!(file.0, stdin.0);
+    assert!(
+        file.0
+            .last()
+            .is_some_and(|line| line.starts_with("Done. 2 games imported, 1 skipped.")),
+        "{}",
+        file.1
+    );
+    // A file reports its tenths. Stdin, whose size isn't known, reports the
+    // games read once a second, so not in an import this short.
+    assert_eq!(import_progress(&file.1).len(), 10, "{}", file.1);
+    assert!(!stdin.1.contains("Processed"), "{}", stdin.1);
 }
 
 /// Returns the length of the tags at the start of game record `record`:
@@ -1285,14 +1405,23 @@ fn test_cli_missing_inputs() {
 #[test]
 fn test_cli_verbose_progress() {
     let temp = TempDir::new().expect("Failed to create temp dir");
-    let pgn: String = (1..=100)
+    // Over 64 KB, so that the file is read in more than one block.
+    let pgn: String = (1..=3000)
         .map(|n| format!("[Event \"Game {n}\"]\n\n1. e4 *\n\n"))
         .collect();
+    assert!(pgn.len() > 64 * 1024);
     let (db_path, stderr) = import_pgn(temp.path(), &pgn);
-    let tenths: String = (1..=10)
-        .map(|n| format!("Processed {}% ({}/100 games)\n", n * 10, n * 10))
-        .collect();
-    assert!(stderr.contains(&tenths), "{stderr}");
+    let progress = import_progress(&stderr);
+    let percents: Vec<u64> = progress.iter().map(|&(percent, _)| percent).collect();
+    assert_eq!(
+        percents,
+        (1..=10).map(|n| n * 10).collect::<Vec<_>>(),
+        "{stderr}"
+    );
+    assert!(progress.is_sorted_by_key(|&(_, games)| games), "{stderr}");
+    assert!(progress[0].1 < 3000, "{stderr}");
+    assert_eq!(progress[9], (100, 3000), "{stderr}");
+    assert!(!stderr.contains("Parsed"), "{stderr}");
 
     let output = cli()
         .arg(&db_path)
@@ -1301,13 +1430,16 @@ fn test_cli_verbose_progress() {
         .expect("Failed to run CLI");
     assert!(output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert_eq!(stderr, format!("{tenths}Done. 100 games exported.\n"));
+    let tenths: String = (1..=10)
+        .map(|n| format!("Processed {}% ({}/3000 games)\n", n * 10, n * 300))
+        .collect();
+    assert_eq!(stderr, format!("{tenths}Done. 3000 games exported.\n"));
 
     // Importing again appends, and --overwrite replaces.
     let pgn_path = temp.path().join("input.pgn");
     for (args, message, count) in [
-        (&[][..], "Appending to existing database", 200),
-        (&["--overwrite"], "Overwriting existing database", 100),
+        (&[][..], "Appending to existing database", 6000),
+        (&["--overwrite"], "Overwriting existing database", 3000),
     ] {
         let output = cli()
             .arg("import")
@@ -1477,7 +1609,25 @@ fn test_cli_verbose_progress_for_selected_games() {
         .map(|n| format!("[Event \"Game {n}\"]\n\n1. e4 *\n\n"))
         .collect();
     let (_, stderr) = import_pgn(temp.path(), &pgn);
-    assert!(stderr.contains(&progress_of_3()), "{stderr}");
+    // The file is read at once, before the first game, and the last tenth
+    // is reported once every game is read.
+    let mut expected: Vec<_> = (1..=9).map(|n| (n * 10, 1)).collect();
+    expected.push((100, 3));
+    assert_eq!(import_progress(&stderr), expected, "{stderr}");
+}
+
+/// The progress lines `import --verbose` writes to `stderr` for a file: the
+/// percentage of the file read and the games read.
+fn import_progress(stderr: &str) -> Vec<(u64, u64)> {
+    stderr
+        .lines()
+        .filter_map(|line| {
+            let rest = line.strip_prefix("Processed ")?;
+            let (percent, games) = rest.split_once("% (")?;
+            let games = games.strip_suffix(" games)")?;
+            Some((percent.parse().unwrap(), games.parse().unwrap()))
+        })
+        .collect()
 }
 
 /// The progress `--verbose` reports for 3 games: each tenth once, with

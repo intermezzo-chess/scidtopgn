@@ -1,8 +1,11 @@
 use std::cell::Cell;
 use std::fmt;
 use std::fs::{File, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 
@@ -228,6 +231,115 @@ impl<'a> Progress<'a> {
     }
 }
 
+/// Reports, when verbose, an import's progress through its input: each
+/// tenth of its bytes read, if its size is known, and otherwise the games
+/// read so far, at most once a second.
+pub struct ReadProgress<'a> {
+    reporter: &'a Reporter,
+    games: u64,
+    by: ProgressBy,
+}
+
+enum ProgressBy {
+    /// The input's size, the bytes read so far, and the tenths reported.
+    Size {
+        size: u64,
+        read: Arc<AtomicU64>,
+        tenths: u64,
+    },
+    /// When the games were last reported, or the import started.
+    Time { last: Instant },
+}
+
+impl<'a> ReadProgress<'a> {
+    /// Reports progress through `size` bytes, if known, given the count of
+    /// bytes read so far, such as a [`CountingReader`] keeps.
+    pub fn new(reporter: &'a Reporter, size: Option<u64>, read: Arc<AtomicU64>) -> Self {
+        let by = match size {
+            Some(size) => ProgressBy::Size {
+                size,
+                read,
+                tenths: 0,
+            },
+            None => ProgressBy::Time {
+                last: Instant::now(),
+            },
+        };
+        Self {
+            reporter,
+            games: 0,
+            by,
+        }
+    }
+
+    /// Counts one more game read.
+    pub fn advance(&mut self) {
+        self.advance_at(Instant::now());
+    }
+
+    fn advance_at(&mut self, now: Instant) {
+        self.games += 1;
+        match &mut self.by {
+            ProgressBy::Size { size, read, .. } => {
+                // Bytes are read ahead of the games parsed from them, so the
+                // last tenth waits for `finish`.
+                let tenths = read.load(Ordering::Relaxed).saturating_mul(10) / (*size).max(1);
+                self.report_tenths(tenths.min(9));
+            }
+            ProgressBy::Time { last } => {
+                if now.duration_since(*last) >= Duration::from_secs(1) {
+                    *last = now;
+                    self.reporter
+                        .info(format_args!("Processed {} games", self.games));
+                }
+            }
+        }
+    }
+
+    /// Reports the tenths not yet reported, once the input is read.
+    pub fn finish(&mut self) {
+        if matches!(self.by, ProgressBy::Size { size, .. } if size > 0) {
+            self.report_tenths(10);
+        }
+    }
+
+    /// Reports each tenth up to `upto` not yet reported.
+    fn report_tenths(&mut self, upto: u64) {
+        let ProgressBy::Size { tenths, .. } = &mut self.by else {
+            return;
+        };
+        while *tenths < upto {
+            *tenths += 1;
+            self.reporter.info(format_args!(
+                "Processed {}% ({} games)",
+                *tenths * 10,
+                self.games
+            ));
+        }
+    }
+}
+
+/// A reader that counts the bytes read from it.
+pub struct CountingReader<R> {
+    inner: R,
+    count: Arc<AtomicU64>,
+}
+
+impl<R> CountingReader<R> {
+    /// Counts the bytes read from `inner` in `count`.
+    pub fn new(inner: R, count: Arc<AtomicU64>) -> Self {
+        Self { inner, count }
+    }
+}
+
+impl<R: Read> Read for CountingReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        self.count.fetch_add(n as u64, Ordering::Relaxed);
+        Ok(n)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -318,5 +430,84 @@ mod tests {
 
         assert!(Log::open(&new, &[existing.clone(), dir.join("new.pgn")]).is_ok());
         assert!(new.exists());
+    }
+
+    /// A verbose reporter that writes only to a log at `path`.
+    fn logging_reporter(path: &Path) -> Reporter {
+        Reporter::new(
+            Verbosity::Verbose,
+            true,
+            Some(Log::open(path, &[]).unwrap()),
+        )
+    }
+
+    #[test]
+    fn reports_each_tenth_of_the_bytes_read_and_the_last_at_the_end() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("run.log");
+        let reporter = logging_reporter(&path);
+        let read = Arc::new(AtomicU64::new(0));
+        let mut progress = ReadProgress::new(&reporter, Some(1000), Arc::clone(&read));
+        for bytes in [0, 150, 150, 990, 1000, 1000] {
+            read.store(bytes, Ordering::Relaxed);
+            progress.advance();
+        }
+        progress.finish();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "info: Processed 10% (2 games)\n\
+             info: Processed 20% (4 games)\n\
+             info: Processed 30% (4 games)\n\
+             info: Processed 40% (4 games)\n\
+             info: Processed 50% (4 games)\n\
+             info: Processed 60% (4 games)\n\
+             info: Processed 70% (4 games)\n\
+             info: Processed 80% (4 games)\n\
+             info: Processed 90% (4 games)\n\
+             info: Processed 100% (6 games)\n"
+        );
+    }
+
+    #[test]
+    fn reports_nothing_for_an_empty_file() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("run.log");
+        let reporter = logging_reporter(&path);
+        let mut progress = ReadProgress::new(&reporter, Some(0), Arc::default());
+        progress.finish();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "");
+    }
+
+    #[test]
+    fn reports_the_games_read_at_most_once_a_second_without_a_size() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("run.log");
+        let reporter = logging_reporter(&path);
+        let mut progress = ReadProgress::new(&reporter, None, Arc::default());
+        let start = match progress.by {
+            ProgressBy::Time { last } => last,
+            ProgressBy::Size { .. } => unreachable!(),
+        };
+        for millis in [0, 999, 1000, 1500, 1999, 2000, 5000] {
+            progress.advance_at(start + Duration::from_millis(millis));
+        }
+        progress.finish();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "info: Processed 3 games\n\
+             info: Processed 6 games\n\
+             info: Processed 7 games\n"
+        );
+    }
+
+    #[test]
+    fn counts_the_bytes_read() {
+        let count = Arc::new(AtomicU64::new(0));
+        let mut reader = CountingReader::new(&b"abcde"[..], Arc::clone(&count));
+        let mut buf = [0; 3];
+        assert_eq!(reader.read(&mut buf).unwrap(), 3);
+        assert_eq!(reader.read(&mut buf).unwrap(), 2);
+        assert_eq!(reader.read(&mut buf).unwrap(), 0);
+        assert_eq!(count.load(Ordering::Relaxed), 5);
     }
 }
