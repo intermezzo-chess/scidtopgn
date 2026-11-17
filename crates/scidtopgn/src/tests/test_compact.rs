@@ -139,7 +139,6 @@ fn assert_frequencies_counted(db: &Database) {
 fn record_bytes(db: &Database) -> u64 {
     db.index()
         .entries()
-        .iter()
         .map(|e| u64::from(e.get_length()))
         .sum()
 }
@@ -164,7 +163,7 @@ fn test_compact_games_removes_deleted_games() {
 
     assert_eq!(db.num_games(), 3);
     assert_eq!(all_pgn(&mut db), kept);
-    assert!(db.index().entries().iter().all(|e| !e.get_delete_flag()));
+    assert!(db.index().entries().all(|e| !e.get_delete_flag()));
     assert_frequencies_counted(&db);
     let count = |names: &[Vec<(u32, String, u32)>]| names.iter().map(Vec::len).sum::<usize>();
     assert_eq!(count(&all_names(&db)), count(&names), "no name is dropped");
@@ -255,7 +254,6 @@ fn database_with_a_record_across_blocks(dir: &Path) -> (PathBuf, Vec<String>) {
     let records: Vec<&[u8]> = db
         .index()
         .entries()
-        .iter()
         .map(|e| &sg4[e.get_offset() as usize..][..e.get_length() as usize])
         .collect();
     let records = records.concat();

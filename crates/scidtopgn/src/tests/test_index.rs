@@ -242,13 +242,61 @@ fn test_write_entry_rewrites_one_entry() {
     let path = temp.path().join("index.si4");
     std::fs::write(&path, file.into_inner()).unwrap();
     let reread = Index::open(&path).unwrap();
-    let flags: Vec<_> = reread
-        .entries()
-        .iter()
-        .map(|e| e.get_delete_flag())
-        .collect();
+    let flags: Vec<_> = reread.entries().map(|e| e.get_delete_flag()).collect();
     assert_eq!(flags, [false, true]);
     assert_eq!(reread.get_entry(1).unwrap().get_offset(), 20);
+}
+
+#[test]
+fn test_adding_to_an_index_read_from_a_file() {
+    use std::io::Cursor;
+
+    let entry_at = |offset| {
+        let mut entry = IndexEntry::new();
+        entry.set_offset(offset);
+        entry
+    };
+    let offsets = |index: &Index| index.entries().map(|e| e.get_offset()).collect::<Vec<_>>();
+
+    let mut index = Index::new();
+    for offset in [10, 20, 30] {
+        index.add_entry(entry_at(offset)).unwrap();
+    }
+    let temp = tempfile::TempDir::new().unwrap();
+    let path = temp.path().join("index.si4");
+    let mut file = Cursor::new(Vec::new());
+    index.flush(&mut file).unwrap();
+    std::fs::write(&path, file.into_inner()).unwrap();
+
+    let mut index = Index::open(&path).unwrap();
+    let first: *const IndexEntry = index.get_entry(0).unwrap();
+    // Enough entries that a vector holding every entry would move.
+    for n in 0..1000 {
+        assert_eq!(index.add_entry(entry_at(40 + n)).unwrap(), 3 + n);
+    }
+    assert!(
+        std::ptr::eq(first, index.get_entry(0).unwrap()),
+        "adding entries doesn't move the entries read"
+    );
+    assert_eq!(index.num_games(), 1003);
+    assert_eq!(offsets(&index)[..5], [10, 20, 30, 40, 41]);
+    assert_eq!(index.get_entry(2).unwrap().get_offset(), 30);
+    assert_eq!(index.get_entry(3).unwrap().get_offset(), 40);
+    assert!(index.get_entry(1003).is_none());
+
+    // Entries on both sides of the first one added can be changed.
+    for game in [2, 3] {
+        index.get_entry_mut(game).unwrap().set_delete_flag(true);
+    }
+    assert!(index.get_entry_mut(1003).is_none());
+
+    let mut file = Cursor::new(Vec::new());
+    index.flush(&mut file).unwrap();
+    std::fs::write(&path, file.into_inner()).unwrap();
+    let reread = Index::open(&path).unwrap();
+    assert_eq!(offsets(&reread), offsets(&index));
+    let deleted: Vec<_> = reread.entries().map(|e| e.get_delete_flag()).collect();
+    assert_eq!(deleted[..5], [false, false, true, true, false]);
 }
 
 /// `entry` written and read back.

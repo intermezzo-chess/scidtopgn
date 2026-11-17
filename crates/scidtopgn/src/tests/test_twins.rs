@@ -336,7 +336,7 @@ fn test_changes_only_delete_flags() {
     assert_eq!(after[1..], before[1..], "the name and game files");
     let after_index = Index::open(path.with_extension("si4")).unwrap();
     assert_eq!(after_index.num_games(), TWINS_GAMES);
-    for (n, (old, new)) in (0u32..).zip(before_index.entries().iter().zip(after_index.entries())) {
+    for (n, (old, new)) in (0u32..).zip(before_index.entries().zip(after_index.entries())) {
         assert_eq!(undeleted_bytes(old), undeleted_bytes(new), "game {}", n + 1);
         assert_eq!(
             new.get_delete_flag(),

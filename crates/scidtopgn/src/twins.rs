@@ -188,9 +188,8 @@ pub(crate) fn find(
     gfile: &mut GFile,
     options: &TwinOptions,
 ) -> Result<Vec<Candidate>> {
-    let entries = index.entries();
     let mut candidates: Vec<Candidate> = (0u32..)
-        .zip(entries)
+        .zip(index.entries())
         .filter(|(_, entry)| {
             !entry.get_delete_flag()
                 && !(options.skip_short && entry.get_num_half_moves() < SHORT_GAME)
@@ -208,14 +207,14 @@ pub(crate) fn find(
         .collect();
     candidates.sort_by_key(|c| (c.players_sum(), Reverse(c.game)));
 
-    let entry = |c: &Candidate| &entries[c.game as usize];
     for group in candidates.chunk_by_mut(|a, b| a.players_sum() == b.players_sum()) {
         for first in 0..group.len() {
             let (before, after) = group.split_at_mut(first + 1);
             let head = &mut before[first];
             for compare in after {
-                if are_twins(head, compare, entries, names, gfile, options)? {
-                    delete_one(head, compare, entry(head), entry(compare), options);
+                if are_twins(head, compare, index, names, gfile, options)? {
+                    let (a, b) = (entry(index, head), entry(index, compare));
+                    delete_one(head, compare, a, b, options);
                 }
             }
         }
@@ -223,6 +222,13 @@ pub(crate) fn find(
 
     candidates.retain(|c| c.deleted || c.ratings_copied);
     Ok(candidates)
+}
+
+/// The index entry of `candidate`'s game.
+fn entry<'a>(index: &'a Index, candidate: &Candidate) -> &'a IndexEntry {
+    index
+        .get_entry(candidate.game)
+        .expect("a candidate is a game of the index")
 }
 
 /// White and Black of `entry` as they are compared: their name IDs if
@@ -257,7 +263,7 @@ fn hash_name(name: &[u8]) -> u32 {
 fn are_twins(
     head: &Candidate,
     compare: &Candidate,
-    entries: &[IndexEntry],
+    index: &Index,
     names: &NameBase,
     gfile: &mut GFile,
     options: &TwinOptions,
@@ -273,10 +279,7 @@ fn are_twins(
         return Ok(false);
     }
 
-    let (a, b) = (
-        &entries[head.game as usize],
-        &entries[compare.game as usize],
-    );
+    let (a, b) = (entry(index, head), entry(index, compare));
     let criteria = [
         (options.event, a.get_event() == b.get_event()),
         (options.site, a.get_site() == b.get_site()),
