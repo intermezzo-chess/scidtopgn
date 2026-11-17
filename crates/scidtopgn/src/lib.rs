@@ -89,7 +89,8 @@
 // the games `Database::search_header` selects, `twins` the twin games
 // `Database::delete_twins` deletes, and `stored_line` the stored-line code
 // an index entry records. `replace` writes files beside a database and
-// moves them into place. `pgn` reads PGN, and `error` defines the errors.
+// moves them into place. `pgn` reads PGN, which `pgn_input` decodes as it
+// is read, and `error` defines the errors.
 mod bytebuf;
 mod common;
 mod database;
@@ -102,6 +103,7 @@ mod mov;
 mod namebase;
 mod nfile;
 mod pgn;
+mod pgn_input;
 mod position;
 mod replace;
 mod search;

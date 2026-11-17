@@ -10,6 +10,7 @@
 //! SCID, and why.
 
 use std::fmt;
+use std::io::Read;
 
 use shakmaty::san::{San, SanError};
 use shakmaty::uci::UciMove;
@@ -20,6 +21,7 @@ use crate::error::{Error, Result};
 use crate::game::{AddedNag, Game, Marker, MoveNode, MAX_NAGS, MAX_TAG_VALUE_LEN};
 use crate::index::MAX_ELO;
 use crate::mov::GameMove;
+use crate::pgn_input::PgnInput;
 use crate::position::{chess_from_fen_reporting_drops, ScidPosition};
 use crate::Date;
 
@@ -273,22 +275,24 @@ impl From<Move> for ParsedMove {
 /// let events: Vec<_> = games.iter().map(|game| game.event.as_str()).collect();
 /// assert_eq!(events, ["A", "C"]);
 /// ```
-pub struct PgnParser {
-    input: Vec<char>,
+pub struct PgnParser<'a> {
+    /// The input's text from just before the current game, or from earlier.
+    /// The text before it is dropped as games are read.
+    input: PgnInput<'a>,
+    /// The position in `input`.
     pos: usize,
     line: u32,
     games: usize,
     /// The line the game last read starts on, or 0 before the first.
     game_line: u32,
     in_movetext: bool,
-    /// Where bytes that weren't valid UTF-8 were read as Windows-1252: the
-    /// index in `input` and the line of each run of them, in input order.
-    not_utf8: Vec<(usize, u32)>,
+    /// Whether reading the input failed, which ends the games.
+    read_failed: bool,
 }
 
-impl PgnParser {
+impl<'a> PgnParser<'a> {
     /// Reads games from `input`.
-    pub fn new(input: &str) -> Self {
+    pub fn new(input: &'a str) -> Self {
         Self::from_bytes(input.as_bytes())
     }
 
@@ -296,31 +300,52 @@ impl PgnParser {
     /// file. Bytes that aren't valid UTF-8 are read as Windows-1252, and
     /// each game with such bytes gets a [`PgnWarningKind::NotUtf8`] warning.
     /// Valid UTF-8 is read as [`PgnParser::new`] reads it.
-    pub fn from_bytes(input: &[u8]) -> Self {
-        let mut chars = Vec::with_capacity(input.len());
-        let mut not_utf8 = Vec::new();
-        let mut line = 1;
-        for chunk in input.utf8_chunks() {
-            for c in chunk.valid().chars() {
-                if c == '\n' {
-                    line += 1;
-                }
-                chars.push(c);
-            }
-            // A line break is valid UTF-8, so an invalid run is on one line.
-            if !chunk.invalid().is_empty() {
-                not_utf8.push((chars.len(), line));
-                chars.extend(chunk.invalid().iter().map(|&b| windows_1252_char(b)));
-            }
-        }
+    pub fn from_bytes(input: &'a [u8]) -> Self {
+        Self::from_reader(input)
+    }
+
+    /// Reads games from `reader`, such as a file or stdin, as
+    /// [`from_bytes`](Self::from_bytes) reads its input, whatever amounts
+    /// each read returns.
+    ///
+    /// The parser reads a block at a time, and holds the text of the game
+    /// it is reading, not the games before it, so its memory doesn't grow
+    /// with the number of games. It needn't be given a `BufReader`. The
+    /// reader must be [`Send`], so that the parser is `Send` and `Sync`:
+    /// pass [`std::io::stdin()`] rather than its lock, for example.
+    ///
+    /// # Errors
+    ///
+    /// As an iterator, a read that fails, other than with
+    /// [`ErrorKind::Interrupted`](std::io::ErrorKind::Interrupted), which is
+    /// retried, yields [`Error::Io`] in place of the game being read, and
+    /// then no more games. [`parse_game`](Self::parse_game) returns it.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::fs::File;
+    /// use scidtopgn::PgnParser;
+    ///
+    /// # let dir = tempfile::tempdir()?;
+    /// # let path = dir.path().join("games.pgn");
+    /// # std::fs::write(&path, "[Event \"A\"]\n\n1. e4 *\n\n[Event \"B\"]\n\n1. d4 *\n")?;
+    /// let mut events = Vec::new();
+    /// for result in PgnParser::from_reader(File::open(&path)?) {
+    ///     events.push(result?.event);
+    /// }
+    /// assert_eq!(events, ["A", "B"]);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn from_reader(reader: impl Read + Send + 'a) -> Self {
         PgnParser {
-            input: chars,
+            input: PgnInput::new(reader),
             pos: 0,
             line: 1,
             games: 0,
             game_line: 0,
             in_movetext: false,
-            not_utf8,
+            read_failed: false,
         }
     }
 
@@ -356,36 +381,56 @@ impl PgnParser {
         self.game_line
     }
 
-    fn peek(&self) -> Option<char> {
-        if self.pos < self.input.len() {
-            Some(self.input[self.pos])
-        } else {
-            None
+    /// Prepares to read a game: drops the text that the parser can no
+    /// longer need, and reads more if all of it has been read.
+    fn start_game(&mut self) {
+        // Looking back from a position, the parser reads only the whitespace
+        // before it on its line, up to a line break or another character.
+        // That character and the text after it are kept.
+        let keep = self.input.chars()[..self.pos]
+            .iter()
+            .rposition(|&c| c == '\n' || !(c == '\u{feff}' || c.is_whitespace()))
+            .unwrap_or(0);
+        self.pos -= self.input.drop_before(keep);
+        if self.pos == self.input.chars().len() {
+            self.input.fill();
         }
     }
 
+    /// Ends reading after a read failed, and returns its error.
+    fn take_read_error(&mut self) -> Option<Error> {
+        let err = self.input.take_error()?;
+        self.read_failed = true;
+        Some(Error::Io(err))
+    }
+
+    fn peek(&self) -> Option<char> {
+        self.input.chars().get(self.pos).copied()
+    }
+
+    /// Moves past the next character. More input is read when the window
+    /// runs out, so that `peek` returns `None` only at the end.
     fn advance(&mut self) -> Option<char> {
-        if self.pos < self.input.len() {
-            let c = self.input[self.pos];
-            self.pos += 1;
-            if c == '\n' {
-                self.line += 1;
-            }
-            Some(c)
-        } else {
-            None
+        let c = self.peek()?;
+        self.pos += 1;
+        if c == '\n' {
+            self.line += 1;
         }
+        if self.pos == self.input.chars().len() {
+            self.input.fill();
+        }
+        Some(c)
     }
 
     fn at_line_start(&self) -> bool {
-        self.pos == 0 || self.input[self.pos - 1] == '\n'
+        self.pos == 0 || self.input.chars()[self.pos - 1] == '\n'
     }
 
     /// Whether the next character starts a tag line: a `[` with only spaces
     /// or tabs before it on its line.
     fn at_tag_line(&self) -> bool {
         self.peek() == Some('[')
-            && self.input[..self.pos]
+            && self.input.chars()[..self.pos]
                 .iter()
                 .rev()
                 .find(|&&c| c != ' ' && c != '\t')
@@ -447,7 +492,7 @@ impl PgnParser {
         loop {
             // A whole line, or the rest of one after a result or comment.
             // Recovery from a failed game can stop inside a line's indent.
-            let whole_line = self.input[..self.pos]
+            let whole_line = self.input.chars()[..self.pos]
                 .iter()
                 .rev()
                 .take_while(|&&c| c != '\n')
@@ -478,7 +523,7 @@ impl PgnParser {
                         self.pos
                     };
                     self.skip_to_end_of_line();
-                    let line: String = self.input[from..self.pos].iter().collect();
+                    let line: String = self.input.chars()[from..self.pos].iter().collect();
                     let line = line.trim_start_matches('\u{feff}').trim_end();
                     // A blank line is kept only between lines of text.
                     if !line.is_empty() || !(had_comment || lines.is_empty()) {
@@ -568,11 +613,16 @@ impl PgnParser {
     /// Returns an error if a tag, the `FEN`, or a move is invalid, if the
     /// `Variant` tag names a variant other than standard chess, or if
     /// variations are nested more than 100 levels deep or a move has more
-    /// than 255 of them.
+    /// than 255 of them, and [`Error::Io`] if reading the input fails.
     pub fn parse_game(&mut self) -> Result<Game> {
+        self.start_game();
         let start = self.pos;
         self.game_line = self.line;
-        let mut game = self.read_game("")?;
+        let result = self.read_game("");
+        if let Some(err) = self.take_read_error() {
+            return Err(err);
+        }
+        let mut game = result?;
         self.warn_not_utf8(&mut game, start);
         Ok(game)
     }
@@ -726,8 +776,9 @@ impl PgnParser {
     /// position, had bytes that weren't valid UTF-8. The warning is placed
     /// among the game's others in line order.
     fn warn_not_utf8(&self, game: &mut Game, start: usize) {
-        let i = self.not_utf8.partition_point(|&(pos, _)| pos < start);
-        let Some(&(_, line)) = self.not_utf8.get(i).filter(|&&(pos, _)| pos < self.pos) else {
+        let not_utf8 = self.input.not_utf8();
+        let i = not_utf8.partition_point(|&(pos, _)| pos < start);
+        let Some(&(_, line)) = not_utf8.get(i).filter(|&&(pos, _)| pos < self.pos) else {
             return;
         };
         let at = game.warnings.partition_point(|w| w.line <= line);
@@ -976,13 +1027,30 @@ impl PgnParser {
     }
 }
 
-impl Iterator for PgnParser {
+impl Iterator for PgnParser<'_> {
     type Item = Result<Game>;
 
     /// Parses the next game, which starts at its first tag line. Text before
     /// it is the comment before its first move. An error is wrapped in
     /// [`Error::PgnGame`], which gives the game's number and first tag line.
+    /// An error reading the input is [`Error::Io`], and ends the games.
     fn next(&mut self) -> Option<Result<Game>> {
+        if self.read_failed {
+            return None;
+        }
+        self.start_game();
+        let result = self.next_game();
+        match self.take_read_error() {
+            Some(err) => Some(Err(err)),
+            None => result,
+        }
+    }
+}
+
+impl PgnParser<'_> {
+    /// Parses the next game, as [`Iterator::next`] does, but reports no
+    /// error reading the input.
+    fn next_game(&mut self) -> Option<Result<Game>> {
         let start = self.pos;
         let text = self.read_pre_game_text()?;
 
@@ -2068,5 +2136,46 @@ mod tests {
         for byte in [0x81, 0x8D, 0x8F, 0x90, 0x9D] {
             assert_eq!(windows_1252_char(byte), char::from(byte), "{byte:#04x}");
         }
+    }
+
+    /// A reader of `count` copies of `game`, made as they are read.
+    struct Repeated {
+        game: &'static [u8],
+        count: usize,
+        pos: usize,
+    }
+
+    impl Read for Repeated {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            let mut n = 0;
+            while n < buf.len() && self.pos < self.game.len() * self.count {
+                buf[n] = self.game[self.pos % self.game.len()];
+                n += 1;
+                self.pos += 1;
+            }
+            Ok(n)
+        }
+    }
+
+    #[test]
+    fn test_window_holds_only_the_games_being_read() {
+        let game = b"[Event \"A\"]\n\n1. e4 {\xE9} e5 *\n\n";
+        let count = 100_000;
+        let mut parser = PgnParser::from_reader(Repeated {
+            game,
+            count,
+            pos: 0,
+        });
+        let mut largest = 0;
+        let mut games = 0;
+        while let Some(result) = parser.next() {
+            assert_eq!(result.unwrap().warnings.len(), 1);
+            largest = largest.max(parser.input.chars().len());
+            assert!(parser.input.not_utf8().len() <= parser.input.chars().len());
+            games += 1;
+        }
+        assert_eq!(games, count);
+        // The input is about 3 MB. The window holds at most two reads' worth.
+        assert!(largest <= 2 * 64 * 1024, "{largest}");
     }
 }

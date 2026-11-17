@@ -132,7 +132,8 @@ fn sibling_movetext(count: usize) -> String {
 }
 
 fn parse_error(movetext: &str) -> String {
-    let mut parser = PgnParser::new(&pgn_game(movetext));
+    let pgn = pgn_game(movetext);
+    let mut parser = PgnParser::new(&pgn);
     match parser.next() {
         Some(Err(Error::PgnGame { source, .. })) => source.to_string(),
         _ => panic!("expected a parse error"),

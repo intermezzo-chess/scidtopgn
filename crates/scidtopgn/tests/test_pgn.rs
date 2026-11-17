@@ -1985,3 +1985,115 @@ fn test_player_names_are_limited_to_255_bytes_after_tidying() {
     assert_eq!(game.white_elo, None);
     assert_eq!(warning_kinds(&game), [long_value(370)]);
 }
+
+/// A reader that returns at most `size` bytes at a time.
+struct Chunked {
+    bytes: Vec<u8>,
+    pos: usize,
+    size: usize,
+}
+
+impl std::io::Read for Chunked {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.size.min(buf.len()).min(self.bytes.len() - self.pos);
+        buf[..n].copy_from_slice(&self.bytes[self.pos..self.pos + n]);
+        self.pos += n;
+        Ok(n)
+    }
+}
+
+/// Each result `parser` yields, with the game number and first line it
+/// gives after it.
+fn read_all(mut parser: PgnParser) -> Vec<String> {
+    let mut results = Vec::new();
+    while let Some(result) = parser.next() {
+        results.push(format!(
+            "{} {} {result:?}",
+            parser.game_number(),
+            parser.game_line()
+        ));
+    }
+    results
+}
+
+/// Every PGN fixture, followed by games written so that read boundaries fall
+/// inside UTF-8 characters, bytes that aren't UTF-8, comments, tags, and
+/// CRLF line endings, and repeated so that the parser drops the text of the
+/// games it has read several times.
+fn streaming_corpus() -> Vec<u8> {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/data");
+    let mut paths: Vec<_> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "pgn"))
+        .collect();
+    paths.sort();
+    let mut once = Vec::new();
+    for path in paths {
+        once.extend(std::fs::read(path).unwrap());
+        once.push(b'\n');
+    }
+    once.extend_from_slice(
+        b"\xEF\xBB\xBFNotes before a game\r\n\
+          [Event \"CRLF\"]\r\n[White \"Caf\xE9\"]\r\n\r\n\
+          1. e4 {a comment\n[Event \"Not a game\"]\n} e5 (1... c5 {\xF0\x9F\x98\x80}) 2. Nf3 *\r\n\
+          \t [Event \"Indented\"]\n\n1. d4 ; a line comment {\n d5 {\xE2\x82\xAC} *\n\
+          [Event \"Bad tag]\n[Site \"?\"]\n\n1. d4 d5 1-0\n\
+          [Event \"No result\"]\n\n1. c4 \x80\x81\n",
+    );
+    once.repeat(8)
+}
+
+#[test]
+fn test_reading_a_stream_matches_reading_bytes() {
+    let pgn = streaming_corpus();
+    assert!(pgn.len() > 4 * 64 * 1024, "{}", pgn.len());
+    let expected = read_all(PgnParser::from_bytes(&pgn));
+    // The corpus has failed games, warnings for bytes that aren't UTF-8, and
+    // a tag line in a comment.
+    assert!(expected.iter().any(|r| r.contains("Err(PgnGame")));
+    assert!(expected.iter().any(|r| r.contains("NotUtf8")));
+    assert!(expected.iter().any(|r| r.contains("Not a game")));
+    assert!(!expected.iter().any(|r| r.contains("Err(Io")));
+
+    for size in [1, 2, 3, 5, 7, 64, 1000, 65_535, 65_537, usize::MAX] {
+        let reader = Chunked {
+            bytes: pgn.clone(),
+            pos: 0,
+            size,
+        };
+        let results = read_all(PgnParser::from_reader(reader));
+        assert!(results == expected, "reads of {size} bytes differ");
+    }
+}
+
+/// A reader that returns `bytes`, then fails.
+struct FailingAfter(&'static [u8]);
+
+impl std::io::Read for FailingAfter {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.0.is_empty() {
+            return Err(std::io::Error::other("disk on fire"));
+        }
+        let n = buf.len().min(self.0.len());
+        buf[..n].copy_from_slice(&self.0[..n]);
+        self.0 = &self.0[n..];
+        Ok(n)
+    }
+}
+
+#[test]
+fn test_read_error_ends_the_games() {
+    let reader = FailingAfter(b"[Event \"A\"]\n\n1. e4 *\n\n[Event \"B\"]\n\n1. d4");
+    let mut parser = PgnParser::from_reader(reader);
+    assert_eq!(parser.next().unwrap().unwrap().event, "A");
+    // The game being read when the read failed isn't returned.
+    match parser.next() {
+        Some(Err(Error::Io(err))) => assert_eq!(err.to_string(), "disk on fire"),
+        other => panic!("expected a read error, got {other:?}"),
+    }
+    assert!(parser.next().is_none());
+
+    let mut parser = PgnParser::from_reader(FailingAfter(b"1. e4 e5"));
+    assert!(matches!(parser.parse_game(), Err(Error::Io(_))));
+}
