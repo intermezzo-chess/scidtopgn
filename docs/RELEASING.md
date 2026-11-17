@@ -245,7 +245,7 @@ After the run succeeds, check each part. Replace `X.Y.Z` with the version.
    sha256sum --check SHA256SUMS   # on macOS: shasum -a 256 --check SHA256SUMS
    ```
 
-3. crates.io has both crates at the version. Open [scidtopgn](https://crates.io/crates/scidtopgn) and [scidtopgn-cli](https://crates.io/crates/scidtopgn-cli), or, with Cargo 1.82 or later, run:
+3. crates.io has both crates at the version. Open [scidtopgn](https://crates.io/crates/scidtopgn) and [scidtopgn-cli](https://crates.io/crates/scidtopgn-cli), and check that the README's links work there. To check only the versions, with Cargo 1.82 or later, run:
 
    ```sh
    cargo info scidtopgn@X.Y.Z
