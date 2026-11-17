@@ -247,6 +247,28 @@ as_utf8() {
   done
 }
 
+# set_meta DB: SCID vs. PC sets DB's header fields and the flags of its
+# first three games, which DB.meta-before then holds.
+set_meta() {
+  "$tcscid" "$tcl/meta.tcl" set "$1"
+  "$tcscid" "$tcl/meta.tcl" get "$1" "$games" > "$1.meta-before"
+}
+
+# same_meta DB [EXPECTED]: SCID vs. PC reads in DB the header fields and
+# flags EXPECTED holds, by default DB.meta-before.
+same_meta() {
+  "$tcscid" "$tcl/meta.tcl" get "$1" "$games" > "$1.meta"
+  same_lines "header fields and flags" "$1.meta" "${2:-$1.meta-before}"
+}
+
+# with_deleted META GAME...: META with the delete flag set on the given games.
+# D comes first in meta.tcl's flags.
+with_deleted() {
+  local meta=$1
+  shift
+  awk -v games=" $* " '$1 == "game" && index(games, " " $2 " ") { sub(/flags=/, "flags=D") } 1' "$meta"
+}
+
 # The first, middle, and last games, once each.
 some_games() {
   printf '%s\n' 1 $((($1 + 1) / 2)) "$1" | sort -n -u | tr '\n' ' '
@@ -279,12 +301,10 @@ s_overwrite() {
 
 s_append() {
   copy_db scid append
-  "$tcscid" "$tcl/meta.tcl" set append
-  "$tcscid" "$tcl/meta.tcl" get append "$games" > append.meta-before
+  set_meta append
   index_entries append "$games" > append.entries-before
   "$scidtopgn" import "$append_pgn" -o append
-  "$tcscid" "$tcl/meta.tcl" get append "$games" > append.meta
-  same_lines "header fields and flags" append.meta append.meta-before
+  same_meta append
   index_entries append "$games" > append.entries-after
   cmp -s append.entries-after append.entries-before || die "the original index entries changed"
   check_db append
@@ -300,16 +320,23 @@ s_merge() {
   same_search merge scid+names
 }
 
+# Delete and undelete start from a copy of scid on which SCID set the header
+# fields and flags, as append does.
 s_delete() {
   local some
   some=$(some_games "$games")
-  copy_db scid delete
+  copy_db scid delete-meta
+  set_meta delete-meta
+  copy_db delete-meta delete
   # shellcheck disable=SC2086
   "$driver" delete delete $some
-  copy_db scid delete-scid
+  copy_db delete-meta delete-scid
   # shellcheck disable=SC2086
   "$tcscid" "$tcl/flag.tcl" delete-scid D 1 $some
   same_files delete delete-scid
+  # shellcheck disable=SC2086
+  with_deleted delete-meta.meta-before $some > delete.expected-meta
+  same_meta delete delete.expected-meta
   check_db delete
   local left=$((games - $(wc -w <<< "$some")))
   [[ $(grep -c '^\[Event ' delete.pgn) -eq $left ]] || die "SCID doesn't read exactly $left games"
@@ -318,18 +345,23 @@ s_delete() {
 s_undelete() {
   local some
   some=$(some_games "$games")
-  copy_db scid undelete
+  copy_db scid undelete-meta
+  set_meta undelete-meta
+  copy_db undelete-meta undelete
   # shellcheck disable=SC2086
   "$driver" undelete delete $some
   # shellcheck disable=SC2086
   "$driver" undelete undelete $some
-  same_files undelete scid
+  same_files undelete undelete-meta
+  same_meta undelete undelete-meta.meta-before
   check_db undelete
 }
 
 # s_update CASE: replace the middle game, then compare with pgnscid's
-# database from the PGN with that game replaced. SCID's tree cache file,
-# written before the update, must not give the old results.
+# database from the PGN with that game replaced. SCID sets the header fields
+# and flags on both first, as append does, and the update must keep them.
+# SCID's tree cache file, written before the update, must not give the old
+# results.
 s_update() {
   local case=$1 db=update-$1 n=$(((games + 1) / 2)) repl
   repl=$db.replacement.pgn
@@ -340,10 +372,12 @@ s_update() {
   esac
   pgn_splice "$pgn" "$n" "$repl" > "$db.expected.pgn"
   pgnscid "$db.expected.pgn" "$db-scid"
+  "$tcscid" "$tcl/meta.tcl" set "$db-scid"
   positions scid
   positions "$db-scid"
   cat scid.positions "$db-scid.positions" | sort -u > "$db.positions"
   copy_db scid "$db"
+  set_meta "$db"
   "$tcscid" "$tcl/search.tcl" "$db.positions" "$db" write-cache > /dev/null
   [[ -f $db.stc ]] || die "SCID vs. PC wrote no tree cache"
   name_list scid > "$db.kept-names"
@@ -354,6 +388,7 @@ s_update() {
     name_list "$db" >> "$db.kept-names"
   fi
   "$driver" "$db" update "$n" "$repl" 1
+  same_meta "$db"
   check_db "$db"
   check_db "$db-scid"
   same_lines "games" "$db.pgn" "$db-scid.pgn"
@@ -373,7 +408,8 @@ s_update() {
 }
 
 # Names that aren't UTF-8: every game keeps its names, read as
-# Windows-1252, and SCID reads the result.
+# Windows-1252, and SCID reads the result. Delete and update keep the header
+# fields and flags SCID set, as above.
 s_non_utf8_append() {
   copy_db original append
   "$scidtopgn" import "$append_pgn" -o append
@@ -391,8 +427,12 @@ s_non_utf8_delete() {
   local some
   some=$(some_games "$games")
   copy_db original delete
+  set_meta delete
   # shellcheck disable=SC2086
   "$driver" delete delete $some
+  # shellcheck disable=SC2086
+  with_deleted delete.meta-before $some > delete.expected-meta
+  same_meta delete delete.expected-meta
   check_db delete
   cmp -s delete.sg4 original.sg4 || die "the game file changed"
   game_names original | as_utf8 > delete.expected-names
@@ -405,8 +445,10 @@ s_non_utf8_delete() {
 s_non_utf8_update() {
   local n=$(((games + 1) / 2))
   copy_db original update
+  set_meta update
   pgn_game "$append_pgn" 1 > update.replacement.pgn
   "$driver" update update "$n" update.replacement.pgn 1
+  same_meta update
   check_db update
   game_names original | as_utf8 |
     awk -v n="$n" -v repl="$(game_names "$run/names-scid" | head -n 1)" 'NR == n { print repl; next } 1' \

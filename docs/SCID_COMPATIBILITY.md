@@ -53,7 +53,7 @@ Import, append, update, delete, and merge are each a [scenario](SCID_COMPAT.md#s
 
 `Database::update_game`, which replaces a game and keeps its number. The CLI doesn't offer it.
 
-- **Kept:** the game's number and flags, apart from the start flag, which follows the new game (`test_update_game_keeps_user_flags_and_sets_the_start_flag` in `crates/scidtopgn/src/tests/test_database.rs`). Every other game's index entry stays byte-identical (`test_changes_keep_scids_other_entries`). The index header keeps the base type, auto-load game, description, and custom flag names (`test_compact_games_keeps_the_index_header` in `crates/scidtopgn/src/tests/test_compact.rs`, which updates a game after compacting). The compatibility check doesn't check this header: its update scenarios start from a database without a description or custom flag names ([#128](https://github.com/intermezzo-chess/scidtopgn/issues/128)).
+- **Kept:** the game's number and flags, apart from the start flag, which follows the new game (`test_update_game_keeps_user_flags_and_sets_the_start_flag` in `crates/scidtopgn/src/tests/test_database.rs`). Every other game's index entry stays byte-identical (`test_changes_keep_scids_other_entries`). The index header keeps the base type, auto-load game, description, and custom flag names (`test_compact_games_keeps_the_index_header` in `crates/scidtopgn/src/tests/test_compact.rs`, which updates a game after compacting). SCID reads the same header fields, and the same flags of the first three games, after an update as before it (`update-*` scenarios).
 - **Changed:** the new record is added at the end of the game file. The old record stays there, unused, until the games are compacted. Names the old game used and the new one doesn't stay in the name file with their frequency lowered, to 0 if no game uses them, until the names are compacted, as SCID does ([#72](https://github.com/intermezzo-chess/scidtopgn/issues/72)). SCID's tree cache is deleted (see [Tree cache](#tree-cache)).
 - **Matches SCID:** the games read back, the index entries, and the names match `pgnscid`'s database from the PGN with that game replaced, apart from game file offsets and unused names (`update-same-names`, `update-new-names`, `update-long`, and `update-twice` scenarios).
 
@@ -63,7 +63,7 @@ Import, append, update, delete, and merge are each a [scenario](SCID_COMPAT.md#s
 
 - **Kept:** the game's record and number, and every name and its frequency, until the games are compacted (`test_delete_and_undelete_game`). Every other game's index entry stays byte-identical (`test_changes_keep_scids_other_entries`), and the name file keeps SCID's order (`test_delete_keeps_scids_name_order`).
 - **Changed:** only the game's delete flag.
-- **Matches SCID:** deleting the first, middle, and last games gives files byte-identical to those SCID writes when it deletes the same games, and undeleting them gives back the original files (`delete` and `undelete` scenarios). These start from a database without a description or custom flag names, so whether a delete keeps those fields is untested ([#128](https://github.com/intermezzo-chess/scidtopgn/issues/128)).
+- **Matches SCID:** deleting the first, middle, and last games gives files byte-identical to those SCID writes when it deletes the same games, and undeleting them gives back the original files (`delete` and `undelete` scenarios). SCID sets a description, base type, auto-load game, custom flag names, and flags on the first three games before the delete, and reads them back unchanged apart from the deleted games' delete flags.
 
 ### Merge
 
@@ -75,7 +75,7 @@ Import, append, update, delete, and merge are each a [scenario](SCID_COMPAT.md#s
 
 ### Names that aren't UTF-8
 
-Any write to a database with names that aren't UTF-8 rewrites every name as UTF-8, as SCID vs. PC stores the names of PGN it imports. If a name was stored both ways, such as `Müller, Hans` once as Latin-1 and once as UTF-8, the two become one name, because SCID can't open a name file that holds the same name twice. The names then get new IDs, and every game keeps its names (`test_appending_writes_the_names_as_utf8` and `test_appending_merges_names_stored_two_ways` in `crates/scidtopgn/src/tests/test_names_not_utf8.rs`). SCID reads the result after an append, a delete, and an update (`append`, `delete`, and `update` scenarios on `latin1` and `mixed`).
+Any write to a database with names that aren't UTF-8 rewrites every name as UTF-8, as SCID vs. PC stores the names of PGN it imports. If a name was stored both ways, such as `Müller, Hans` once as Latin-1 and once as UTF-8, the two become one name, because SCID can't open a name file that holds the same name twice. The names then get new IDs, and every game keeps its names (`test_appending_writes_the_names_as_utf8` and `test_appending_merges_names_stored_two_ways` in `crates/scidtopgn/src/tests/test_names_not_utf8.rs`). SCID reads the result after an append, a delete, and an update, and the delete and the update keep the header fields and flags SCID set (`append`, `delete`, and `update` scenarios on `latin1` and `mixed`).
 
 ### Tree cache
 
