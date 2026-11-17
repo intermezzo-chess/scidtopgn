@@ -1,5 +1,6 @@
 # Sets, or prints, the header fields and game flags that compat/run checks
-# an append keeps. PGN can't record them, so SCID vs. PC sets them.
+# an append, a delete, an undelete, and an update keep. PGN can't record
+# them, so SCID vs. PC sets them.
 #
 #     tcscid compat/tcl/meta.tcl set <database>
 #     tcscid compat/tcl/meta.tcl get <database> <games>
