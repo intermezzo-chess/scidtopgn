@@ -82,3 +82,4 @@ Times vary between runs and machines, so compare the growth of each operation, w
 
 - [BENCHMARK_RESULTS_2026-11-11.md](BENCHMARK_RESULTS_2026-11-11.md): Caissabase 2022-12-24 on an Apple M1 Max (#109).
 - [BENCHMARK_RESULTS_2026-11-17.md](BENCHMARK_RESULTS_2026-11-17.md): the same, after import stores each game as it reads it (#124).
+- [BENCHMARK_RESULTS_2026-11-17-append-memory.md](BENCHMARK_RESULTS_2026-11-17-append-memory.md): the same, after an append stops holding the index twice (#138).
