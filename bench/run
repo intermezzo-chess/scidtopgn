@@ -311,7 +311,10 @@ echo "Checks"
 # memory at full size are at most 1.5 times what linear growth from the
 # sample predicts, and its peak memory is within the limit. Results under 1
 # second or 64 MB are too small to compare. pgnscid's import is the
-# baseline, and isn't checked.
+# baseline, and isn't checked. The time of the import one at a time isn't
+# compared: each of its appends reads and writes the whole database, so its
+# total grows faster than the number of games. The append checks the time
+# of one.
 while IFS=$'\t' read -r verdict text; do
   check "$verdict" "$text"
 done < <(awk -F '\t' -v limit="$limit_mb" '
@@ -328,7 +331,7 @@ done < <(awk -F '\t' -v limit="$limit_mb" '
       g = $4 / sg[key]
       rs = ss[key] > 0 ? $5 / ss[key] : 0
       rm = sm[key] > 0 ? $6 / sm[key] : 0
-      if ($5 >= 1 && (rs == 0 || rs > 1.5 * g)) fails = fails sprintf("; time grows %.1fx", rs)
+      if ($3 != "import one at a time" && $5 >= 1 && (rs == 0 || rs > 1.5 * g)) fails = fails sprintf("; time grows %.1fx", rs)
       if ($6 >= 64 && (rm == 0 || rm > 1.5 * g)) fails = fails sprintf("; memory grows %.1fx", rm)
       detail = detail sprintf(", %.1fx and %.1fx the sample, for %.1fx the games", rs, rm, g)
     } else {

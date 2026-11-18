@@ -832,7 +832,12 @@ impl IndexEntry {
 /// and names.
 pub(crate) struct Index {
     header: IndexHeader,
-    entries: Vec<IndexEntry>,
+    /// The entries read from the index file.
+    read: Vec<IndexEntry>,
+    /// The entries added since, after those read. They are kept apart so that
+    /// adding an entry never moves the entries read, which a large database
+    /// would hold twice while they were copied.
+    added: Vec<IndexEntry>,
     dirty: bool,
 }
 
@@ -847,7 +852,8 @@ impl Index {
     pub(crate) fn new() -> Self {
         Self {
             header: IndexHeader::new(),
-            entries: Vec::new(),
+            read: Vec::new(),
+            added: Vec::new(),
             dirty: false,
         }
     }
@@ -875,15 +881,16 @@ impl Index {
             return Err(Error::Truncated);
         }
 
-        let mut entries = Vec::with_capacity(header.num_games as usize);
+        let mut read = Vec::with_capacity(header.num_games as usize);
         for _ in 0..header.num_games {
             let entry = IndexEntry::read(&mut reader)?;
-            entries.push(entry);
+            read.push(entry);
         }
 
         Ok(Self {
             header,
-            entries,
+            read,
+            added: Vec::new(),
             dirty: false,
         })
     }
@@ -939,14 +946,22 @@ impl Index {
     /// Returns the entry of game `game_num`, counting from 0, or `None` if there
     /// is no such game. Logically deleted games have entries.
     pub(crate) fn get_entry(&self, game_num: u32) -> Option<&IndexEntry> {
-        self.entries.get(game_num as usize)
+        let n = game_num as usize;
+        match n.checked_sub(self.read.len()) {
+            None => self.read.get(n),
+            Some(n) => self.added.get(n),
+        }
     }
 
     /// Returns the entry of game `game_num` for changing. Write the index with
     /// [`flush`](Self::flush) or [`write_entry`](Self::write_entry) to keep the
     /// change.
     pub(crate) fn get_entry_mut(&mut self, game_num: u32) -> Option<&mut IndexEntry> {
-        self.entries.get_mut(game_num as usize)
+        let n = game_num as usize;
+        match n.checked_sub(self.read.len()) {
+            None => self.read.get_mut(n),
+            Some(n) => self.added.get_mut(n),
+        }
     }
 
     /// Adds an entry and returns its game number, counting from 0.
@@ -961,7 +976,7 @@ impl Index {
         }
 
         let game_num = self.header.num_games;
-        self.entries.push(entry);
+        self.added.push(entry);
         self.header.num_games += 1;
         self.dirty = true;
 
@@ -981,16 +996,14 @@ impl Index {
         writer: &mut W,
         game_num: u32,
     ) -> Result<()> {
-        if game_num >= self.header.num_games {
-            return Err(Error::GameNotFound {
-                number: u64::from(game_num) + 1,
-            });
-        }
+        let entry = self.get_entry(game_num).ok_or(Error::GameNotFound {
+            number: u64::from(game_num) + 1,
+        })?;
 
         let pos = INDEX_HEADER_SIZE as u64 + (game_num as u64) * (INDEX_ENTRY_SIZE as u64);
         writer.seek(SeekFrom::Start(pos))?;
 
-        self.entries[game_num as usize].write(writer)?;
+        entry.write(writer)?;
 
         Ok(())
     }
@@ -1015,7 +1028,7 @@ impl Index {
         writer.seek(SeekFrom::Start(0))?;
         self.header.write(writer)?;
 
-        for entry in &self.entries {
+        for entry in self.entries() {
             entry.write(writer)?;
         }
 
@@ -1041,8 +1054,8 @@ impl Index {
     }
 
     /// Returns every entry, in game order, counting logically deleted games.
-    pub(crate) fn entries(&self) -> &[IndexEntry] {
-        &self.entries
+    pub(crate) fn entries(&self) -> impl Iterator<Item = &IndexEntry> {
+        self.read.iter().chain(&self.added)
     }
 
     /// Returns whether the index has changed since it was read or last written.

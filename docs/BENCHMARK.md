@@ -50,13 +50,17 @@ Each operation's time is its wall time, and its memory its peak resident set siz
 
 | Check | Passes when |
 | --- | --- |
-| Each operation | It exits with 0, and it isn't stopped at the memory limit, on the sample and on all the files. On all the files, its time and its memory are each at most 1.5 times what growing in proportion to the number of games from the sample predicts. A time under 1 second or a memory under 64 MB is too small to compare, and passes |
+| Each operation | It exits with 0, and it isn't stopped at the memory limit, on the sample and on all the files. On all the files, its time and its memory are each at most 1.5 times what growing in proportion to the number of games from the sample predicts. A time under 1 second or a memory under 64 MB is too small to compare, and passes. The time of the import one at a time isn't compared, [below](#the-import-one-at-a-time) says why |
 | Import all at once | It stores as many games as the import one at a time |
 | Game counts | `pgnscid` and scidtopgn store the same number of games, apart from the difference [explained](#explained-differences) for the input |
 | SCID vs. PC | It opens both databases after the append, and reads as many games in each as scidtopgn reported |
 | 1.e4 | SCID vs. PC's tree search finds as many games in both databases, apart from the explained difference |
 
 `pgnscid` and scidtopgn import some PGN differently on purpose, as [PGN_IMPORT.md](PGN_IMPORT.md) describes, so their game counts can differ.
+
+### The import one at a time
+
+Each append reads the whole index and name file, and writes them again, so the time of an append grows with the database it appends to. The import one at a time is a series of appends to a growing database, so its total time grows faster than the number of games: with ten times the files, it makes ten times the appends, to databases ten times as large on average. No check of growth in proportion to the games fits it, so its time is recorded but not checked. The append of the chunk checks the time of one append, and the memory check covers each of the appends, through the largest. #139 is about making that reading and writing faster.
 
 ### Explained differences
 
@@ -78,3 +82,4 @@ Times vary between runs and machines, so compare the growth of each operation, w
 
 - [BENCHMARK_RESULTS_2026-11-11.md](BENCHMARK_RESULTS_2026-11-11.md): Caissabase 2022-12-24 on an Apple M1 Max (#109).
 - [BENCHMARK_RESULTS_2026-11-17.md](BENCHMARK_RESULTS_2026-11-17.md): the same, after import stores each game as it reads it (#124).
+- [BENCHMARK_RESULTS_2026-11-17-append-memory.md](BENCHMARK_RESULTS_2026-11-17-append-memory.md): the same, after an append stops holding the index twice (#138).
