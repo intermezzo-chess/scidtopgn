@@ -504,10 +504,10 @@ impl NameBase {
     /// Latin-1 or Windows-1252 names, is converted: the bytes that aren't
     /// valid UTF-8 are read as Windows-1252, as
     /// [`PgnParser::from_bytes`](crate::PgnParser::from_bytes) reads them,
-    /// and [`converted_names`](Self::converted_names) lists the name. Then
-    /// control characters and surrounding spaces are removed from each name,
-    /// and a name longer than 255 bytes is cut as
-    /// [`add_name`](Self::add_name) cuts it.
+    /// and [`converted_names`](Self::converted_names) lists the name. As in
+    /// SCID, every other character is kept, including control characters and
+    /// surrounding spaces. A name that the conversion makes longer than 255
+    /// bytes is cut as [`add_name`](Self::add_name) cuts it.
     ///
     /// Names of a kind that read the same, such as a name stored as Latin-1
     /// and as UTF-8, keep their IDs, which [`get_name`](Self::get_name)
@@ -584,10 +584,10 @@ impl NameBase {
                 name_bytes.extend_from_slice(&suffix);
 
                 let (name, converted) = decode_name(&name_bytes);
-                let name: String = name.chars().filter(|&c| c >= ' ').collect();
-                // The cut can leave spaces at the end, which reading the
-                // name again would remove.
-                let clean_name = stored_name(name.trim()).trim_end().to_string();
+                // SCID stores names as given: keep every character, including
+                // control characters and surrounding spaces. Only the
+                // 255-byte cut applied to names that aren't UTF-8 still holds.
+                let clean_name = stored_name(&name).to_string();
                 if converted {
                     self.converted.push((ntype, clean_name.clone()));
                 }
@@ -1009,13 +1009,14 @@ mod tests {
     }
 
     #[test]
-    fn test_read_removes_spaces_the_cut_leaves_at_the_end() {
+    fn test_read_keeps_spaces_the_cut_leaves_at_the_end() {
         // 127 é and a space are 255 bytes of UTF-8, and the é after them is
-        // cut, which would leave the space at the end.
+        // cut. As in SCID the space is kept, since reading no longer trims.
         let mut stored = vec![0xe9; 127];
         stored.extend([b' ', 0xe9]);
         let nb = read(&sn4_with_players(&[(0, 1, 0, &stored)]));
-        let name = "é".repeat(127);
+        let mut name = "é".repeat(127);
+        name.push(' ');
         assert_eq!(nb.get_name(NameType::Player, 0), Some(name.as_str()));
 
         let mut file = Vec::new();
@@ -1027,23 +1028,51 @@ mod tests {
     }
 
     #[test]
-    fn test_read_takes_the_shared_prefix_from_the_stored_name() {
-        // The first name is stored with a control character, which isn't
-        // part of the name read, but is part of the prefix the next shares.
-        let nb = read(&sn4_with_players(&[(0, 1, 0, b"\x01Ab"), (1, 1, 2, b"Zz")]));
-        assert_eq!(nb.get_name(NameType::Player, 0), Some("Ab"));
-        assert_eq!(nb.get_name(NameType::Player, 1), Some("AZz"));
+    fn test_read_keeps_control_characters_in_names() {
+        // SCID stores names as given. Reading must not strip C0 controls or
+        // merge names that differ only by them, so a later write leaves the
+        // names unchanged.
+        let nb = read(&sn4_with_players(&[
+            (0, 1, 0, b"M\x01nster Open"),
+            (1, 1, 0, b"Mnster Open"),
+            (2, 1, 0, b"\x01\x02"),
+            (3, 1, 0, b"a\tb"),
+        ]));
+        assert_eq!(nb.get_name(NameType::Player, 0), Some("M\u{1}nster Open"));
+        assert_eq!(nb.get_name(NameType::Player, 1), Some("Mnster Open"));
+        assert_eq!(nb.get_name(NameType::Player, 2), Some("\u{1}\u{2}"));
+        assert_eq!(nb.get_name(NameType::Player, 3), Some("a\tb"));
+        assert_eq!(nb.count(NameType::Player), 4);
+
+        let mut file = Vec::new();
+        nb.write_sn4(&mut file).unwrap();
+        let again = read(&file);
+        assert_eq!(
+            again.get_name(NameType::Player, 0),
+            Some("M\u{1}nster Open")
+        );
+        assert_eq!(again.get_name(NameType::Player, 1), Some("Mnster Open"));
+        assert_eq!(again.count(NameType::Player), 4);
     }
 
-    /// Three players that read as "Müller, Hans", stored as UTF-8, as
-    /// Latin-1, and as Latin-1 with a space before it, with IDs 2, 0, and 3,
-    /// and an unused player with ID 1.
+    #[test]
+    fn test_read_takes_the_shared_prefix_from_the_stored_name() {
+        // As in SCID the control character is part of the name read, and
+        // part of the prefix the next name shares.
+        let nb = read(&sn4_with_players(&[(0, 1, 0, b"\x01Ab"), (1, 1, 2, b"Zz")]));
+        assert_eq!(nb.get_name(NameType::Player, 0), Some("\u{1}Ab"));
+        assert_eq!(nb.get_name(NameType::Player, 1), Some("\u{1}AZz"));
+    }
+
+    /// Three players that read as "Müller, Hans": stored as UTF-8, as
+    /// Latin-1, and as Latin-1 again with a different ID, with IDs 2, 0,
+    /// and 3, and an unused player with ID 1.
     fn three_millers() -> NameBase {
         read(&sn4_with_players(&[
             (1, 0, 0, b"Anand"),
             (2, 3, 0, "Müller, Hans".as_bytes()),
             (0, 1, 1, b"\xfcller, Hans"),
-            (3, 2, 0, b" M\xfcller, Hans"),
+            (3, 2, 1, b"\xfcller, Hans"),
         ]))
     }
 
