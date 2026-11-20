@@ -198,7 +198,9 @@ fn game_pgn(event: &str, white: &str, black: &str, moves: &str) -> String {
 }
 
 /// Imports `pgn` into a new database at `path`, as `scidtopgn import` does
-/// through the library's API.
+/// through the library's API, then closes and reopens the database, so that
+/// callers read names from the files the import wrote, as a fresh reader
+/// does, rather than from the creating instance's memory.
 fn import(path: &std::path::Path, pgn: &str) -> scidtopgn::Database {
     let mut db = scidtopgn::Database::create(path).expect("Failed to create database");
     for result in scidtopgn::PgnParser::new(pgn) {
@@ -206,7 +208,8 @@ fn import(path: &std::path::Path, pgn: &str) -> scidtopgn::Database {
         db.add_game(&game).expect("Failed to add game");
     }
     db.flush().expect("Failed to flush");
-    db
+    drop(db);
+    scidtopgn::Database::open(path).expect("Failed to reopen the imported database")
 }
 
 /// Asserts that games `nums` have the given `event`, `white`, and `black`.
