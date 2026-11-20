@@ -466,29 +466,22 @@ fn read_names_section(
         // Reconstruct full name using front-coding
         previous_name.truncate(prefix_length);
         previous_name.push_str(&String::from_utf8(suffix_bytes)?);
-        
-        // Clean name (remove control characters, trim whitespace)
-        let clean_name = clean_name_string(&previous_name);
-        names.push(clean_name);
-    }
-    
-    Ok(names)
-}
 
-fn clean_name_string(name: &str) -> String {
-    name.chars()
-        .filter(|&c| c >= ' ')  // Remove control characters (< 0x20)
-        .collect::<String>()
-        .trim()
-        .to_string()
+        // The name is kept as stored: control characters and spaces stay.
+        // The only changes are the UTF-8 conversion of names that aren't
+        // valid UTF-8, and the cut of a converted name to 255 bytes.
+        names.push(previous_name.clone());
+    }
+
+    Ok(names)
 }
 ```
 
 ### Text Encoding and Character Handling
 
 - **Character Encoding**: UTF-8 in SCID vs. PC, which converts PGN to UTF-8 when it imports. Older versions of SCID store a Latin-1 or Windows-1252 PGN file's bytes unchanged. `scidtopgn` reads bytes that aren't valid UTF-8 as Windows-1252 and writes UTF-8. SCID can't open a name file that holds the same name twice.
-- **Control Character Filtering**: Characters below 0x20 (space) are removed
-- **Whitespace Handling**: Leading and trailing whitespace is trimmed
+- **Control Characters**: A name is stored and read as SCID stored it, control characters included: reading a name file doesn't remove characters below 0x20 (space) or trim the name. This is how SCID stores a name, and it keeps names that differ only by control characters separate.
+- **Whitespace Handling**: A name file's names are read as stored, without trimming. PGN import is different: SCID's import and scidtopgn's both trim leading and trailing spaces, and scidtopgn also trims trailing tabs, as SCID's PGN parser does.
 - **Empty Names**: Zero-length names are allowed and stored as empty strings
 - **Maximum Length**: 255 characters per name (1-byte length field)
 

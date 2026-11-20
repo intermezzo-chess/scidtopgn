@@ -337,6 +337,8 @@ These cases were added by [#43](https://github.com/intermezzo-chess/scidtopgn/is
 
 As SCID's `standardPlayerName` does, the value of a `White` or `Black` tag is tidied: spaces at the start are dropped, each comma that something follows gets exactly one space after it, and spaces and tabs at the end are dropped. Other characters, including other spaces, are kept. This gives the PGN standard's `Surname, Given name` form, so `Carlsen,Magnus` and `Carlsen, Magnus` are one player. Other tags aren't tidied.
 
+Names keep control characters, as in SCID ([#142](https://github.com/intermezzo-chess/scidtopgn/issues/142)): tidying drops only spaces and tabs at the edges, never a control character, so a control character inside a name, one at its start or end, and a name that is only control characters are all stored as written, and export writes them as SCID does. Names that differ only by control characters stay different players. The same holds for `Event`, `Site`, and `Round` names, which import stores as written.
+
 A rating is read from three places, as SCID's `ExtractPgnTag` reads it:
 
 - **A rating tag**: `White` or `Black` followed by one of SCID's kinds of rating, `Elo`, `Rating`, `Rapid`, `ICCF`, `USCF`, `DWZ`, or `ECF`, such as `WhiteUSCF`. The name must match exactly.
