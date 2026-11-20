@@ -71,7 +71,7 @@ SCID compares and hashes names as C `char`s, which are signed on x86 and Apple a
 
 ## Inputs
 
-The inputs are the PGN files of the fixtures in `tests/data`, `compat/data/names.pgn`, and an empty PGN made at run time. `names.pgn` has names that aren't ASCII as players, events, sites, and rounds, ordered so that signed and unsigned bytes sort them differently. Its second game has a `;` comment line and a `%` escape line between its tags, and comments over several lines, with lines that start with `[`. None of these may end its tags or start a game when the check finds where games start. It is also the PGN every scenario appends, merges, and takes new games from.
+The inputs are the PGN files of the fixtures in `tests/data`, `compat/data/names.pgn`, and an empty PGN made at run time. `controls.pgn` has names with control characters, as issue #142 records them: an event with a C0 control character and its clean spelling, a name that is only control characters, a tab inside a name, and a control character at the start or end of a name. `names.pgn` has names that aren't ASCII as players, events, sites, and rounds, ordered so that signed and unsigned bytes sort them differently. Its second game has a `;` comment line and a `%` escape line between its tags, and comments over several lines, with lines that start with `[`. None of these may end its tags or start a game when the check finds where games start. It is also the PGN every scenario appends, merges, and takes new games from.
 
 Two fixtures are left out, because scidtopgn imports them differently from SCID on purpose, as [PGN_IMPORT.md](PGN_IMPORT.md) describes: `notation.pgn` holds those cases, and `search.pgn` has the player `van der Wiel, John`, whose prefix SCID capitalizes.
 

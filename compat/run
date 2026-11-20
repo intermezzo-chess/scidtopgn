@@ -29,8 +29,9 @@ append_pgn=$repo/compat/data/names.pgn
 # differently from SCID on purpose, as docs/PGN_IMPORT.md describes.
 # notation.pgn holds its cases, and search.pgn has a Dutch name prefix,
 # "van der Wiel", which SCID capitalizes.
+# controls.pgn has names with control characters, as in #142.
 inputs=(
-  "$data"/{accents,annotated,castling,derived,edge,five,long,one,stored,twins}.pgn
+  "$data"/{accents,annotated,castling,controls,derived,edge,five,long,one,stored,twins}.pgn
   "$repo/compat/data/names.pgn"
 )
 for pgn in "$@"; do
