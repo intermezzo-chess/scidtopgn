@@ -1173,25 +1173,32 @@ impl Database {
         self.gfile.flush()?;
         check_replaceable(&self.path)?;
 
-        let merged = match self.nfile.namebase().merged() {
-            Some((namebase, new_ids)) => Some((namebase, renumbered(&self.index, &new_ids)?)),
-            None => None,
-        };
-        let (namebase, index) = match &merged {
-            Some((namebase, index)) => (namebase, index),
-            None => (self.nfile.namebase(), &self.index),
-        };
+        // The index is renumbered as it is written, and changed only once the
+        // new files are in place, so that a large index isn't held twice and
+        // is as it was if writing fails.
+        let merged = self.nfile.namebase().merged();
         let mut new = NewFiles::new(&self.path)?;
-        write_names(namebase, create(&mut new, "sn4")?)?;
-        write_index(index, create(&mut new, "si4")?)?;
+        match &merged {
+            Some((namebase, new_ids)) => {
+                write_names(namebase, create(&mut new, "sn4")?)?;
+                write_renumbered_index(&self.index, new_ids, create(&mut new, "si4")?)?;
+            }
+            None => {
+                write_names(self.nfile.namebase(), create(&mut new, "sn4")?)?;
+                write_index(&self.index, create(&mut new, "si4")?)?;
+            }
+        }
         if self.tree_cache_stale {
             remove_tree_cache(&self.path)?;
         }
         new.replace()?;
 
         match merged {
-            Some((namebase, index)) => {
-                self.index = index;
+            Some((namebase, new_ids)) => {
+                for entry in self.index.entries_mut() {
+                    renumber_names(entry, &new_ids)
+                        .expect("writing the index found a new ID for each name ID");
+                }
                 *self.nfile.namebase_mut() = namebase;
             }
             None => self.nfile.namebase_mut().clear_converted(),
@@ -1780,6 +1787,21 @@ fn remove_tree_cache(path: &Path) -> Result<()> {
 /// Writes `index` to `file` as an index file.
 fn write_index<W: Write + Seek>(index: &Index, file: W) -> Result<()> {
     index.write_to(&mut BufWriter::new(file))
+}
+
+/// Writes `index` to `file` as an index file, with the name IDs of each
+/// entry changed to their new IDs in `new_ids`, as [`renumbered`] changes
+/// them, but without copying the index.
+///
+/// # Errors
+///
+/// Returns [`Error::Game`] with [`Error::NameNotFound`] for the first game
+/// that refers to an ID that has no new ID, and [`Error::Io`] if the file
+/// can't be written.
+fn write_renumbered_index<W: Write + Seek>(index: &Index, new_ids: &NewIds, file: W) -> Result<()> {
+    index.write_changed_to(&mut BufWriter::new(file), |game_num, entry| {
+        renumber_names(entry, new_ids).map_err(|e| in_game(game_num, e))
+    })
 }
 
 /// Writes `namebase` to `file` as a name file.
