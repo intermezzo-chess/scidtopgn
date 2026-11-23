@@ -368,8 +368,9 @@ fn test_a_merge_stops_at_a_name_the_name_file_lacks() {
     let before = database_bytes(&path);
 
     let mut db = Database::open(&path).unwrap();
+    let first = db.get_game(0).unwrap().to_pgn();
     db.add_game(&parse_single_game(NEW_GAME).unwrap()).unwrap();
-    let err = db.close().unwrap_err();
+    let err = db.flush().unwrap_err();
 
     match err {
         Error::Game { number: 2, source } => assert!(
@@ -390,4 +391,43 @@ fn test_a_merge_stops_at_a_name_the_name_file_lacks() {
         files_in(temp.path()),
         ["mixed.sg4", "mixed.si4", "mixed.sn4"]
     );
+    // The names and the index are as they were, so writing again stops at
+    // the same game. Müller is still two names, beside the new Carlsen.
+    assert_eq!(db.nfile().namebase().count(NameType::Player), 5);
+    assert_eq!(db.get_game(0).unwrap().to_pgn(), first);
+    assert!(matches!(db.flush(), Err(Error::Game { number: 2, .. })));
+}
+
+#[test]
+fn test_the_index_in_memory_matches_the_file_after_merging_names() {
+    let temp = TempDir::new().unwrap();
+    let path = copy_of(temp.path(), "mixed");
+    let mut db = Database::open(&path).unwrap();
+    let before = all_pgn(&mut db);
+    db.add_game(&parse_single_game(NEW_GAME).unwrap()).unwrap();
+    db.flush().unwrap();
+
+    // The entries refer to the merged names by their new IDs, as the index
+    // file written does.
+    let mut index = std::io::Cursor::new(Vec::new());
+    db.index().write_to(&mut index).unwrap();
+    assert_eq!(
+        index.into_inner(),
+        std::fs::read(path.with_extension("si4")).unwrap()
+    );
+    let written = all_pgn(&mut db);
+    assert_eq!(written[..3], before);
+    assert_eq!(
+        written,
+        all_pgn(&mut Database::open_read_only(&path).unwrap())
+    );
+
+    // Writing again keeps the new IDs.
+    db.add_game(&parse_single_game(NEW_GAME).unwrap()).unwrap();
+    db.close().unwrap();
+    assert_names_written_as_utf8(&path);
+    let mut db = Database::open(&path).unwrap();
+    let after = all_pgn(&mut db);
+    assert_eq!(after[..4], written);
+    assert_eq!(after[4], written[3]);
 }

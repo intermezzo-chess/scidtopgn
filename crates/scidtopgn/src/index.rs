@@ -1025,10 +1025,29 @@ impl Index {
     /// that doesn't yet replace the index file, so the index stays dirty
     /// until [`mark_written`](Self::mark_written).
     pub(crate) fn write_to<W: Write + Seek>(&self, writer: &mut W) -> Result<()> {
+        self.write_changed_to(writer, |_, _| Ok(()))
+    }
+
+    /// Writes the whole index file to `writer`, as
+    /// [`write_to`](Self::write_to) does, with each entry as `change` changes
+    /// a copy of it, given its game number, counting from 0. The index
+    /// itself isn't changed, and no more than one entry is copied at a time.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first error `change` returns, and [`Error::Io`] if the
+    /// file can't be written.
+    pub(crate) fn write_changed_to<W: Write + Seek>(
+        &self,
+        writer: &mut W,
+        mut change: impl FnMut(u32, &mut IndexEntry) -> Result<()>,
+    ) -> Result<()> {
         writer.seek(SeekFrom::Start(0))?;
         self.header.write(writer)?;
 
-        for entry in self.entries() {
+        for (game_num, entry) in (0u32..).zip(self.entries()) {
+            let mut entry = entry.clone();
+            change(game_num, &mut entry)?;
             entry.write(writer)?;
         }
 
@@ -1056,6 +1075,12 @@ impl Index {
     /// Returns every entry, in game order, counting logically deleted games.
     pub(crate) fn entries(&self) -> impl Iterator<Item = &IndexEntry> {
         self.read.iter().chain(&self.added)
+    }
+
+    /// Returns every entry for changing, in game order. Write the index with
+    /// [`write_to`](Self::write_to) to keep the changes.
+    pub(crate) fn entries_mut(&mut self) -> impl Iterator<Item = &mut IndexEntry> {
+        self.read.iter_mut().chain(&mut self.added)
     }
 
     /// Returns whether the index has changed since it was read or last written.
