@@ -35,7 +35,7 @@ This document says what that compatibility covers, what scidtopgn keeps and chan
 
 ## Supported format
 
-scidtopgn reads and writes SCID vs. PC 4 databases: an index file (`.si4`), a name file (`.sn4`), and a game file (`.sg4`), with index format version 400. It is tested with SCID vs. PC 4.26, the version every fixture and the compatibility check use. Other 4.x releases of SCID vs. PC are untested.
+scidtopgn reads and writes SCID vs. PC 4 databases: an index file (`.si4`), a name file (`.sn4`), and a game file (`.sg4`), with index format version 400. It is tested with SCID vs. PC 4.26, which the compatibility check uses. The fixtures `pgnscid` wrote are [the files 4.26 writes](SCID_FORMAT_AUDIT.md#fixtures). [SCID_FORMAT.md](SCID_FORMAT.md) describes the format. Other 4.x releases of SCID vs. PC are untested.
 
 - **Other format versions are rejected.** Opening an index file of any other version, such as 300, fails with an error naming both versions ([#107](https://github.com/intermezzo-chess/scidtopgn/issues/107)). Checked by `test_open_rejects_other_versions` and `test_unsupported_version_names_both_versions` in `crates/scidtopgn/src/tests/test_errors.rs`, and `test_cli_rejects_other_versions` in `crates/scidtopgn-cli/tests/integration.rs`.
 - **Other SCID programs and formats aren't supported**, including the original SCID and its later `.si5` format, which scidtopgn can't open. If the original SCID wrote a database with index version 400, scidtopgn opens it, but this is untested.
@@ -50,6 +50,21 @@ scidtopgn reads the databases SCID vs. PC 4.26 writes. The claims below are chec
 - **Control characters in names.** A name is read as stored, control characters included, as SCID stores names ([#142](https://github.com/intermezzo-chess/scidtopgn/issues/142)). Reading removes no character and trims nothing, names that differ only by control characters stay separate, and a write never changes a name it didn't add. The exceptions are the names that aren't UTF-8, in the bullet above. Checked by `test_read_keeps_control_characters_in_names` in `crates/scidtopgn/src/namebase.rs`, and `test_import_keeps_control_characters_in_names_through_writes` and `test_names_differing_only_by_control_characters_stay_separate_through_writes` in `crates/scidtopgn/tests/integration.rs`.
 
 The compatibility check's append, merge, delete, and update scenarios also start by reading the databases `pgnscid` writes from each of its inputs.
+
+### Files SCID refuses or misreads
+
+scidtopgn reads some files that SCID vs. PC 4.26 doesn't, and the other way around. SCID's behavior, and scidtopgn's where no test is named, was checked by the [probes of the format audit](SCID_FORMAT_AUDIT.md#results-damaged-files), not by the compatibility check.
+
+| File | SCID | scidtopgn |
+| --- | --- | --- |
+| A [record that crosses a block](SG4_FORMAT.md#blocks-offsets-and-record-boundaries) | Reports the game as corrupt | Reads it (`test_gfile_read_across_blocks` in `crates/scidtopgn/src/gfile.rs`) |
+| A tag with a [spare code](SG4_FORMAT.md#tags), 251 to 254 | Crashes when it decodes the tags | Drops the value (`test_decode_drops_spare_common_tags` in `crates/scidtopgn/src/game.rs`) |
+| A tag value of 255 bytes | Overruns a buffer. Values up to 254 bytes are safe | Reads and writes it (`test_tag_values_up_to_255_bytes_round_trip` in `crates/scidtopgn/src/tests/test_database.rs`) |
+| Names out of [order](SN4_FORMAT.md#order), or the same name twice | Refuses to open the database, or can't look names up | Reads them. A write puts them in order, and [merges](#names-that-arent-utf-8) the same names |
+| An entry with a name ID that no name has | Refuses to open the database | Reads the name as `?` |
+| An illegal move that has a destination | Plays it as written | Refuses the game (`rejects_illegal_bytes` in `crates/scidtopgn/src/mov.rs`) |
+
+`scidtopgn validate` reports damage only in games scidtopgn can't read, so it finds only the last of these.
 
 ## Writing
 

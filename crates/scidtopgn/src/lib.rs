@@ -75,7 +75,7 @@
 //! Games are numbered from 0 in this API and from 1 in error messages. The
 //! [file format description] gives the binary layout of each file.
 //!
-//! [file format description]: https://github.com/intermezzo-chess/scidtopgn/blob/main/SCID_DATABASE_FORMAT.md
+//! [file format description]: https://github.com/intermezzo-chess/scidtopgn/blob/main/docs/SCID_FORMAT.md
 
 #![warn(missing_docs)]
 #![warn(unreachable_pub)]

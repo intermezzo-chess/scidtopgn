@@ -273,7 +273,7 @@ cargo run -p scidtopgn-cli -- /path/to/database  # run without installing
 
 ## SCID format docs
 
-If you're the kind of person who wants to understand the binary format, see `SCID_DATABASE_FORMAT.md`.
+If you're the kind of person who wants to understand the binary format, see [docs/SCID_FORMAT.md](https://github.com/intermezzo-chess/scidtopgn/blob/main/docs/SCID_FORMAT.md).
 
 ## License
 

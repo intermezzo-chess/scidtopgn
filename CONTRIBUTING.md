@@ -45,8 +45,10 @@ reference the issue the PR addresses.
   `nfile.rs` and `namebase.rs` handle the `.sn4` name base, and `gfile.rs`
   handles the `.sg4` game file. Move and game decoding live in `game.rs`,
   `mov.rs`, and `position.rs`. `database.rs` ties the
-  three files together. See [SCID_DATABASE_FORMAT.md](SCID_DATABASE_FORMAT.md)
-  for the binary layout.
+  three files together. See [docs/SCID_FORMAT.md](docs/SCID_FORMAT.md)
+  for the binary layout. It describes the files as SCID vs. PC writes them;
+  scidtopgn's differences belong in
+  [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
 - **Chess rules come from [shakmaty](https://crates.io/crates/shakmaty).**
   Legality, SAN, check and mate, and FEN all use it. `position.rs` adds only
   SCID's piece numbering to a shakmaty position, and `mov.rs` only SCID's move
@@ -108,6 +110,9 @@ the header search follows Tcl 8.6, as `HeaderSearch` documents.
 `stored` was written from `stored.pgn` by `pgnscid -f stored.pgn stored`. Each
 game is a case of the stored-line code, named by its `Site` tag, and
 importing `stored.pgn` gives files byte-identical to it.
+How `one` and `five` were written isn't recorded.
+[docs/SCID_FORMAT_AUDIT.md](docs/SCID_FORMAT_AUDIT.md#fixtures) compares each
+fixture with what SCID vs. PC 4.26 writes.
 `notation.pgn` has one game per case in
 [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md#pgn-import-compared-with-scid). `.gitignore` excludes `*.si4`, `*.sn4`, and `*.sg4` everywhere, so new
 fixtures must be added with `git add -f`.
