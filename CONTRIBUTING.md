@@ -91,7 +91,7 @@ tags. `twins.tcl` runs SCID vs. PC's `sc_base duplicates` on copies of it with
 several sets of options, as
 `tcscid tests/data/twins.tcl tests/data/twins <scratch directory>`, and
 `crates/scidtopgn/tests/test_twins.rs` holds the games it deleted with each.
-`search` was written from `search.pgn` by `pgnscid -f search.pgn search`. Its
+`controls.pgn` is an input of the compatibility check for names with control characters (#142): an event with a C0 control character and its clean spelling, a name that is only control characters, a tab inside a name, and a control character at the start or end of a name. `search` was written from `search.pgn` by `pgnscid -f search.pgn search`. Its
 games differ in each field SCID's header search compares. `search.tcl` sets
 SCID's flags on some of them, which PGN can't record, and runs SCID vs. PC's
 `sc_search header` with several sets of options, as

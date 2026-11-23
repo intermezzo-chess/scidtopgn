@@ -406,7 +406,7 @@ Each name record has variable length:
    - 2 bytes if max_frequency < 65,536  
    - 3 bytes if max_frequency ≥ 65,536
 
-3. **String Length**: Total length of reconstructed name (1 byte, max 255 chars)
+3. **String Length**: The reconstructed name's length in bytes (1 byte, max 255)
 
 4. **String Data**: The name's bytes after the shared prefix. The prefix is shared with the previous name's bytes as stored.
 
@@ -442,16 +442,16 @@ fn read_names_section(
     reader: &mut BufReader<File>, 
     count: u32, 
     max_frequency: u32
-) -> Result<Vec<String>, Error> {
+) -> Result<Vec<Vec<u8>>, Error> {
     let mut names = Vec::new();
-    let mut previous_name = String::new();
+    let mut previous_name = Vec::new();  // the previous name's stored bytes
     
     for _ in 0..count {
         // Read variable-length ID and frequency
         let (name_id, id_bytes) = read_variable_int(reader, count)?;
         let (frequency, freq_bytes) = read_variable_int(reader, max_frequency)?;
         
-        // Read string length and prefix length
+        // Read string length and prefix length; both count bytes
         let total_length = read_byte(reader)? as usize;
         let prefix_length = if names.is_empty() { 
             0  // First name has no prefix
@@ -463,34 +463,28 @@ fn read_names_section(
         let suffix_length = total_length - prefix_length;
         let suffix_bytes = read_bytes(reader, suffix_length)?;
         
-        // Reconstruct full name using front-coding
-        previous_name.truncate(prefix_length);
-        previous_name.push_str(&String::from_utf8(suffix_bytes)?);
-        
-        // Clean name (remove control characters, trim whitespace)
-        let clean_name = clean_name_string(&previous_name);
-        names.push(clean_name);
+        // Reconstruct the name as stored: copy the prefix bytes from the
+        // previous name's stored bytes, then append the suffix bytes.
+        // The lengths are byte counts, so a prefix can end inside a
+        // multi-byte character: the halves join as raw bytes, and only the
+        // complete name is interpreted. Nothing is filtered or trimmed.
+        let mut name = previous_name[..prefix_length].to_vec();
+        name.extend_from_slice(&suffix_bytes);
+        names.push(name.clone());
+        previous_name = name;
     }
-    
-    Ok(names)
-}
 
-fn clean_name_string(name: &str) -> String {
-    name.chars()
-        .filter(|&c| c >= ' ')  // Remove control characters (< 0x20)
-        .collect::<String>()
-        .trim()
-        .to_string()
+    Ok(names)
 }
 ```
 
 ### Text Encoding and Character Handling
 
-- **Character Encoding**: UTF-8 in SCID vs. PC, which converts PGN to UTF-8 when it imports. Older versions of SCID store a Latin-1 or Windows-1252 PGN file's bytes unchanged. `scidtopgn` reads bytes that aren't valid UTF-8 as Windows-1252 and writes UTF-8. SCID can't open a name file that holds the same name twice.
-- **Control Character Filtering**: Characters below 0x20 (space) are removed
-- **Whitespace Handling**: Leading and trailing whitespace is trimmed
+- **Character Encoding**: A name file stores names as raw bytes and doesn't encode or validate them. SCID vs. PC writes UTF-8 names: it converts PGN to UTF-8 when it imports. Older versions of SCID store a Latin-1 or Windows-1252 PGN file's bytes unchanged. SCID can't open a name file that holds the same name twice.
+- **Control Characters**: A name is stored and read as SCID stored it, control characters included: reading a name file doesn't remove characters below 0x20 (space) or trim the name. This is how SCID stores a name, and it keeps names that differ only by control characters separate.
+- **Whitespace Handling**: A name file's names are read as stored, without trimming.
 - **Empty Names**: Zero-length names are allowed and stored as empty strings
-- **Maximum Length**: 255 characters per name (1-byte length field)
+- **Maximum Length**: 255 bytes per name (1-byte length field)
 
 ---
 
