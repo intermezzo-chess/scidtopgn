@@ -5,7 +5,7 @@ This records the audit of `SCID_DATABASE_FORMAT.md` for [#145](https://github.co
 - [Summary](#summary)
 - [Verification](#verification)
 - [Remaining uncertainties](#remaining-uncertainties)
-- [Suspected scidtopgn defects](#suspected-scidtopgn-defects)
+- [Follow-up issues](#follow-up-issues)
 - [Inventory](#inventory)
 
 ## Summary
@@ -175,12 +175,12 @@ So the conflict doesn't affect them as evidence. No rule rests only on `one` or 
 - **Stored lines.** The codes' values come from a table in SCID's source, which the probes print but don't derive. `tests/data/stored` has 12 cases.
 - **Links** to SourceForge depend on that site. The tarball's SHA-256 identifies the source without it.
 
-## Suspected scidtopgn defects
+## Follow-up issues
 
-Found by the probes above, and not changed here. Issues for them need a maintainer's approval.
+Found by the probes above, and not changed here.
 
-1. **`validate` reports no damage in databases that SCID refuses.** Reproduce with `scidtopgn validate` on the `badname`, `order`, `duplicate`, and `cross` databases.
-2. **Import stores tag values of 255 bytes, which SCID 4.26 can't read safely.** Reproduce by importing `tag255.pgn`. SCID's own import stores them too.
+1. **`validate` reports no damage in databases that SCID refuses** ([#149](https://github.com/intermezzo-chess/scidtopgn/issues/149)). It is documented to check only that each game's record can be read, so this is a possible improvement. Reproduce with `scidtopgn validate` on the `badname`, `order`, `duplicate`, `cross`, and `firstbyte` databases.
+2. **SCID 4.26 can't read a tag value of 255 bytes safely** ([#150](https://github.com/intermezzo-chess/scidtopgn/issues/150)). The bug is SCID's: `Game::DecodeTags` writes 1 byte past a 255-byte buffer, which AddressSanitizer reports for `tag255` written by `pgnscid` and by scidtopgn. Both programs import such a value without a warning, and write the same record. The issue is to decide whether scidtopgn should.
 
 `GFile::read_game`'s comment said that SCID reads a record that crosses a block. The comment is corrected; the behavior is unchanged.
 
