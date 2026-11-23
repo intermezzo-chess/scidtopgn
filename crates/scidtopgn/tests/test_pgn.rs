@@ -625,7 +625,7 @@ fn failure(error: &Error) -> String {
     }
 }
 
-/// Each game in `tests/data/notation.pgn` is a case in `docs/PGN_IMPORT.md`,
+/// Each game in `tests/data/notation.pgn` is a case in `docs/COMPATIBILITY.md`,
 /// named by its `Event` tag. The document records how SCID reads the same
 /// file.
 #[test]

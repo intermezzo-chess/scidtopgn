@@ -56,7 +56,7 @@ Each operation's time is its wall time, and its memory its peak resident set siz
 | SCID vs. PC | It opens both databases after the append, and reads as many games in each as scidtopgn reported |
 | 1.e4 | SCID vs. PC's tree search finds as many games in both databases, apart from the explained difference |
 
-`pgnscid` and scidtopgn import some PGN differently on purpose, as [PGN_IMPORT.md](PGN_IMPORT.md) describes, so their game counts can differ.
+`pgnscid` and scidtopgn import some PGN differently on purpose, as [COMPATIBILITY.md](COMPATIBILITY.md#pgn-import-compared-with-scid) describes, so their game counts can differ.
 
 ### The import one at a time
 

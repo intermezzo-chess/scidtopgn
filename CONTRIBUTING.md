@@ -52,10 +52,10 @@ reference the issue the PR addresses.
   SCID's piece numbering to a shakmaty position, and `mov.rs` only SCID's move
   encoding. Don't add chess rules to the crate.
 - **The C++ converter in `scid-cpp/` is the behavioral reference.** It is built
-  from the original SCID encoding and decoding sources. When there is a
+  from SCID vs. PC's encoding and decoding sources. When there is a
   question about how SCID or PGN import and export should behave, such as
   which games to skip or how to encode a move, match `scid-cpp/src/main.cpp`.
-  [docs/PGN_IMPORT.md](docs/PGN_IMPORT.md) records where PGN import
+  [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md#pgn-import-compared-with-scid) records where PGN import
   deliberately differs, and why. Update it when you change how PGN is read.
   `scidvspc/` is a local reference checkout and is not tracked.
 - **The library uses structured errors.** It returns `scidtopgn::Error`, which
@@ -109,7 +109,7 @@ the header search follows Tcl 8.6, as `HeaderSearch` documents.
 game is a case of the stored-line code, named by its `Site` tag, and
 importing `stored.pgn` gives files byte-identical to it.
 `notation.pgn` has one game per case in
-[docs/PGN_IMPORT.md](docs/PGN_IMPORT.md). `.gitignore` excludes `*.si4`, `*.sn4`, and `*.sg4` everywhere, so new
+[docs/COMPATIBILITY.md](docs/COMPATIBILITY.md#pgn-import-compared-with-scid). `.gitignore` excludes `*.si4`, `*.sn4`, and `*.sg4` everywhere, so new
 fixtures must be added with `git add -f`.
 
 `edge` covers variations, null moves, promotions, en passant, castling, and
