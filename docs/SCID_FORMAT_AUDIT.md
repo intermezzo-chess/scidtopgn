@@ -6,6 +6,7 @@ This records the audit of `SCID_DATABASE_FORMAT.md` for [#145](https://github.co
 - [Verification](#verification)
 - [Remaining uncertainties](#remaining-uncertainties)
 - [Follow-up issues](#follow-up-issues)
+- [Audit of COMPATIBILITY.md](#audit-of-compatibilitymd)
 - [Inventory](#inventory)
 
 ## Summary
@@ -177,7 +178,7 @@ So the conflict doesn't affect them as evidence. No rule rests only on `one` or 
 - **Source only.** These were read in SCID's source and not exercised: the most games and names; that SCID doesn't lower a maximum frequency and counts frequencies when it opens a database; that a NUL ends a name; lookups in a file with first bytes out of order; piece numbers above the count; more than 255 variations of a move.
 - **Undefined behavior.** What SCID does after the buffer overrun of `tag255`, with `spare`, and with more than 40 tags depends on the build.
 - **Base types** are numbers to the format. What SCID's interface calls them wasn't audited.
-- **`COMPATIBILITY.md`** wasn't audited here, apart from [Files SCID refuses or misreads](COMPATIBILITY.md#files-scid-refuses-or-misreads) and which SCID wrote the fixtures. A review of #148 found corrections it needs.
+- **`COMPATIBILITY.md`** was audited [separately](#audit-of-compatibilitymd), with its own uncertainties.
 - **Stored lines.** The codes' values come from a table in SCID's source, which the probes print but don't derive. `tests/data/stored` has 12 cases.
 - **Links** to SourceForge depend on that site. The tarball's SHA-256 identifies the source without it.
 
@@ -188,7 +189,41 @@ Found by the probes above, and not changed here.
 1. **`validate` reports no damage in databases that SCID refuses** ([#149](https://github.com/intermezzo-chess/scidtopgn/issues/149)). It is documented to check only that each game's record can be read, so this is a possible improvement. Reproduce with `scidtopgn validate` on the `badname`, `order`, `duplicate`, `cross`, and `firstbyte` databases.
 2. **SCID 4.26 can't read a tag value of 255 bytes safely** ([#150](https://github.com/intermezzo-chess/scidtopgn/issues/150)). The bug is SCID's: `Game::DecodeTags` writes 1 byte past a 255-byte buffer, which AddressSanitizer reports for `tag255` written by `pgnscid` and by scidtopgn. Both programs import such a value without a warning, and write the same record. The issue is to decide whether scidtopgn should.
 
+The [audit of `COMPATIBILITY.md`](#audit-of-compatibilitymd) led to five more, all bugs: #151 to #155.
+
 `GFile::read_game`'s comment said that SCID reads a record that crosses a block. The comment is corrected; the behavior is unchanged.
+
+## Audit of COMPATIBILITY.md
+
+A reviewer audited `docs/COMPATIBILITY.md` at `ec9696c`, all 351 paragraphs, table rows, and examples, against scidtopgn's source, `scid-cpp/scid`, and SCID vs. PC 4.26, and found these 17 corrections and gaps. Each was confirmed again before it was corrected, by importing and exporting the cases with scidtopgn, `pgnscid` 4.26, and the reference converter, or, for F01 and F16, in the source and file tree.
+
+| | Finding | Correction |
+| --- | --- | --- |
+| F01 | An update recomputes three flags, not only the start flag | [Update](COMPATIBILITY.md#update) |
+| F02 | Export isn't in the PGN standard's export format in full | [Export and round trips](COMPATIBILITY.md#export-and-round-trips) |
+| F03 | SCID doesn't ignore a `{...}` comment between tags | [General differences](COMPATIBILITY.md#general-differences). Two test comments that said so are corrected |
+| F04 | NUL is an exception to keeping control characters as SCID does | [Reading](COMPATIBILITY.md#reading), [Player names and ratings](COMPATIBILITY.md#player-names-and-ratings) |
+| F05 | Tags after the 40th are dropped silently | [Limits shared with SCID](COMPATIBILITY.md#limits-shared-with-scid), [#155](https://github.com/intermezzo-chess/scidtopgn/issues/155) |
+| F06 | A `}` in a comment loses text in a round trip. It can also lose moves and change the result | [Export and round trips](COMPATIBILITY.md#export-and-round-trips), [#152](https://github.com/intermezzo-chess/scidtopgn/issues/152) |
+| F07 | Rating overflow depends on the width of `unsigned long`, and not every negative rating is 4,000 | [Player names and ratings](COMPATIBILITY.md#player-names-and-ratings) |
+| F08 | SCID keeps none of 256 variations | [General differences](COMPATIBILITY.md#general-differences) |
+| F09 | SCID's limit on text before a game counts bytes, and splits long lines | [Text before and between games](COMPATIBILITY.md#text-before-and-between-games) |
+| F10 | SCID cuts long comments in the moves | [Comments](COMPATIBILITY.md#comments-tag-values-results-in-variations-and-stray-brackets) |
+| F11 | Dates: game years 1 and 2, years over 2047, malformed dates, and partly unknown dates in exports | [Limits shared with SCID](COMPATIBILITY.md#limits-shared-with-scid), [Known differences](COMPATIBILITY.md#known-differences-outside-these-cases), [#154](https://github.com/intermezzo-chess/scidtopgn/issues/154). Export can also lose a known day |
+| F12 | `--overwrite` doesn't keep permissions | [Deliberate differences](COMPATIBILITY.md#deliberate-differences), [#151](https://github.com/intermezzo-chess/scidtopgn/issues/151) |
+| F13 | Empty name tags | [Known differences](COMPATIBILITY.md#known-differences-outside-these-cases) |
+| F14 | Several tags on one line | [Known differences](COMPATIBILITY.md#known-differences-outside-these-cases) |
+| F15 | An unknown ECO code isn't stored | [Export and round trips](COMPATIBILITY.md#export-and-round-trips) |
+| F16 | Two test paths were wrong, and one test doesn't run SCID | [Tests](COMPATIBILITY.md#tests) |
+| F17 | A line feed in a name, and spaces and tabs at its ends, don't survive a round trip | [Export and round trips](COMPATIBILITY.md#export-and-round-trips), [#153](https://github.com/intermezzo-chess/scidtopgn/issues/153) |
+
+Not verified by either:
+
+- Ratings where `unsigned long` has 32 bits, such as on Windows. The document says so.
+- Which Tcl SCID vs. PC 4.27 for macOS bundles. The document no longer says.
+- SCID's GUI, two programs writing at once, power loss, and every way a file operation can fail.
+- What "Before #..." statements say about old versions, beyond the linked issues.
+- Inputs beyond the cases tried. A claim that the sources and tests support can still have exceptions.
 
 ## Inventory
 
