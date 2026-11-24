@@ -106,7 +106,7 @@ platform whose `char` is signed, such as x86 or Apple arm64, as SCID's name hash
 depends on it. Built on macOS, it links the system's Tcl 8.5.9, while SCID vs.
 PC 4.27 for macOS bundles Tcl 8.6.13. The two differ in how a search pattern
 counts characters above U+FFFF, such as emoji, so `search.pgn` has none, and
-the header search follows Tcl 8.6, as `HeaderSearch` documents.
+the header search follows Tcl 8.6.13, as `HeaderSearch` documents.
 `stored` was written from `stored.pgn` by `pgnscid -f stored.pgn stored`. Each
 game is a case of the stored-line code, named by its `Site` tag, and
 importing `stored.pgn` gives files byte-identical to it.

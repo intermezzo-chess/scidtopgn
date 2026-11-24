@@ -215,12 +215,12 @@ A reviewer audited `docs/COMPATIBILITY.md` at `ec9696c`, all 351 paragraphs, tab
 | F14 | Several tags on one line | [Known differences](COMPATIBILITY.md#known-differences-outside-these-cases) |
 | F15 | An unknown ECO code isn't stored | [Export and round trips](COMPATIBILITY.md#export-and-round-trips) |
 | F16 | Two test paths were wrong, and one test doesn't run SCID | [Tests](COMPATIBILITY.md#tests) |
-| F17 | A line feed in a name, and spaces and tabs at its ends, don't survive a round trip | [Export and round trips](COMPATIBILITY.md#export-and-round-trips), [#153](https://github.com/intermezzo-chess/scidtopgn/issues/153) |
+| F17 | A line feed in a name or other tag value, and spaces and tabs at a player name's ends, don't survive a round trip. A line feed in the last tag loses the whole game | [Export and round trips](COMPATIBILITY.md#export-and-round-trips), [#153](https://github.com/intermezzo-chess/scidtopgn/issues/153) |
 
 Not verified by either:
 
 - Ratings where `unsigned long` has 32 bits, such as on Windows. The document says so.
-- Which Tcl SCID vs. PC 4.27 for macOS bundles. The document no longer says.
+- Which Tcl SCID vs. PC 4.27 for macOS bundles. The document no longer says. How Tcl 8.6.13 and 8.6.0 match was read in their source, and 8.6.0's functions were run on their own, not in SCID.
 - SCID's GUI, two programs writing at once, power loss, and every way a file operation can fail.
 - What "Before #..." statements say about old versions, beyond the linked issues.
 - Inputs beyond the cases tried. A claim that the sources and tests support can still have exceptions.

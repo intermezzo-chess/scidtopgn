@@ -142,7 +142,7 @@ Each difference below is a decision, with its reason.
   - Replacing the files breaks hard links to them, and doesn't keep their owner, access control lists, or extended attributes. Writing changes to an existing database, and compacting it, keep their permissions. `import --overwrite` and `merge --overwrite` don't: the new files get default permissions, which can make a private database readable by others ([#151](https://github.com/intermezzo-chess/scidtopgn/issues/151)).
   - A killed process can leave a temporary directory beside the database: `.scidtopgn-compact-*` from writing changes to a database or compacting it, or `.scidtopgn-new-*` from `import` into a new database, `import --overwrite`, or `merge`. If it holds `old.*` files, they are the original files, and a database file can be missing: move them back to open the database as it was.
   - This doesn't protect against a power loss.
-- **Search patterns count Unicode characters.** In a header search pattern, `?` matches one Unicode character, as in Tcl 8.6. SCID built with Tcl 8.5 counts each byte of a character above U+FFFF, such as an emoji, as a character. scidtopgn follows the newer Tcl (`matches_patterns_as_tcl` in `crates/scidtopgn/src/search.rs`).
+- **Search patterns count Unicode characters.** In a header search pattern, `?` matches one Unicode character, as in Tcl 8.6.13. SCID built with Tcl 8.5 or an early 8.6, such as 8.6.0, counts each byte of a character above U+FFFF, such as an emoji, as a character. scidtopgn follows Tcl 8.6.13 (`matches_patterns_as_tcl` in `crates/scidtopgn/src/search.rs`).
 - **Variation limits** ([#4](https://github.com/intermezzo-chess/scidtopgn/issues/4)). A game with variations nested more than 100 levels deep, or with more than 255 variations of one move, is rejected, whether it is read from PGN or from a database, so that deep nesting can't overflow the stack. SCID has no limit on nesting, and counts a move's variations modulo 256. See [General differences](#general-differences).
 
 ## Limits shared with SCID
@@ -524,7 +524,7 @@ The first rating tag with a rating sets the player's rating and its kind. Later 
 | Text after the digits, or whitespace and `+` before them | `"2100x"`, `" +2400"` | 2100, 2400 | 2100, 2400 | Same |
 | A rating above 4,000 | `[BlackICCF "4001"]`, `A (4500)` | 4,000, and logs `rating too large` | 4,000, with a warning | Same |
 | A negative rating | `[WhiteElo "-5"]` | 4,000, and logs `rating too large` | No rating | **Differs** |
-| A rating of 2³² or more, below 2⁶⁴ | `[WhiteElo "4294967297"]` | The value's remainder after dividing by 2³², here 1, without a message, where `unsigned long` has 64 bits | 4,000, with a warning | **Differs** |
+| A rating of 2³² or more | `[WhiteElo "4294967297"]` | Wraps around, here to 1 without a message, where `unsigned long` has 64 bits. Below | 4,000, with a warning | **Differs** |
 
 **Dutch name prefixes.** *What changes:* a name starting with `van`, `Van Der`, `Van Den`, or `Van De` keeps its capital letters as written. *Why:* SCID's `standardDutchName` writes these prefixes as `Van der`, `Van den`, and `Van de`, so that one player isn't stored under several spellings. The PGN standard doesn't ask for it, and it changes how the file spells the name, so `scidtopgn` doesn't do it.
 
@@ -534,7 +534,26 @@ The first rating tag with a rating sets the player's rating and its kind. Later 
 
 **A rating tag after a rating in the name, and a rating tag before `(0000)` in the name.** *What changes:* the rating tag kept as an ordinary tag isn't exported. *Why:* SCID exports it. After a rating in the name, that gives the game two `WhiteElo` tags, which the PGN standard doesn't allow. When `(0000)` has cleared the rating, reading the export back makes the tag the player's rating. The tag is still stored with the game.
 
-**A negative rating, and a rating of 2³² or more, below 2⁶⁴.** *What changes:* a negative rating is no rating, and a rating of 2³² or more is 4,000. *Why:* SCID reads the value with `strtoul` and keeps its low 32 bits. A negative value is taken modulo 2³², so `-5` is above 4 billion and stored as 4,000, but `-4294967295` is 1, and `-4294967296` is 0, no rating. A value of 2³² or more, below 2⁶⁴, becomes its remainder. From 2⁶⁴ on, `strtoul` gives its largest value, which SCID stores as 4,000, as `scidtopgn` does. These were checked on macOS, where `unsigned long` has 64 bits. Where it has 32, as on Windows, `strtoul` gives its largest value from 2³² on, so SCID would store 4,000 there too; this wasn't run. `scidtopgn` reads a negative value as no rating, and any value above 4,000 as 4,000.
+**A negative rating, and a rating of 2³² or more.** *What changes:* a negative rating is no rating, and a rating of 2³² or more is 4,000, with a warning. *Why:* SCID takes these steps:
+
+1. `strtoul` reads the value as an `unsigned long`. A value too large for it, with or without a `-`, gives its largest number. Otherwise a `-` makes it wrap around.
+2. Its low 32 bits are kept.
+3. 0 is no rating, and more than 4,000 is stored as 4,000, with `rating too large` in the log.
+
+With a 64-bit `unsigned long`, as on macOS, where these were run:
+
+| Value | Low 32 bits | Stored |
+| --- | --- | --- |
+| `-5` | 4,294,967,291 | 4,000, logged |
+| `-4294967295` | 1 | 1 |
+| `-4294967296` | 0 | No rating |
+| `-18446744073709551616` (too large) | 4,294,967,295 | 4,000, logged |
+| `4294967296` (2³²) | 0 | No rating |
+| `4294967297` | 1 | 1 |
+| `4294971297` | 4,001 | 4,000, logged |
+| `18446744073709551616` (2⁶⁴, too large) | 4,294,967,295 | 4,000, logged |
+
+Where `unsigned long` has 32 bits, as on Windows, every value from 2³² on is too large, so SCID would store 4,000. This wasn't run. `scidtopgn` reads a negative value as no rating, and any value above 4,000 as 4,000.
 
 ### Known differences outside these cases
 
@@ -560,7 +579,7 @@ The cases above compare how a game is imported and stored. Exporting the stored 
 - **A rating tag kept as an ordinary tag** isn't exported when it has the same name as the player's rating tag, such as a second `WhiteElo`, or when the player has no rating (#43). See [Player names and ratings](#player-names-and-ratings).
 - **Tags after a game's 40th** are dropped on import, without a warning ([#155](https://github.com/intermezzo-chess/scidtopgn/issues/155)). See [Limits shared with SCID](#limits-shared-with-scid).
 - **A comment that contains `}`**, which text before a game can give and SCID databases can hold, is exported as it is, so the comment ends there when the export is read. The rest is skipped with a warning, or read as moves or a result, which can change the game ([#152](https://github.com/intermezzo-chess/scidtopgn/issues/152)). SCID's export has the same text.
-- **A name or other tag value with a line feed**, which PGN can't give but a database can hold, is exported over two lines. Reading the export skips the game's tags up to there, and reads the rest as a game without them ([#153](https://github.com/intermezzo-chess/scidtopgn/issues/153)).
+- **A name or other tag value with a line feed**, which PGN can't give but a database can hold, is exported over two lines. Reading the export skips the game up to the next tag line, and reads the rest as a game without what was skipped, such as its players or result. If none of its tag lines follows, as when the value is the last tag's, **the whole game is lost** ([#153](https://github.com/intermezzo-chess/scidtopgn/issues/153)).
 - **Spaces at either end of a player name, and tabs at its end**, which PGN can't give but a database can hold, are dropped when the export is imported, by the [tidying of player names](#player-names-and-ratings).
 - **Some dates with unknown parts** are stored in full but exported wrongly, and event dates too. With an unknown year, an unknown month or day is written as `00`. With a known year and an unknown month, a known day is written as `??` and lost. SCID writes `??` for each unknown part and keeps the known ones ([#154](https://github.com/intermezzo-chess/scidtopgn/issues/154)).
 - **An ECO code that SCID doesn't know**, such as `BAD`, isn't stored, as in SCID. A game that was parsed and not stored still exports it.
@@ -573,7 +592,7 @@ The moves themselves are exported as canonical SAN, so `ed` comes back as `exd5`
 - It writes some NAGs as symbols ([below](#how-nags-are-exported-34)), where the standard allows only `$n`.
 - It writes the tags after the seven standard ones in an order of its own, such as ratings and ECO before other tags, where the standard sorts them by name.
 
-Both are valid PGN that import reads back.
+Import reads both back. The standard allows tags in any order on import. Symbols other than `!`, `?`, `!!`, `??`, `!?`, and `?!`, such as `+=`, are extensions that SCID and `scidtopgn` read, and other programs may not.
 
 For example, importing and exporting
 
