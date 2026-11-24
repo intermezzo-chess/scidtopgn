@@ -82,7 +82,7 @@ foreach flag {D W B M E N P T K Q ! ? U 1 2 3 4 5 6} { sc_game flag $flag [incr 
 sc_base close $base
 ```
 
-`frequency` is a database of 8,388,607 games of player A against themselves, which [`format_probe_frequency.py`](../scid-cpp/tools/format_probe_frequency.py) writes. SCID opens it, and saves one more such game, with a frequency of 16,777,216. Opening the result then crashes SCID, with and without `-fast`. Importing `self.pgn` onto the first database with scidtopgn writes the same name file:
+`frequency` is a database of 8,388,607 games of player A against themselves, which [`format_probe_frequency.py`](../scid-cpp/tools/format_probe_frequency.py) writes. SCID opens it, and saves one more such game, with a frequency of 16,777,216. Opening the result then crashes SCID, with and without `-fast`. Importing `self.pgn` onto the first database with scidtopgn writes the same name file. Importing 32,769 copies of `self.pgn` instead, with `sc_base import` or scidtopgn, gives a database that both open, whose player has the frequency 65,536:
 
 ```sh
 printf '[Event "E"]\n[Site "S"]\n[White "A"]\n[Black "A"]\n[Round "1"]\n\n1. e4 *\n' > self.pgn
@@ -267,6 +267,8 @@ At `81b5721`, the reviewer checked the corrections above. Each finding was repro
 | T5 | A frequency of 2²⁴ can be reached with a database | [SN4](SN4_FORMAT.md#header-sections-ids-and-frequencies), [Append](COMPATIBILITY.md#append). scidtopgn writes the same file, which was found while reproducing this |
 
 `README.md`, `CONTRIBUTING.md`, and doc comments made the claims about older versions of SCID and about SCID vs. PC 4.27 that had been removed from `COMPATIBILITY.md`. They are removed there too.
+
+At `8724c38`, the reviewer found these resolved, and one more: a frequency above 16,777,215 doesn't always make the file unreadable (T5). It was reproduced and corrected.
 
 ### Not verified
 
