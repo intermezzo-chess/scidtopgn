@@ -274,9 +274,37 @@ class MainLine:
                 self.half_moves % 1024, h(data))
 
 
+class Node:
+    """A move, or the start of a line."""
+
+    def __init__(self, text=None):
+        self.text, self.nags, self.comment, self.variations = text, [], None, []
+
+
+def nodes(line):
+    """The nodes of a line, each before its variations: the order of comments."""
+    for node in line:
+        yield node
+        for variation in node.variations:
+            yield from nodes(variation)
+
+
+def show(line, out):
+    for node in line:
+        if node.text:
+            out.append(node.text)
+            out.extend(f"${n}" for n in node.nags)
+        if node.comment is not None:
+            out.append("{" + h(node.comment) + "}")
+        for variation in node.variations:
+            out.append("(")
+            show(variation, out)
+            out.append(")")
+
+
 def read_game(record):
     r = Reader(record)
-    out, comments, totals = [], [], [0, 0, 0]
+    out = []
     while code := r.uint(1):
         if code == 255:
             out.append(f"eventdate={date(r.uint(3))}")
@@ -286,29 +314,24 @@ def read_game(record):
         tag = TAGS[code - 241].encode() if code > 240 else r.take(code)
         out.append(f"[{h(tag)} {h(r.take(r.uint(1)))}]")
     flags = r.uint(1)
-    out.append(f"flags={flags}")
+    out.append(f"flags={flags & 7}")
     position = Position()
     if flags & 1:
         fen = r.zstring()
         out.append(f"fen={h(fen)}")
         position = Position(fen)
 
-    def line(position, depth):
-        before = None
+    def read_line(position, depth):
+        before, line = None, [Node()]
         while (b := r.uint(1)) not in (14, 15):
             if b == 11:
-                out.append(f"${r.uint(1)}")
-                totals[2] += 1
+                line[-1].nags.append(r.uint(1))
             elif b == 12:
-                comments.append(len(out))
-                out.append(None)
+                line[-1].comment = b""
             elif b == 13:
                 if before is None:
                     raise Corrupt("variation before a move")
-                out.append("(")
-                totals[0] += 1
-                line(before.copy(), depth + 1)
-                out.append(")")
+                line[-1].variations.append(read_line(before.copy(), depth + 1))
             else:
                 move = position.decode(r, b)
                 before = position.copy()
@@ -316,18 +339,23 @@ def read_game(record):
                 if depth == 0:
                     main.add(position, move[2])
                 text = "null" if move[0] == move[1] else f"{move[0]}-{move[1]}"
-                out.append(text + (f"={move[2]}" if move[2] else ""))
+                line.append(Node(text + (f"={move[2]}" if move[2] else "")))
         if b != (14 if depth else 15):
             raise Corrupt("end marker")
+        return line
 
     main = MainLine(flags & 1)
-    line(position, 0)
+    line = read_line(position, 0)
     main.end(position)
-    totals[1] = len(comments)
-    for i in comments:
-        out[i] = "{" + h(r.zstring()) + "}"
+    for node in nodes(line):
+        if node.comment is not None:
+            node.comment = r.zstring()
     if r.pos != len(record):
         raise Corrupt("bytes after the last comment")
+    show(line, out)
+    tree = list(nodes(line))
+    totals = [sum(len(n.variations) for n in tree), sum(n.comment is not None for n in tree),
+              sum(len(n.nags) for n in tree if n.text)]
     return f"end={r.pos} " + " ".join(out), main.fields(totals)
 
 

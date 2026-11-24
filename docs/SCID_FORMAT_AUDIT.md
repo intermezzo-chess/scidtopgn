@@ -117,7 +117,7 @@ In `blocks.sg4`, the padding after the records of blocks 0 to 3 is all zeros.
 
 ### Results: damaged files
 
-SCID's error numbers are from `error.h`: 109 and 110 are versions, 152 is corrupt, 402 and 406 are decoding errors, and 602 is reading past the end. "Reads" means that SCID decodes the game.
+SCID's error numbers are from `error.h`: 109 and 110 are versions, 152 is corrupt, 402 and 406 are decoding errors, and 602 is reading past the end. "Reads" means that SCID decodes the game. The two programs print the same for `e4`, `d4`, `compactdate`, `flags8`, `emptyvar`, `nagfirst`, `nagafter`, and the three with comments that SCID reads, whose entries fit their games.
 
 | Database | What is wrong | SCID 4.26 | scidtopgn `validate` |
 | --- | --- | --- | --- |
@@ -144,6 +144,9 @@ SCID's error numbers are from `error.h`: 109 and 110 are versions, 152 is corrup
 | `nag9` | 9 NAGs | Reads the first 7 | No damage |
 | `twocomments` | Two markers, one text | Reads one comment | No damage |
 | `commentafter` | Marker after a variation | Reads | No damage |
+| `commentorder` | Markers in another order than the tree | Reads the texts in the tree's order | No damage |
+| `nagafter` | NAG after a variation | Reads it as the move's | No damage |
+| `nagfirst` | NAG before the first move | Reads without it | No damage |
 | `nocomment` | Marker without text | Error 602 | Damaged |
 | `varfirst` | Variation before a move | Error 402 | Damaged |
 | `emptyvar` | Variation without moves | Reads | No damage |

@@ -227,13 +227,13 @@ These bytes are king values that aren't moves, so they can't be confused with on
 
 | Byte | Meaning | What follows |
 | --- | --- | --- |
-| 11 `0b` | NAG of the move before it | The NAG, 1 byte |
-| 12 `0c` | The move before it has a comment, or the line does if no move comes before it | Nothing: the text is after the moves |
+| 11 `0b` | NAG of the line's last move before it | The NAG, 1 byte |
+| 12 `0c` | The line's last move before it has a comment, or the line's start does if no move comes before it | Nothing: the text is after the moves |
 | 13 `0d` | A variation starts | Its moves, ending with 14 |
 | 14 `0e` | The variation ends | The next variation, or the line it belongs to |
 | 15 `0f` | The game ends | The comments |
 
-A move is followed by its NAGs, then its comment marker, then its variations, and then the next move of its line. A variation replaces **the move it follows**. Variations can have variations, and one can be empty of moves.
+SCID writes a move, its NAGs, its comment marker, its variations, and then the next move of its line. A variation replaces **the move it follows**. Variations can have variations, and one can be empty of moves.
 
 ```text
                   ┌────────────── 2. Nf3 ──────────────┐
@@ -246,7 +246,18 @@ That is `tests/data/edge.sg4` from offset 2.
 
 **NAGs.** A NAG is 1 to 255. What each means isn't part of the format; 1 to 6 are `!`, `?`, `!!`, `??`, `!?`, and `?!`.
 
-**Comments** follow the end of the game, each ending with a NUL, in the order of their markers. A marker's text is the comment of the move before it; before the first move of a line, it is the comment before that move. No encoding is recorded, and SCID vs. PC writes the UTF-8 it converts PGN to.
+**Comments** follow the end of the game, each ending with a NUL. There is one text for each move, or start of a line, that has at least one marker. A marker before the first move of a line is for the start of that line, and its text is the comment before the line's first move. No encoding is recorded, and SCID vs. PC writes the UTF-8 it converts PGN to.
+
+The texts are in the order of the game's tree, not of the markers in the bytes: the start of a line, then each of its moves in turn, and after each move its variations, each in the same way. A writer that puts a move's marker before its variations, as SCID does, gives the two the same order. A reader has to use the tree, because SCID also reads a marker after the variations, as for this record:
+
+```text
+00 00                           no tags, flags
+cf                              1. e4
+   0d bf 0c 0e                  (1. d4, with a marker)
+0c                              a marker for 1. e4, after its variation
+0f
+"main" 00 "variation" 00        1. e4 {main} (1. d4 {variation})
+```
 
 `tests/data/annotated.sg4`, offset 0:
 
@@ -278,8 +289,8 @@ read_line(position, depth):
         if b == 15 and depth == 0: return          the game ends
         if b == 14 and depth > 0: return           the variation ends
         if b == 14 or b == 15: fail
-        if b == 11: add NAG read_uint(1) to the last move
-        else if b == 12: note that the last move, or the line, has a comment
+        if b == 11: add NAG read_uint(1) to the last move of this line, if any
+        else if b == 12: note that the last move of this line, or its start, has a comment
         else if b == 13:
             if before is none: fail                a variation replaces a move
             read_line(copy of before, depth + 1)
@@ -287,15 +298,20 @@ read_line(position, depth):
             before = copy of position
             play the move that starts with b on position
 
-after the outermost read_line: for each comment noted, in order, read its text up to a NUL
+after the outermost read_line: read_comments(the main line)
+
+read_comments(line):
+    for the start of the line, then each move of it in order:
+        if it was noted as having a comment, once or more: read a text up to a NUL
+        for each variation of the move, in order: read_comments(the variation)
 ```
 
-**SCID's behavior.** SCID keeps a move's first 7 NAGs that aren't 0 and ignores the rest. Two comment markers for one move have one text. A marker after a move's variations belongs to that move, and its text then comes before theirs; SCID doesn't write one. SCID counts a move's variations in 1 byte, so it can hold 255.
+**SCID's behavior.** SCID keeps a move's first 7 NAGs that aren't 0 and ignores the rest. It drops a NAG before a line's first move. It writes a move's NAGs and at most one marker before the move's variations, but reads them after the variations too, and reads repeated markers as one. SCID counts a move's variations in 1 byte, so it can hold 255.
 
 | Rule | SCID vs. PC 4.26 | Evidence | scidtopgn |
 | --- | --- | --- | --- |
 | Markers | [`ENCODE_NAG`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4460) | Every probe game | [`ENCODE_NAG`](../crates/scidtopgn/src/mov.rs) |
 | Structure | [`encodeVariation`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4564), [`Game::DecodeVariation`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4617) | Probes `random`, `comments`, `varfirst`, `emptyvar`, `endvar`, `noend` | [`encode_moves`](../crates/scidtopgn/src/database.rs), [`decode_variation`](../crates/scidtopgn/src/game.rs). Differs: [variation limits](COMPATIBILITY.md#deliberate-differences) |
-| NAG limit | [`Game::AddNag`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.h#l560), [`MAX_NAGS`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.h#l132) | Probes `nag0`, `nag9`, `comments` | [`add_nag`](../crates/scidtopgn/src/game.rs) |
-| Comments | [`encodeComments`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4802), [`decodeComments`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4831) | Probes `comments`, `annotated`, `twocomments`, `commentafter`, `nocomment` | [`encode_comments`](../crates/scidtopgn/src/database.rs), [`decode_comments_recursive`](../crates/scidtopgn/src/game.rs) |
+| NAG limit | [`Game::AddNag`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.h#l560), [`MAX_NAGS`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.h#l132) | Probes `nag0`, `nag9`, `nagfirst`, `nagafter`, `comments` | [`add_nag`](../crates/scidtopgn/src/game.rs) |
+| Comments | [`encodeComments`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4802), [`decodeComments`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4831) | Probes `comments`, `annotated`, `twocomments`, `commentafter`, `commentorder`, `nocomment` | [`encode_comments`](../crates/scidtopgn/src/database.rs), [`decode_comments_recursive`](../crates/scidtopgn/src/game.rs) |
 | Variations of one move | [`numVariations`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.h#l147) | Source only | [Refused above 255](COMPATIBILITY.md#general-differences) |
