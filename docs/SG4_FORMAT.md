@@ -75,7 +75,7 @@ f7               2c "accelerated fianchetto, Gurgenidze variation"
 00                                end of the tags, at 0x7e
 ```
 
-**SCID's behavior.** In SCID 4.26, reading a tag with a value of 255 bytes overruns a buffer. What happens is undefined: in the build the probe used, the tag's name was lost. Values up to 254 bytes are safe. Decoding a spare code (251 to 254) with tags stored crashes SCID. Skipping tags, as its searches do, handles both. SCID keeps at most 40 tags.
+**SCID's behavior.** In SCID 4.26, reading a tag with a value of 255 bytes overruns a buffer. What happens is undefined: in the build the probe used, the tag's name was lost. Values up to 254 bytes are safe. Decoding a spare code (251 to 254) with tags stored crashes SCID. SCID holds 40 tags, and checks this only with an assertion, which its normal build leaves out: reading a record with 41 tags, or importing a game with 41, crashed the builds the probe used. Skipping tags, as its searches do, handles all three.
 
 ### Flags and starting position
 
@@ -97,7 +97,7 @@ If bit 0 is set, a FEN follows, ending with a NUL. SCID writes all six fields, a
 | Tags | [`encodeTags`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4694), [`Game::DecodeTags`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4729), [`skipTags`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4774), [`commonTags`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4668) | Probes `tags`, `random`, `compactdate` | [`encode_tags`](../crates/scidtopgn/src/database.rs), [`decode_tags`](../crates/scidtopgn/src/game.rs) |
 | 255-byte value | [`value`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4733) | Probe `tag255` | Differs: [reads it](COMPATIBILITY.md#files-scid-refuses-or-misreads) |
 | Spare codes | [`AddPgnTag`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4753) | Probe `spare` | Differs: [drops the value](COMPATIBILITY.md#files-scid-refuses-or-misreads) |
-| Most tags | [`MAX_TAGS`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.h#l105), checked only by an assertion | Source only | No such limit |
+| Most tags | [`MAX_TAGS`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.h#l105), [`Game::AddPgnTag`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l763) | Probes `tags40`, `tags41`, `manytags` | [`add_tag`](../crates/scidtopgn/src/game.rs). Differs: [keeps the first 40](COMPATIBILITY.md#files-scid-refuses-or-misreads) |
 | Flags and FEN | [`flags`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4879), [`gflags`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l5113), [`Position::PrintFEN`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/position.cpp#l3013), [`Position::ReadFromFEN`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/position.cpp#l2850) | Probes `random`, `edge`, `flags8` | [`record_flags`](../crates/scidtopgn/src/database.rs), [`decode_start_position`](../crates/scidtopgn/src/game.rs). Differs: [FEN fields that don't fit the position are dropped](COMPATIBILITY.md#results-and-the-start-position) |
 
 ## Piece numbering and position tracking

@@ -85,7 +85,7 @@ It was run on macOS on Apple silicon.
 
 `fixtures` is the 13 databases in `tests/data`. On all of them the two programs print the same.
 
-Of the 37 databases `pgnscid` and `tcscid` 4.26 wrote, they print the same for 33, which have 198,520 games:
+Of the 39 databases `pgnscid` and `tcscid` 4.26 wrote, or tried to, they print the same for 34, which have 198,521 games:
 
 | Database | What it checks | Games |
 | --- | --- | --- |
@@ -96,7 +96,7 @@ Of the 37 databases `pgnscid` and `tcscid` 4.26 wrote, they print the same for 3
 | `ratings` | Rating types, 3,999 to 4,096, ECO codes | 23 |
 | `counts` | 0 to 55 variations, comments, and NAGs | 56 |
 | `moves` | 0, 1, 255, 256, 1,023, 1,024, 1,025, and 2,049 half-moves | 8 |
-| `comments`, `tags` | Places for comments and NAGs; tags to 254 bytes | 12 |
+| `comments`, `tags`, `tags40` | Places for comments and NAGs; tags to 254 bytes; 40 tags | 13 |
 | `blocks`, `size131071` | Records that fill blocks, and the longest | 10 |
 | `random` | Random legal games from the standard position (400) and 5 FENs (200), with variations, NAGs, and comments | 600 |
 | `flags`, `meta`, `empty` | User and custom flags, header fields, no games | 61 |
@@ -104,12 +104,13 @@ Of the 37 databases `pgnscid` and `tcscid` 4.26 wrote, they print the same for 3
 
 `format_probe.py` also derives each entry's start and promotion flags, counts, material, half-moves, and home pawns from its game, and they match in every one.
 
-The other four differ, as SCID itself misreads or can't write them:
+The other five differ, as SCID itself misreads or can't write them:
 
 | Database | Result |
 | --- | --- |
 | `notation` | Game 41 castles without a rook, which SCID writes as a [corrupt game](COMPATIBILITY.md#castling). The 40 before it match |
 | `tag255` | SCID overruns its buffer when it reads a tag value of 255 bytes, and loses the tag's name |
+| `tags41` | `pgnscid` crashes at the 41st tag |
 | `size131072` | SCID writes a record of 131,072 bytes with length 0, and can't read it |
 | `size131073` | `pgnscid` stops with "Fatal error encoding game!" |
 
@@ -136,6 +137,7 @@ SCID's error numbers are from `error.h`: 109 and 110 are versions, 152 is corrup
 | `zero` | Length 0 | Game corrupt (152) | Damaged |
 | `compactdate` | Event date with code 255 | Reads 2021.3.7 | No damage |
 | `spare` | Tag code 251 | Crashes | No damage |
+| `manytags` | 41 tags | Crashes | No damage |
 | `flags8` | Unused flag bits | Reads | No damage |
 | `e4`, `d4` | Nothing: 1. e4 and 1. d4 | Reads | No damage |
 | `knight15`, `queen` | Invalid value, invalid second byte | Error 406 | Damaged |
@@ -172,9 +174,10 @@ So the conflict doesn't affect them as evidence. No rule rests only on `one` or 
 ## Remaining uncertainties
 
 - **Versions.** Only SCID vs. PC 4.26 was checked. Other releases, the original SCID, and other index versions weren't.
-- **Source only.** These were read in SCID's source and not exercised: the most games, names, and tags; that SCID doesn't lower a maximum frequency and counts frequencies when it opens a database; that a NUL ends a name; lookups in a file with first bytes out of order; piece numbers above the count; more than 255 variations of a move.
-- **Undefined behavior.** What SCID does after the buffer overrun of `tag255` and with `spare` depends on the build.
+- **Source only.** These were read in SCID's source and not exercised: the most games and names; that SCID doesn't lower a maximum frequency and counts frequencies when it opens a database; that a NUL ends a name; lookups in a file with first bytes out of order; piece numbers above the count; more than 255 variations of a move.
+- **Undefined behavior.** What SCID does after the buffer overrun of `tag255`, with `spare`, and with more than 40 tags depends on the build.
 - **Base types** are numbers to the format. What SCID's interface calls them wasn't audited.
+- **`COMPATIBILITY.md`** wasn't audited here, apart from [Files SCID refuses or misreads](COMPATIBILITY.md#files-scid-refuses-or-misreads) and which SCID wrote the fixtures. A review of #148 found corrections it needs.
 - **Stored lines.** The codes' values come from a table in SCID's source, which the probes print but don't derive. `tests/data/stored` has 12 cases.
 - **Links** to SourceForge depend on that site. The tarball's SHA-256 identifies the source without it.
 

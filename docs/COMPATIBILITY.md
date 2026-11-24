@@ -60,6 +60,7 @@ scidtopgn reads some files that SCID vs. PC 4.26 doesn't, and the other way arou
 | A [record that crosses a block](SG4_FORMAT.md#blocks-offsets-and-record-boundaries) | Reports the game as corrupt | Reads it (`test_gfile_read_across_blocks` in `crates/scidtopgn/src/gfile.rs`) |
 | A tag with a [spare code](SG4_FORMAT.md#tags), 251 to 254 | Crashes when it decodes the tags | Drops the value (`test_decode_drops_spare_common_tags` in `crates/scidtopgn/src/game.rs`) |
 | A tag value of 255 bytes | Overruns a buffer. Values up to 254 bytes are safe | Reads and writes it (`test_tag_values_up_to_255_bytes_round_trip` in `crates/scidtopgn/src/tests/test_database.rs`) |
+| A record with more than 40 tags | Crashes when it decodes the tags | Keeps the first 40, without a warning. Import does the same, where `pgnscid` crashes |
 | Names out of [order](SN4_FORMAT.md#order), or the same name twice | Refuses to open the database, or can't look names up | Reads them. A write puts them in order, and [merges](#names-that-arent-utf-8) the same names |
 | An entry with a name ID that no name has | Refuses to open the database | Reads the name as `?` |
 | An illegal move that has a destination | Plays it as written | Refuses the game (`rejects_illegal_bytes` in `crates/scidtopgn/src/mov.rs`) |

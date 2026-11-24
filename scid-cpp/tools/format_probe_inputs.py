@@ -78,6 +78,9 @@ common = ["WhiteCountry", "BlackCountry", "Annotator", "PlyCount", "Opening", "V
 write("tags", [({t: t.lower() for t in common}, "1. e4"), ({"Custom": "v", "Empty": ""}, "1. e4"),
                ({"T" * 240: "v" * 254}, "1. e4"), ({"T" * 241: "v"}, "1. e4"),
                ({"SetUp": "1", "FEN": "8/8/8/3k4/8/8/4P3/4K2R w K - 5 40"}, "1. O-O Ke4")])
+# SCID holds 40 tags, and pgnscid crashes at the 41st.
+for n in (40, 41):
+    write(f"tags{n}", [({f"Extra{i:02}": "v" for i in range(n)}, "1. e4")])
 # SCID writes a 255-byte tag value, but overruns its buffer when it reads one.
 write("tag255", [({"Custom": "v" * 255}, "1. e4")])
 

@@ -76,7 +76,7 @@ SCID can also keep a `.stc` file, a cache of its opening tree, which isn't neede
 | Record offset | 4,294,967,295 | 4 bytes |
 | Tag name | 240 bytes | [Higher bytes are codes](SG4_FORMAT.md#tags) |
 | Tag value | 255 bytes | 1-byte length. SCID 4.26 [can't read 255 safely](SG4_FORMAT.md#tags) |
-| Tags of a game | 40 | SCID's limit |
+| Tags of a game | 40 | SCID's limit: 4.26 [crashes above it](SG4_FORMAT.md#tags). The record can have more |
 | Year | 2047 | 11 bits |
 | Event date | 3 years from the game's year | [3 bits](SI4_FORMAT.md#dates-and-event-dates) |
 | Rating | 4,000 | SCID's limit. 12 bits hold 4,095 |

@@ -70,6 +70,7 @@ record("zero", b"")
 E4 = b"\0\0\xcf"
 date = (2021 << 9 | 3 << 5 | 7).to_bytes(3, "big")
 game("compactdate", b"\xff" + date + E4 + b"\x0f")
+game("manytags", b"".join(b"\3T%02d\1v" % i for i in range(41)) + E4 + b"\x0f")
 record("spare", b"\xfb\1x" + E4 + b"\x0f")
 game("flags8", b"\0\xf8\xcf\x0f")
 game("e4", E4 + b"\x0f")
