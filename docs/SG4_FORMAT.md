@@ -61,7 +61,7 @@ Each tag starts with a byte that is also its name's length or code:
 | 244 `f4` | `PlyCount` | | 249 `f9` | `Source` |
 | 245 `f5` | `EventDate`, as text | | 250 `fa` | `SetUp` |
 
-A value is 0 to 255 bytes. Names and values aren't terminated, and no encoding is recorded. When SCID imports PGN, what the index holds isn't stored as a tag: the names, the date, the result, the ECO code, the event date, and each player's rating. A second rating tag of a player is stored as a tag, such as a `WhiteElo` after a `WhiteUSCF` ([Player names and ratings](COMPATIBILITY.md#player-names-and-ratings)), as is any other tag, apart from `FEN`, `ScidFlags`, and, with `pgnscid`, `PlyCount`.
+A value is 0 to 255 bytes. Names and values aren't terminated, and no encoding is recorded. When SCID imports PGN, what the index holds isn't stored as a tag: the names, the date, the result, the ECO code, the event date, and each player's rating. Once a player has a rating other than 0, a further rating tag of theirs is stored as a tag, such as a `WhiteElo` after a `WhiteUSCF` ([`GetWhiteElo`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnparse.cpp#l457), [Player names and ratings](COMPATIBILITY.md#player-names-and-ratings)), as is any other tag, apart from `FEN`, `ScidFlags`, and, with `pgnscid`, `PlyCount`.
 
 `tests/data/one.sg4`, offset 0:
 
@@ -75,7 +75,7 @@ f7               2c "accelerated fianchetto, Gurgenidze variation"
 00                                end of the tags, at 0x7e
 ```
 
-**SCID's behavior.** In SCID 4.26, reading a tag with a value of 255 bytes overruns a buffer. What happens is undefined: in the build the probe used, the tag's name was lost. Values up to 254 bytes are safe. SCID writes a longer value with a length that has wrapped around, so the record can't be read. Its importers drop a value longer than 255 bytes before converting it to UTF-8, which can make it longer: from 200 Latin-1 `é`s, `pgnscid` wrote such a record. Decoding a spare code (251 to 254) with tags stored crashes SCID. SCID holds 40 tags, and checks this only with an assertion, which its normal build leaves out: reading a record with 41 tags, or importing a game with 41, crashed the builds the probe used. Skipping tags, as its searches do, handles all three.
+**SCID's behavior.** In SCID 4.26, reading a tag with a value of 255 bytes overruns a buffer. What happens is undefined: in the build the probe used, the tag's name was lost. Values up to 254 bytes are safe. SCID writes a longer value with a length that has wrapped around, and all its bytes. The bytes past that length are then read as more tags, so decoding fails, or succeeds with other tags. Its importers drop a value longer than 255 bytes before converting it to UTF-8, which can make it longer: from 200 Latin-1 `é`s, `pgnscid` wrote a record that SCID can't decode, and from another 254 bytes, which became 256, one that it decodes with an empty value and a tag that wasn't in the PGN. Decoding a spare code (251 to 254) with tags stored crashes SCID. SCID holds 40 tags, and checks this only with an assertion, which its normal build leaves out: reading a record with 41 tags, or importing a game with 41, crashed the builds the probe used. Skipping tags, as its searches do, handles all three.
 
 ### Flags and starting position
 

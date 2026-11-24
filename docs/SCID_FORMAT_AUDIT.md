@@ -82,7 +82,20 @@ foreach flag {D W B M E N P T K Q ! ? U 1 2 3 4 5 6} { sc_game flag $flag [incr 
 sc_base close $base
 ```
 
-It was run on macOS on Apple silicon.
+`frequency` is a database of 8,388,607 games of player A against themselves, which [`format_probe_frequency.py`](../scid-cpp/tools/format_probe_frequency.py) writes. SCID opens it, and saves one more such game, with a frequency of 16,777,216. Opening the result then crashes SCID, with and without `-fast`. Importing `self.pgn` onto the first database with scidtopgn writes the same name file:
+
+```sh
+printf '[Event "E"]\n[Site "S"]\n[White "A"]\n[Black "A"]\n[Round "1"]\n\n1. e4 *\n' > self.pgn
+$V/bin/pgnscid -f self.pgn self
+python3 -I scid-cpp/tools/format_probe_frequency.py self frequency
+printf 'sc_base open frequency\nsc_game load 1\nputs [sc_game save 0]\nsc_base close\nexit 0\n' > save.tcl
+printf 'puts [sc_base open frequency]\nexit 0\n' > open.tcl
+$V/bin/tcscid open.tcl    # opens
+$V/bin/tcscid save.tcl    # saves
+$V/bin/tcscid open.tcl    # crashes
+```
+
+The probes were run on macOS on Apple silicon.
 
 ### Results: databases SCID wrote
 
@@ -178,7 +191,7 @@ So the conflict doesn't affect them as evidence. No rule rests only on `one` or 
 ## Remaining uncertainties
 
 - **Versions.** Only SCID vs. PC 4.26 was checked. Other releases, the original SCID, and other index versions weren't.
-- **Component runs.** The most games and names, and a frequency of 2²⁴, were tried by calling SCID's code (`limits`), not with a database of that size. Whether `pgnscid` can reach that frequency wasn't tried.
+- **Component runs.** The most games and names were tried by calling SCID's code (`limits`), not with a database of that size. A frequency of 2²⁴ was tried both ways, but not by importing that many games with `pgnscid`.
 - **Undefined behavior.** What SCID does after the buffer overrun of `tag255`, with `spare`, and with more than 40 tags depends on the build.
 - **Base types** are numbers to the format. What SCID's interface calls them wasn't audited.
 - **`COMPATIBILITY.md`** was audited [separately](#audit-of-compatibilitymd), with its own uncertainties.
@@ -237,9 +250,23 @@ At `1e33e31`, the reviewer checked all five documents against 4.26's source and 
 | S9 | Citations that didn't establish the claim, and a claim about older versions of SCID | Citations added or replaced, and the claim removed |
 | S10 | A frequency of 2²⁴ wraps | [SN4](SN4_FORMAT.md#header-sections-ids-and-frequencies) |
 
-Reproducing them showed three more: `sc_base import` ignores text before games; neither importer skips a game with an error; and 4.26 writes a record it can't read when a tag value is over 255 bytes after conversion.
+Reproducing them showed three more: `sc_base import` ignores text before games; neither importer skips a game with an error; and 4.26 writes a wrapped length when a tag value is over 255 bytes after conversion.
 
 `COMPATIBILITY.md` had no links to SCID's source. It now links the code for each section's claims. The PGN tables' examples were run again with the unmodified 4.26 parser, which agreed with each, apart from S1. Its `pgnparse.cpp` differs from the copy in `scid-cpp/scid` only in which headers it includes, and `position.cpp` doesn't differ.
+
+### Third review
+
+At `81b5721`, the reviewer checked the corrections above. Each finding was reproduced before it was corrected.
+
+| | Finding | Correction |
+| --- | --- | --- |
+| T1 | A record with a wrapped tag length can decode, with other tags. An `Annotator` of 66 `A`s, `=`, 59 `a`s, and a Latin-1 `é`, twice, is 254 bytes, and 256 after conversion | [Tags](SG4_FORMAT.md#tags), [Tag and name lengths](COMPATIBILITY.md#general-differences) |
+| T2 | A further rating tag is stored as a tag only once the player's rating isn't 0. `[WhiteUSCF "0"]` and then `[WhiteElo "2400"]` stores no tag | [Tags](SG4_FORMAT.md#tags) |
+| T3 | The reference converter's copy doesn't replace `DoCharsetConversion`, but the detector and converter | [PGN import](COMPATIBILITY.md#pgn-import-compared-with-scid) |
+| T4 | Functions that read were cited for writing | [Reading](COMPATIBILITY.md#reading) |
+| T5 | A frequency of 2²⁴ can be reached with a database | [SN4](SN4_FORMAT.md#header-sections-ids-and-frequencies), [Append](COMPATIBILITY.md#append). scidtopgn writes the same file, which was found while reproducing this |
+
+`README.md`, `CONTRIBUTING.md`, and doc comments made the claims about older versions of SCID and about SCID vs. PC 4.27 that had been removed from `COMPATIBILITY.md`. They are removed there too.
 
 ### Not verified
 
