@@ -2,7 +2,7 @@
 
 A Rust library and CLI for converting between SCID vs. PC 4 databases (.si4/.sn4/.sg4) and PGN. Fast, accurate, and functional on Windows, Mac, and Linux.
 
-scidtopgn reads the databases SCID vs. PC writes, and writes or appends games so that SCID vs. PC still reads the database. It isn't a replacement for the SCID application. [docs/SCID_COMPATIBILITY.md](https://github.com/intermezzo-chess/scidtopgn/blob/main/docs/SCID_COMPATIBILITY.md) says what it is compatible with, what it keeps when it changes a database, and where it deliberately differs from SCID.
+scidtopgn reads the databases SCID vs. PC writes, and writes or appends games so that SCID vs. PC still reads the database. It isn't a replacement for the SCID application. [docs/COMPATIBILITY.md](https://github.com/intermezzo-chess/scidtopgn/blob/main/docs/COMPATIBILITY.md) says what it is compatible with, what it keeps when it changes a database, and where it deliberately differs from SCID.
 
 ![animation showing scidtopgn in the terminal](https://raw.githubusercontent.com/intermezzo-chess/scidtopgn/main/assets/scidtopgn.gif)
 
@@ -116,7 +116,7 @@ This has some limits:
 - A killed process can leave a directory named `.scidtopgn-compact-*` beside the database. If it holds no `old.*` files, it can be removed. If it does, which takes a kill during the few renames that swap the files in, or a failed rename that can't be undone, they are the original files, and a database file can be missing. Move them back over the database's files to open the database as it was.
 - This doesn't protect against a power loss, or other programs writing to the database at the same time.
 
-Import reads the same PGN notation as SCID, such as `0-0`, `ed` for `exd5`, `e2-e4`, or `N` for a novelty. Problems that don't stop a game from being imported, such as castling after the king has moved and returned, are printed as warnings. [docs/PGN_IMPORT.md](https://github.com/intermezzo-chess/scidtopgn/blob/main/docs/PGN_IMPORT.md) lists each notation and where `scidtopgn` differs from SCID.
+Import reads the same PGN notation as SCID, such as `0-0`, `ed` for `exd5`, `e2-e4`, or `N` for a novelty. Problems that don't stop a game from being imported, such as castling after the king has moved and returned, are printed as warnings. [docs/COMPATIBILITY.md](https://github.com/intermezzo-chess/scidtopgn/blob/main/docs/COMPATIBILITY.md#pgn-import-compared-with-scid) lists each notation and where `scidtopgn` differs from SCID.
 
 #### Import arguments
 

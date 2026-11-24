@@ -4,6 +4,8 @@
 
 It doesn't test SCID vs. PC's GUI, or any other version of SCID.
 
+This document describes the check itself. [COMPATIBILITY.md](COMPATIBILITY.md) says what scidtopgn is compatible with, and where it differs from SCID.
+
 ## Running it
 
 From the repository root:
@@ -73,7 +75,7 @@ SCID compares and hashes names as C `char`s, which are signed on x86 and Apple a
 
 The inputs are the PGN files of the fixtures in `tests/data`, `compat/data/names.pgn`, and an empty PGN made at run time. `controls.pgn` has names with control characters, as issue #142 records them: an event with a C0 control character and its clean spelling, a name that is only control characters, a tab inside a name, and a control character at the start or end of a name. `names.pgn` has names that aren't ASCII as players, events, sites, and rounds, ordered so that signed and unsigned bytes sort them differently. Its second game has a `;` comment line and a `%` escape line between its tags, and comments over several lines, with lines that start with `[`. None of these may end its tags or start a game when the check finds where games start. It is also the PGN every scenario appends, merges, and takes new games from.
 
-Two fixtures are left out, because scidtopgn imports them differently from SCID on purpose, as [PGN_IMPORT.md](PGN_IMPORT.md) describes: `notation.pgn` holds those cases, and `search.pgn` has the player `van der Wiel, John`, whose prefix SCID capitalizes.
+Two fixtures are left out, because scidtopgn imports them differently from SCID on purpose, as [COMPATIBILITY.md](COMPATIBILITY.md#pgn-import-compared-with-scid) describes: `notation.pgn` holds those cases, and `search.pgn` has the player `van der Wiel, John`, whose prefix SCID capitalizes.
 
 `latin1` and `mixed`, whose names aren't UTF-8, are run from their committed databases instead of their PGN, because `pgnscid` would convert their names. The reference converter that wrote them counts no names, so each is first repaired by SCID vs. PC (`sc_base fixCorrupted`), which recounts them and keeps their bytes.
 
@@ -108,7 +110,7 @@ The **SCID compatibility** job in `ci.yml` runs `compat/run` on `ubuntu-latest`,
 ## Changing the check
 
 - To support a new version of SCID vs. PC, change `version`, `url`, and `sha256` in `compat/build-scidvspc`, and the key of the source cache in `ci.yml`.
-- When scidtopgn imports a fixture differently from SCID on purpose, document it in [PGN_IMPORT.md](PGN_IMPORT.md) and leave the fixture out of `inputs` in `compat/run`, saying why.
+- When scidtopgn imports a fixture differently from SCID on purpose, document it in [COMPATIBILITY.md](COMPATIBILITY.md#pgn-import-compared-with-scid) and leave the fixture out of `inputs` in `compat/run`, saying why.
 
 ## History
 

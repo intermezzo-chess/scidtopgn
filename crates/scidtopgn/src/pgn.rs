@@ -6,7 +6,7 @@
 //! read in [`Game::warnings`].
 //!
 //! The parser reads the notations SCID reads, not only standard SAN.
-//! `docs/PGN_IMPORT.md` in the repository records where it differs from
+//! `docs/COMPATIBILITY.md` in the repository records where it differs from
 //! SCID, and why.
 
 use std::fmt;
@@ -27,7 +27,7 @@ use crate::Date;
 
 /// A problem in a PGN game that didn't stop the game from being read.
 ///
-/// `docs/PGN_IMPORT.md` lists the warnings and compares them with SCID. As
+/// `docs/COMPATIBILITY.md` lists the warnings and compares them with SCID. As
 /// for [`Error`](crate::Error), the text that `Display` writes can change in
 /// any release.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -45,7 +45,7 @@ dir=$(cd "$dir" && pwd)
 # counts, and why.
 explained=(
   # Caissabase 2022-12-24, in 488 files.
-  "4d550e51bec1155dafd899abebb330363b7fbc280eb09a624007b76fdbc16575 5 0 scidtopgn skips 5 Chess960 games, as PGN_IMPORT.md #32 says"
+  "4d550e51bec1155dafd899abebb330363b7fbc280eb09a624007b76fdbc16575 5 0 scidtopgn skips 5 Chess960 games, as COMPATIBILITY.md #32 says"
 )
 
 # --- Machine ----------------------------------------------------------------

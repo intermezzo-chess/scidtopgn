@@ -1,6 +1,6 @@
 // Prints how SCID's PGN parser reads each game in a PGN file: the parse
 // result, the game as SCID would store it, and the messages SCID logged for
-// it. docs/PGN_IMPORT.md compares this output with scidtopgn's behavior.
+// it. docs/COMPATIBILITY.md compares this output with scidtopgn's behavior.
 //
 // Build and run from the repository root:
 //
