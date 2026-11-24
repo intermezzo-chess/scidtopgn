@@ -61,7 +61,7 @@ Each tag starts with a byte that is also its name's length or code:
 | 244 `f4` | `PlyCount` | | 249 `f9` | `Source` |
 | 245 `f5` | `EventDate`, as text | | 250 `fa` | `SetUp` |
 
-A value is 0 to 255 bytes. Names and values aren't terminated, and no encoding is recorded. What the index holds, such as the names, the date, the result, the ratings, the ECO code, and the event date, isn't stored as a tag when SCID imports PGN.
+A value is 0 to 255 bytes. Names and values aren't terminated, and no encoding is recorded. When SCID imports PGN, what the index holds isn't stored as a tag: the names, the date, the result, the ECO code, the event date, and each player's rating. A second rating tag of a player is stored as a tag, such as a `WhiteElo` after a `WhiteUSCF` ([Player names and ratings](COMPATIBILITY.md#player-names-and-ratings)), as is any other tag, apart from `FEN`, `ScidFlags`, and, with `pgnscid`, `PlyCount`.
 
 `tests/data/one.sg4`, offset 0:
 
@@ -75,7 +75,7 @@ f7               2c "accelerated fianchetto, Gurgenidze variation"
 00                                end of the tags, at 0x7e
 ```
 
-**SCID's behavior.** In SCID 4.26, reading a tag with a value of 255 bytes overruns a buffer. What happens is undefined: in the build the probe used, the tag's name was lost. Values up to 254 bytes are safe. Decoding a spare code (251 to 254) with tags stored crashes SCID. SCID holds 40 tags, and checks this only with an assertion, which its normal build leaves out: reading a record with 41 tags, or importing a game with 41, crashed the builds the probe used. Skipping tags, as its searches do, handles all three.
+**SCID's behavior.** In SCID 4.26, reading a tag with a value of 255 bytes overruns a buffer. What happens is undefined: in the build the probe used, the tag's name was lost. Values up to 254 bytes are safe. SCID writes a longer value with a length that has wrapped around, so the record can't be read. Its importers drop a value longer than 255 bytes before converting it to UTF-8, which can make it longer: from 200 Latin-1 `é`s, `pgnscid` wrote such a record. Decoding a spare code (251 to 254) with tags stored crashes SCID. SCID holds 40 tags, and checks this only with an assertion, which its normal build leaves out: reading a record with 41 tags, or importing a game with 41, crashed the builds the probe used. Skipping tags, as its searches do, handles all three.
 
 ### Flags and starting position
 
@@ -94,6 +94,7 @@ If bit 0 is set, a FEN follows, ending with a NUL. SCID writes all six fields, a
 | Rule | SCID vs. PC 4.26 | Evidence | scidtopgn |
 | --- | --- | --- | --- |
 | Record parts | [`Game::Encode`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4868), [`Game::Decode`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l5097) | Every probe game | [`encode_game`](../crates/scidtopgn/src/database.rs), [`decode`](../crates/scidtopgn/src/game.rs) |
+| Which tags are stored | [`PgnParser::ExtractPgnTag`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnparse.cpp#l312), [`AddIgnoredTag`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnscid.cpp#l188) | `pgnscid` and `sc_base import` run on such tags | Differs: [`ScidFlags`, `PlyCount`](COMPATIBILITY.md#known-differences-outside-these-cases) |
 | Tags | [`encodeTags`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4694), [`Game::DecodeTags`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4729), [`skipTags`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4774), [`commonTags`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4668) | Probes `tags`, `random`, `compactdate` | [`encode_tags`](../crates/scidtopgn/src/database.rs), [`decode_tags`](../crates/scidtopgn/src/game.rs) |
 | 255-byte value | [`value`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4733) | Probe `tag255` | Differs: [reads it](COMPATIBILITY.md#files-scid-refuses-or-misreads) |
 | Spare codes | [`AddPgnTag`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4753) | Probe `spare` | Differs: [drops the value](COMPATIBILITY.md#files-scid-refuses-or-misreads) |
@@ -147,7 +148,7 @@ A number at or above the side's number of pieces is invalid. SCID doesn't check 
 | FEN | [`Position::AddPiece`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/position.cpp#l700), [`AddPiece`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/position.cpp#l2898) | Probes `random` (200 games), `edge` | [`from_board`](../crates/scidtopgn/src/position.rs) |
 | Changes | [`Position::DoSimpleMove`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/position.cpp#l1804) | Probe `random`: 600 games with captures, en passant, promotions, and castling | [`PieceList`](../crates/scidtopgn/src/position.rs) |
 | Variations | [`Game::AddVariation`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l1036), [`Position::UndoSimpleMove`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/position.cpp#l1956) | Probes `random`, `comments`, `edge` | [`decode_variation`](../crates/scidtopgn/src/game.rs) |
-| Invalid number | [`from`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4499) | Source only | [`decode_move`](../crates/scidtopgn/src/mov.rs): refused |
+| Invalid number | [`from`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4499) | Probe `stalepiece` | [`decode_move`](../crates/scidtopgn/src/mov.rs). Differs: [refused](COMPATIBILITY.md#files-scid-refuses-or-misreads) |
 
 ## Piece-specific move encoding
 
@@ -246,7 +247,7 @@ That is `tests/data/edge.sg4` from offset 2.
 
 **NAGs.** A NAG is 1 to 255. What each means isn't part of the format; 1 to 6 are `!`, `?`, `!!`, `??`, `!?`, and `?!`.
 
-**Comments** follow the end of the game, each ending with a NUL. There is one text for each move, or start of a line, that has at least one marker. A marker before the first move of a line is for the start of that line, and its text is the comment before the line's first move. No encoding is recorded, and SCID vs. PC writes the UTF-8 it converts PGN to.
+**Comments** follow the end of the game, each ending with a NUL. There is one text for each move, or start of a line, that has at least one marker. A marker before the first move of a line is for the start of that line, and its text is the comment before the line's first move. No encoding is recorded. SCID's PGN import converts comments that aren't UTF-8 to UTF-8 ([`PgnParser::ConvertComments`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnparse.cpp#l1388)).
 
 The texts are in the order of the game's tree, not of the markers in the bytes: the start of a line, then each of its moves in turn, and after each move its variations, each in the same way. A writer that puts a move's marker before its variations, as SCID does, gives the two the same order. A reader has to use the tree, because SCID also reads a marker after the variations, as for this record:
 
@@ -314,4 +315,4 @@ read_comments(line):
 | Structure | [`encodeVariation`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4564), [`Game::DecodeVariation`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4617) | Probes `random`, `comments`, `varfirst`, `emptyvar`, `endvar`, `noend` | [`encode_moves`](../crates/scidtopgn/src/database.rs), [`decode_variation`](../crates/scidtopgn/src/game.rs). Differs: [variation limits](COMPATIBILITY.md#deliberate-differences) |
 | NAG limit | [`Game::AddNag`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.h#l560), [`MAX_NAGS`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.h#l132) | Probes `nag0`, `nag9`, `nagfirst`, `nagafter`, `comments` | [`add_nag`](../crates/scidtopgn/src/game.rs) |
 | Comments | [`encodeComments`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4802), [`decodeComments`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4831) | Probes `comments`, `annotated`, `twocomments`, `commentafter`, `commentorder`, `nocomment` | [`encode_comments`](../crates/scidtopgn/src/database.rs), [`decode_comments_recursive`](../crates/scidtopgn/src/game.rs) |
-| Variations of one move | [`numVariations`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.h#l147) | Source only | [Refused above 255](COMPATIBILITY.md#general-differences) |
+| Variations of one move | [`numVariations`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.h#l147) | `pgnscid` run on 255 and 256 | [Refused above 255](COMPATIBILITY.md#general-differences) |

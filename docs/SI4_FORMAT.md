@@ -34,7 +34,7 @@ Game *n*, counted from 1, has its entry at offset 182 + 47 × (*n* − 1).
 | 128 | 54 | Custom flag names | Six of 9 bytes, for custom flags 1 to 6: at most 8 bytes and a NUL each |
 | **Total** | **182** | | |
 
-A text field ends at its first NUL, and the bytes after that have no meaning. SCID doesn't clear them, so they can hold unrelated data: in `tests/data/five.si4`, the description is empty but its last byte, at offset 127, is `65`, and the custom flag names hold pieces of a script. The format doesn't record a text encoding.
+A text field ends at its first NUL, and the bytes after that have no meaning. SCID doesn't clear all of them: a new header's fields start with only their first byte set, setting a description clears all but the field's last byte, and setting a custom flag's name clears its field. So they can hold unrelated data: in `tests/data/five.si4`, the description is empty but its last byte, at offset 127, is `65`, and the custom flag names hold pieces of a script. The format doesn't record a text encoding.
 
 `tests/data/one.si4`, offset 0:
 
@@ -52,10 +52,10 @@ A text field ends at its first NUL, and the bytes after that have no meaning. SC
 | Rule | SCID vs. PC 4.26 | Evidence | scidtopgn |
 | --- | --- | --- | --- |
 | Header layout | [`Index::WriteHeader`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.cpp#l910), [`Index::Open`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.cpp#l936) | Probes `fixtures`, `meta`, `empty` | [`IndexHeader`](../crates/scidtopgn/src/index.rs) |
-| Sizes and limits | [`INDEX_HEADER_SIZE`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l70), [`MAX_GAMES`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l36), [`SCID_DESC_LENGTH`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l42), [`CUSTOM_FLAG_DESC_LENGTH`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l43) | Probes `fixtures`, `meta`; the maximum number of games is from source only | [`INDEX_HEADER_SIZE`](../crates/scidtopgn/src/index.rs), [`MAX_GAMES`](../crates/scidtopgn/src/index.rs) |
+| Sizes and limits | [`INDEX_HEADER_SIZE`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l70), [`MAX_GAMES`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l36) and [`MAX_GAMES`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.cpp#l1268), [`SCID_DESC_LENGTH`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l42), [`CUSTOM_FLAG_DESC_LENGTH`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l43) | Probes `fixtures`, `meta`; the maximum number of games, `limits` | [`INDEX_HEADER_SIZE`](../crates/scidtopgn/src/index.rs), [`MAX_GAMES`](../crates/scidtopgn/src/index.rs) |
 | Auto-load numbering | [`GetAutoLoad`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l675) | Probe `meta`: setting game 3 stores 4 | Kept as stored ([Append](COMPATIBILITY.md#append)) |
-| Text ends at a NUL | [`Index::SetDescription`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.cpp#l1237), [`SetCustomFlagDesc`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l669) | `tests/data/five.si4`, probe `meta` | Kept as stored |
-| Version check | [`SCID_VERSION`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/common.h#l53), [`SCID_OLDEST_VERSION`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/common.h#l54) | Probes `v300`, `v399`, `v401` | [`IndexHeader`](../crates/scidtopgn/src/index.rs): the same, and [other versions are rejected](COMPATIBILITY.md#supported-format) |
+| Text ends at a NUL, and what is cleared | [`Index::Init`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.cpp#l822), [`Index::SetDescription`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.cpp#l1237), [`SetCustomFlagDesc`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l669) | `tests/data/five.si4`, probe `meta` | Kept as stored |
+| Version check | [`SCID_VERSION`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.cpp#l977), [`SCID_VERSION`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/common.h#l53), [`SCID_OLDEST_VERSION`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/common.h#l54) | Probes `v300`, `v399`, `v401` | [`IndexHeader`](../crates/scidtopgn/src/index.rs): the same, and [other versions are rejected](COMPATIBILITY.md#supported-format) |
 
 ## Game entries and packed fields
 
@@ -201,7 +201,7 @@ s = 1 + (letter - 'a') × 5 + digit       letter and digit 1 to 4, as in A00a1
 └──────────┴──────────────────────────────┘
 ```
 
-The rating has 12 bits; 0 means none. SCID stores at most 4,000, and reads a higher stored rating as 4,000. Types: 0 Elo, 1 Rating, 2 Rapid, 3 ICCF, 4 USCF, 5 DWZ, 6 ECF. SCID names no other type.
+The rating has 12 bits, 0 to 4,095; 0 means none. SCID's PGN import stores at most 4,000, and SCID reads a higher stored rating as 4,000. Its other ways to save a game don't limit it: `sc_game tags set -whiteElo 4095` and `sc_game save` store 4,095. Types: 0 Elo, 1 Rating, 2 Rapid, 3 ICCF, 4 USCF, 5 DWZ, 6 ECF. SCID names no other type.
 
 ### Sources
 
@@ -211,11 +211,11 @@ The rating has 12 bits; 0 means none. SCID stores at most 4,000, and reads a hig
 | Record length | [`GetLength`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l263), [`SetLength`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l354) | Probes `long`, `blocks`, `size131071` | [`get_length`](../crates/scidtopgn/src/index.rs) |
 | Length 131,072 and over | [`MAX_GAME_LENGTH`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l28), [`MAX_GAME_LENGTH`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4961) | Probes `size131072`, `size131073` | Differs: [refuses both](COMPATIBILITY.md#limits-shared-with-scid) |
 | Flags | [`IDX_FLAG_START`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l87), [`GetFlag`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l295), [`IndexEntry::CharToFlag`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.cpp#l295) | Probe `flags`, which sets each user flag; `tests/data/derived` | [`get_flag`](../crates/scidtopgn/src/index.rs), [`get_custom_flag`](../crates/scidtopgn/src/index.rs) |
-| Name IDs | [`IndexEntry::GetWhite`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l484) to [`IndexEntry::GetRound`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l558), [`NAME_MAX_ID`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/namebase.h#l46) | Probe `names66000`; the maximums are from source only | [`get_white`](../crates/scidtopgn/src/index.rs) to [`get_round`](../crates/scidtopgn/src/index.rs) |
+| Name IDs | [`IndexEntry::GetWhite`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l484) to [`IndexEntry::GetRound`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l558), [`NAME_MAX_ID`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/namebase.h#l46) | Probes `names66000`, `limits` | [`get_white`](../crates/scidtopgn/src/index.rs) to [`get_round`](../crates/scidtopgn/src/index.rs) |
 | Invalid ID | [`IndexEntry::Verify`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.cpp#l95), [`VerifyFile`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/tkscid.cpp#l1038) | Probe `badname` | Differs: [reads the name as `?`](COMPATIBILITY.md#files-scid-refuses-or-misreads) |
 | Counts and result | [`EncodeCount`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l329), [`DecodeCount`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l338), [`GetResult`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l286) | Probes `counts` (0 to 55 of each), `fixtures` | [`encode_count`](../crates/scidtopgn/src/index.rs), [`get_result`](../crates/scidtopgn/src/index.rs) |
 | ECO code | [`eco_FromString`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/misc.cpp#l71), [`eco_ToString`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/misc.cpp#l113) | Probe `ratings` | [`eco_from_string`](../crates/scidtopgn/src/index.rs) |
-| Ratings | [`MAX_ELO`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l46), [`ratingTypeNames`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l179) | Probes `ratings`, `elo4095` | [`MAX_ELO`](../crates/scidtopgn/src/index.rs), [`RatingType`](../crates/scidtopgn/src/common.rs) |
+| Ratings | [`MAX_ELO`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnparse.cpp#l463) (import), [`sc_game_tags_set`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/tkscid.cpp#l9928) and [`SetWhiteElo`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l376) (no limit), [`MAX_ELO`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.cpp#l205) (reading), [`MAX_ELO`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l46), [`ratingTypeNames`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l179) | Probes `ratings`, `elo4095` | [`MAX_ELO`](../crates/scidtopgn/src/index.rs), [`RatingType`](../crates/scidtopgn/src/common.rs) |
 
 ## Dates and event dates
 
@@ -267,7 +267,7 @@ day            10011   = 19                        2022.12.19
 | --- | --- | --- | --- |
 | Packing | [`DATE_MAKE`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/date.h#l44), [`YEAR_MAX`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/date.h#l42), [`GetDate`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l280) | Probe `dates` | [`Date`](../crates/scidtopgn/src/date.rs), [`get_date`](../crates/scidtopgn/src/index.rs) |
 | Event date | [`IndexEntry::GetEventDate`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.cpp#l120), [`IndexEntry::SetEventDate`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.cpp#l137) | Probe `dates`: 2015 to 2025 for a game in 2020, and game years 0 to 3 | [`get_event_date`](../crates/scidtopgn/src/index.rs), [`set_event_date`](../crates/scidtopgn/src/index.rs) |
-| PGN dates | [`date_EncodeFromString`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/date.cpp#l63) | Probe `dates` | [`from_string`](../crates/scidtopgn/src/date.rs) |
+| PGN dates | [`date_EncodeFromString`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/date.cpp#l63) | Probe `dates` | [`from_string`](../crates/scidtopgn/src/date.rs). Differs: [dates that aren't all digits, and months above 12](COMPATIBILITY.md#known-differences-outside-these-cases) |
 
 ## Search fields and derived game metadata
 
@@ -315,6 +315,6 @@ In `tests/data/one.si4`, offset 219, `25 09 b5 c1 d4 ae 70` is 37 half-moves and
 | Rule | SCID vs. PC 4.26 | Evidence | scidtopgn |
 | --- | --- | --- | --- |
 | Material | [`SHIFT_WQ`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/matsig.h#l47), [`matsig_Make`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/matsig.cpp#l92) | Every probe game, derived again from its moves | [`material_sig`](../crates/scidtopgn/src/index.rs) |
-| Stored lines | [`storedLineText`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/stored.cpp#l49), [`storedLineCode`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4930) | `tests/data/stored`, probe `fixtures` | [`code`](../crates/scidtopgn/src/stored_line.rs) |
+| Stored lines | [`storedLineText`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/stored.cpp#l49), [`storedLineCode`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4930) | All 254 lines, each imported by `pgnscid`; `tests/data/stored` | [`code`](../crates/scidtopgn/src/stored_line.rs) |
 | Half-moves | [`NumHalfMoves`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.cpp#l218), [`NumHalfMoves`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.cpp#l279) | Probe `moves`: 0 to 2,049 | [`MAX_HALF_MOVES`](../crates/scidtopgn/src/index.rs) |
 | Home pawns | [`Game::MakeHomePawnList`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l1379), [`Position::GetHPSig`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/position.cpp#l536) | Every probe game, derived again from its moves | [`HomePawnList`](../crates/scidtopgn/src/index.rs) |

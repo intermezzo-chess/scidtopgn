@@ -2,7 +2,7 @@
 
 scidtopgn is file-compatible with SCID vs. PC 4. It reads the databases SCID vs. PC writes, and it writes, appends to, and changes databases so that SCID vs. PC still reads them. It isn't a replacement for the SCID application: it converts between SCID databases and PGN, and changes a database's games, but doesn't offer SCID's other features.
 
-This document says what that compatibility covers, what scidtopgn keeps and changes when it writes a database, and where it deliberately differs from SCID vs. PC, and why. Each statement names what checks it: a test in this repository, a scenario of the [compatibility check](SCID_COMPAT.md), or neither, in which case it says the statement is untested. "SCID" below means SCID vs. PC unless it says otherwise.
+This document says what that compatibility covers, what scidtopgn keeps and changes when it writes a database, and where it deliberately differs from SCID vs. PC, and why. Each statement names what checks it: a test in this repository, a scenario of the [compatibility check](SCID_COMPAT.md), or neither, in which case it says the statement is untested. "SCID" below means SCID vs. PC 4.26 unless it says otherwise. Links under **SCID's source** go to its code at SourceForge r3570, as [SCID_FORMAT.md](SCID_FORMAT.md#sources-and-verification) explains.
 
 [PGN import compared with SCID](#pgn-import-compared-with-scid) lists each case of PGN notation, and has its own definition of "SCID" and [list of tests](#tests). [SCID_COMPAT.md](SCID_COMPAT.md) is a different document: it describes how the compatibility check works and how to run it.
 
@@ -40,13 +40,15 @@ scidtopgn reads and writes SCID vs. PC 4 databases: an index file (`.si4`), a na
 - **Other format versions are rejected.** Opening an index file of any other version, such as 300, fails with an error naming both versions ([#107](https://github.com/intermezzo-chess/scidtopgn/issues/107)). Checked by `test_open_rejects_other_versions` and `test_unsupported_version_names_both_versions` in `crates/scidtopgn/src/tests/test_errors.rs`, and `test_cli_rejects_other_versions` in `crates/scidtopgn-cli/tests/integration.rs`.
 - **Other SCID programs and formats aren't supported**, including the original SCID and its later `.si5` format, which scidtopgn can't open. If the original SCID wrote a database with index version 400, scidtopgn opens it, but this is untested.
 
+**SCID's source:** [`Index::Open`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.cpp#l936), [`SCID_VERSION`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/common.h#l53).
+
 ## Reading
 
-scidtopgn reads the databases SCID vs. PC 4.26 writes. The claims below are checked against fixtures in `tests/data`, most written by SCID vs. PC's PGN converter, `pgnscid`: `long`, `accents`, `derived`, `twins`, `search`, and `stored`. [CONTRIBUTING.md](../CONTRIBUTING.md#test-data) describes each fixture.
+scidtopgn reads the databases SCID vs. PC 4.26 writes. The claims below are checked against fixtures in `tests/data`, most written by SCID vs. PC's PGN converter, `pgnscid`: `long`, `accents`, `derived`, `twins`, `search`, and `stored`. [CONTRIBUTING.md](../CONTRIBUTING.md#test-data) describes each fixture. SCID reads and writes them with [`IndexEntry::Read`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.cpp#l173), [`NameBase::ReadNameFile`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/namebase.cpp#l149), and [`Game::Decode`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l5097), searches headers with [`sc_search_header`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/tkscid.cpp#l17165), and finds twins with [`sc_base_duplicates`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/tkscid.cpp#l2418).
 
 - **Games, index fields, and names.** Importing the PGN of `long`, `accents`, `derived`, `twins`, or `stored` gives files byte-identical to the fixture (`test_imports_match_scid_byte_for_byte` in `crates/scidtopgn/src/tests/test_interop.rs`), and the index fields SCID derives from the moves read as SCID wrote them (`test_index_derived_fields_match_scid`). scidtopgn's header search and twin deletion select the same games as SCID's on the `search` and `twins` fixtures (`crates/scidtopgn/src/tests/test_search.rs` and `test_twins.rs`).
 - **Records over 64 KiB.** A game record can be up to 131,071 bytes, more than a 16-bit length holds. The second game of `long` is 72,015 bytes, and reads back as its PGN (`test_reads_a_scid_written_record_longer_than_64_kib`).
-- **Names that aren't UTF-8.** SCID vs. PC stores names as UTF-8, converting the PGN it imports. Older versions of SCID, and the C++ reference converter in `scid-cpp`, store the bytes of a Latin-1 or Windows-1252 PGN file's names as they are. scidtopgn reads the bytes of such a name that aren't valid UTF-8 as Windows-1252, and warns about each name ([#49](https://github.com/intermezzo-chess/scidtopgn/issues/49)). The `latin1` and `mixed` fixtures, written by the reference converter, hold such names. Checked by `test_reading_converts_names_that_arent_utf8` in `crates/scidtopgn/src/tests/test_names_not_utf8.rs` and `test_cli_reads_names_that_arent_utf8` in `crates/scidtopgn-cli/tests/integration.rs`. A name that the conversion makes longer than 255 bytes is cut to 255, ending before a character that the cut would split, as every name longer than 255 bytes is cut when it is added; checked by `test_read_cuts_a_converted_name_to_255_bytes` in `crates/scidtopgn/src/namebase.rs`.
+- **Names that aren't UTF-8.** SCID vs. PC 4.26 converts PGN text that isn't UTF-8 to UTF-8 when it imports it, with the encoding it detects ([`PgnParser::DoCharsetConversion`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnparse.cpp#l1350)). Its name files can still hold bytes that aren't UTF-8, as it cuts a name longer than 255 bytes after converting it, inside a character if need be ([`NameBase::AddName`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/namebase.cpp#l357)). The C++ reference converter in `scid-cpp` stores the bytes of a Latin-1 or Windows-1252 PGN file's names as they are, as other programs may; other versions of SCID weren't checked. scidtopgn reads the bytes of such a name that aren't valid UTF-8 as Windows-1252, and warns about each name ([#49](https://github.com/intermezzo-chess/scidtopgn/issues/49)). The `latin1` and `mixed` fixtures, written by the reference converter, hold such names. Checked by `test_reading_converts_names_that_arent_utf8` in `crates/scidtopgn/src/tests/test_names_not_utf8.rs` and `test_cli_reads_names_that_arent_utf8` in `crates/scidtopgn-cli/tests/integration.rs`. A name that the conversion makes longer than 255 bytes is cut to 255, ending before a character that the cut would split, as every name longer than 255 bytes is cut when it is added; checked by `test_read_cuts_a_converted_name_to_255_bytes` in `crates/scidtopgn/src/namebase.rs`.
 - **Control characters in names.** A name is read as stored, control characters included, as SCID stores names ([#142](https://github.com/intermezzo-chess/scidtopgn/issues/142)). Reading removes no character and trims nothing, names that differ only by control characters stay separate, and a write never changes a name it didn't add. The exceptions are the names that aren't UTF-8, in the bullet above. A NUL in a name is kept too, but SCID reads the name only up to it. Keeping a name doesn't mean that its export can be imported again: see [Export and round trips](#export-and-round-trips). Checked by `test_read_keeps_control_characters_in_names` in `crates/scidtopgn/src/namebase.rs`, and `test_import_keeps_control_characters_in_names_through_writes` and `test_names_differing_only_by_control_characters_stay_separate_through_writes` in `crates/scidtopgn/tests/integration.rs`.
 
 The compatibility check's append, merge, delete, and update scenarios also start by reading the databases `pgnscid` writes from each of its inputs.
@@ -63,9 +65,11 @@ scidtopgn reads some files that SCID vs. PC 4.26 doesn't, and the other way arou
 | A record with more than 40 tags | Crashes when it decodes the tags | Keeps the first 40, without a warning. Import does the same, where `pgnscid` crashes |
 | Names out of [order](SN4_FORMAT.md#order), or the same name twice | Refuses to open the database, or can't look names up | Reads them. A write puts them in order, and [merges](#names-that-arent-utf-8) the same names |
 | An entry with a name ID that no name has | Refuses to open the database | Reads the name as `?` |
-| An illegal move that has a destination | Plays it as written | Refuses the game (`rejects_illegal_bytes` in `crates/scidtopgn/src/mov.rs`) |
+| A move of a piece number its side doesn't have, or an illegal move that has a destination | Plays it as written, from the square the number last had | Refuses the game (`rejects_illegal_bytes` in `crates/scidtopgn/src/mov.rs`) |
 
 `scidtopgn validate` reports damage only in games scidtopgn can't read, so it finds only the last of these.
+
+**SCID's source:** blocks, [`GFile::ReadGame`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/gfile.cpp#l240); tags, [`Game::DecodeTags`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4729) and [`Game::AddPgnTag`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l763); name order, [`StrTree<C>::AddLast`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/strtree.h#l485) and [`StrTree<C>::MakeTree`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/strtree.h#l340); name IDs, [`IndexEntry::Verify`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.cpp#l95) and [`VerifyFile`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/tkscid.cpp#l1038); moves, [`decodeMove`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4492) and [`Position::DoSimpleMove`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/position.cpp#l1804).
 
 ## Writing
 
@@ -76,13 +80,17 @@ Import, append, update, delete, and merge are each a [scenario](SCID_COMPAT.md#s
 - **Matches SCID:** the files are byte-identical to those `pgnscid` writes from the same PGN, for every input of the compatibility check (`import` scenario), and for `long`, `accents`, `derived`, `twins`, and `stored` (`test_imports_match_scid_byte_for_byte`). `import --overwrite` replaces an existing database's files with the same result (`overwrite` scenario).
 - **PGN differences:** where scidtopgn reads PGN differently from SCID, the games stored differ too, as [PGN import compared with SCID](#pgn-import-compared-with-scid) describes. The check leaves out the two fixtures with such games.
 
+**SCID's source:** [`ParseGame`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnscid.cpp#l191), [`Game::Encode`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4868), [`GFile::AddGame`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/gfile.cpp#l265), [`NameBase::WriteNameFile`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/namebase.cpp#l259).
+
 ### Append
 
 `scidtopgn import` onto an existing database, and `Database::add_game`.
 
 - **Kept:** the description, base type, auto-load game, custom flag names, and each game's flags, which SCID sets on the database before the append. Each existing game's index entry stays byte-identical (`append` scenario).
-- **Changed:** the game count, and the name file, which gains the new names.
+- **Changed:** the game count, and the name file, which gains the new names. A name's frequency goes up by its uses in the new games. scidtopgn relies on the stored frequency of a name, where SCID counts them again when it opens a database, unless it is opened with `-fast`. So a name whose stored frequency is wrong stays wrong by as much.
 - **Matches SCID:** the appended entries and the names match the database `pgnscid` writes from both PGN files (`append` scenario).
+
+**SCID's source:** [`ParseGame`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/tkscid.cpp#l1672) and [`sc_savegame`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/tkscid.cpp#l8813), for SCID's own append; frequencies, [`fastOpen`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/tkscid.cpp#l1047) and [`recalcNameFrequencies`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/tkscid.cpp#l310).
 
 ### Update
 
@@ -92,6 +100,8 @@ Import, append, update, delete, and merge are each a [scenario](SCID_COMPAT.md#s
 - **Changed:** the start, promotion, and underpromotion flags follow the new game, with the other fields derived from its moves (`test_update_game_sets_the_derived_fields` in `crates/scidtopgn/src/tests/test_database.rs`). The new record is added at the end of the game file. The old record stays there, unused, until the games are compacted. Names the old game used and the new one doesn't stay in the name file with their frequency lowered, to 0 if no game uses them, until the names are compacted, as SCID does ([#72](https://github.com/intermezzo-chess/scidtopgn/issues/72)). SCID's tree cache is deleted (see [Tree cache](#tree-cache)).
 - **Matches SCID:** the games read back, the index entries, and the names match `pgnscid`'s database from the PGN with that game replaced, apart from game file offsets and unused names (`update-same-names`, `update-new-names`, `update-long`, and `update-twice` scenarios).
 
+**SCID's source:** [`sc_game_save`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/tkscid.cpp#l9112), [`sc_savegame`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/tkscid.cpp#l8813) (which keeps user flags and lowers the old names' frequencies).
+
 ### Delete and undelete
 
 `Database::delete_game` and `undelete_game`. The CLI doesn't offer them.
@@ -99,6 +109,8 @@ Import, append, update, delete, and merge are each a [scenario](SCID_COMPAT.md#s
 - **Kept:** the game's record and number, and every name and its frequency, until the games are compacted (`test_delete_and_undelete_game`). Every other game's index entry stays byte-identical (`test_changes_keep_scids_other_entries`), and the name file keeps SCID's order (`test_delete_keeps_scids_name_order`).
 - **Changed:** only the game's delete flag.
 - **Matches SCID:** deleting the first, middle, and last games gives files byte-identical to those SCID writes when it deletes the same games, and undeleting them gives back the original files (`delete` and `undelete` scenarios). SCID sets a description, base type, auto-load game, custom flag names, and flags on the first three games before the delete, and reads them back unchanged apart from the deleted games' delete flags.
+
+**SCID's source:** [`sc_game_flag`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/tkscid.cpp#l6901), [`SetFlag`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l392).
 
 ### Merge
 
@@ -108,9 +120,13 @@ Import, append, update, delete, and merge are each a [scenario](SCID_COMPAT.md#s
 - **Changed:** names are rewritten as UTF-8, with new IDs and with frequencies that count the new database's games. The new database has no description and no custom flag names, as with SCID's `scmerge` (`test_cli_merge_gives_the_output_a_default_header`).
 - **Matches SCID:** the entries, names, and games read back match `pgnscid`'s database from both PGN files (`merge` scenario).
 
+**SCID's source:** [`mergeFile`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/scmerge.cpp#l63), [`Index::Init`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.cpp#l822).
+
 ### Names that aren't UTF-8
 
-Any write to a database with names that aren't UTF-8 rewrites every name as UTF-8, as SCID vs. PC stores the names of PGN it imports. If a name was stored both ways, such as `Müller, Hans` once as Latin-1 and once as UTF-8, the two become one name, because SCID can't open a name file that holds the same name twice. The names then get new IDs, and every game keeps its names (`test_appending_writes_the_names_as_utf8` and `test_appending_merges_names_stored_two_ways` in `crates/scidtopgn/src/tests/test_names_not_utf8.rs`). SCID reads the result after an append, a delete, and an update, and the delete and the update keep the header fields and flags SCID set (`append`, `delete`, and `update` scenarios on `latin1` and `mixed`).
+Any write to a database with names that aren't UTF-8 rewrites every name as UTF-8, the encoding SCID vs. PC converts PGN to when it imports it. If a name was stored both ways, such as `Müller, Hans` once as Latin-1 and once as UTF-8, the two become one name, because SCID can't open a name file that holds the same name twice. The names then get new IDs, and every game keeps its names (`test_appending_writes_the_names_as_utf8` and `test_appending_merges_names_stored_two_ways` in `crates/scidtopgn/src/tests/test_names_not_utf8.rs`). SCID reads the result after an append, a delete, and an update, and the delete and the update keep the header fields and flags SCID set (`append`, `delete`, and `update` scenarios on `latin1` and `mixed`).
+
+**SCID's source:** [`NameBase::ReadNameFile`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/namebase.cpp#l149), which keeps the bytes; [`StrTree<C>::AddLast`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/strtree.h#l485), which refuses the same name twice.
 
 ### Tree cache
 
@@ -125,25 +141,29 @@ SCID keeps a database's opening tree statistics in a tree cache file, `.stc`, an
 | Append, delete, undelete, copying a game | Kept | `test_other_changes_keep_the_tree_cache`, `test_cli_import_removes_the_tree_cache_only_when_it_overwrites` |
 | Deleting twins, compacting names | Kept | `test_keeps_the_tree_cache` in `crates/scidtopgn/src/tests/test_twins.rs`, `test_compact_games_deletes_the_tree_cache` |
 
+**SCID's source:** [`TreeCache::ReadFile`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/tree.cpp#l334), [`numGames`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/tkscid.cpp#l15131) (the check of the number of games), [`removeFile`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/tkscid.cpp#l9159) (when a game is saved). These were read, and the cache's use by SCID is checked by the `update-*` scenarios.
+
 ### If a write fails
 
 scidtopgn writes a changed database's index and name files beside it, and replaces the originals only once both are complete. If writing fails, for example because the disk is full, the database reads the same games as before. The new games' records may stay at the end of the game file as unused bytes. See [Deliberate differences](#deliberate-differences) for the limits.
+
+**SCID's source:** [`sc_game_save`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/tkscid.cpp#l9112), [`Index::WriteHeader`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.cpp#l910), [`NameBase::WriteNameFile`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/namebase.cpp#l259), which write in place.
 
 ## Deliberate differences
 
 Each difference below is a decision, with its reason.
 
 - **PGN import and export.** scidtopgn reads some PGN SCID rejects or misreads, rejects some PGN SCID stores as a corrupt game, and reports more warnings. It exports PGN in a layout of its own, close to the PGN standard's export format, as [Export and round trips](#export-and-round-trips) describes. [PGN import compared with SCID](#pgn-import-compared-with-scid) lists every case, with its reason.
-- **NAG export symbols** ([#45](https://github.com/intermezzo-chess/scidtopgn/issues/45)). PGN export writes a NAG as a symbol only when both SCID and scidtopgn read that symbol back as the same NAG, and as `$n` otherwise. SCID writes some NAGs as symbols it can't read back, such as `→` for `$40`, so they are lost when a game SCID exports is imported again. With scidtopgn, every NAG survives export and import (`test_every_nag_survives_export_and_import` in `crates/scidtopgn/src/game.rs`). See [How NAGs are exported](#how-nags-are-exported-34).
-- **Names stored as UTF-8 and merged** ([#49](https://github.com/intermezzo-chess/scidtopgn/issues/49)). scidtopgn rewrites names that aren't UTF-8 when it writes a database, as [above](#names-that-arent-utf-8). SCID keeps their bytes. scidtopgn's names are Rust strings, which must be valid UTF-8, and SCID vs. PC itself stores names as UTF-8. Once converted, a name stored both ways reads the same twice, and SCID can't open a name file that holds the same name twice, so the two are merged. PGN text that isn't UTF-8 is read as Windows-1252 too ([#42](https://github.com/intermezzo-chess/scidtopgn/issues/42)).
-- **Writes that are safe against partial failure** ([#110](https://github.com/intermezzo-chess/scidtopgn/issues/110)). SCID rewrites the index and name files in place, so a failure part way leaves a database neither program can open. scidtopgn writes new files and swaps them in, as [above](#if-a-write-fails). Checked by `test_a_failed_write_of_either_file_leaves_the_database_as_it_was` in `crates/scidtopgn/src/database.rs`. This has limits that SCID's in-place writes don't:
+- **NAG export symbols** ([#45](https://github.com/intermezzo-chess/scidtopgn/issues/45)). PGN export writes a NAG as a symbol only when both SCID and scidtopgn read that symbol back as the same NAG, and as `$n` otherwise. SCID writes some NAGs as symbols it can't read back, such as `→` for `$40`, so they are lost when a game SCID exports is imported again ([`evalNagsRegular`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/nagtext.h#l16), [`game_parseNag`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l249)). With scidtopgn, every NAG survives export and import (`test_every_nag_survives_export_and_import` in `crates/scidtopgn/src/game.rs`). See [How NAGs are exported](#how-nags-are-exported-34).
+- **Names stored as UTF-8 and merged** ([#49](https://github.com/intermezzo-chess/scidtopgn/issues/49)). scidtopgn rewrites names that aren't UTF-8 when it writes a database, as [above](#names-that-arent-utf-8). SCID keeps their bytes. scidtopgn's names are Rust strings, which must be valid UTF-8, and UTF-8 is what SCID vs. PC converts names to when it imports PGN. Once converted, a name stored both ways reads the same twice, and SCID can't open a name file that holds the same name twice, so the two are merged. PGN text that isn't UTF-8 is read as Windows-1252 too ([#42](https://github.com/intermezzo-chess/scidtopgn/issues/42)).
+- **Writes that are safe against partial failure** ([#110](https://github.com/intermezzo-chess/scidtopgn/issues/110)). SCID rewrites the index and name files in place, so a failure part way can leave files that are partly updated or can't be read. With only the name file read-only, for example, saving a changed rating in 4.26 fails with `Error writing name file.`, but the database opens with the new rating ([`sc_game_save`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/tkscid.cpp#l9112)). scidtopgn writes new files and swaps them in, as [above](#if-a-write-fails). Checked by `test_a_failed_write_of_either_file_leaves_the_database_as_it_was` in `crates/scidtopgn/src/database.rs`. This has limits that SCID's in-place writes don't:
   - The new files need disk space beside the old ones, and the database's directory must be writable.
   - Writing changes to an existing database, such as an append, refuses a read-only or symbolically linked `.si4` or `.sn4` file with an error instead of replacing it, because replacing it would ignore its protection or leave the file it links to out of date (`test_flush_refuses_a_read_only_name_or_index_file` and `test_flush_refuses_a_linked_name_or_index_file`). The new games' records may already be at the end of the game file then, as unused bytes. `import --overwrite` and `merge --overwrite` don't refuse such files: they replace them.
   - Replacing the files breaks hard links to them, and doesn't keep their owner, access control lists, or extended attributes. Writing changes to an existing database, and compacting it, keep their permissions. `import --overwrite` and `merge --overwrite` don't: the new files get default permissions, which can make a private database readable by others ([#151](https://github.com/intermezzo-chess/scidtopgn/issues/151)).
   - A killed process can leave a temporary directory beside the database: `.scidtopgn-compact-*` from writing changes to a database or compacting it, or `.scidtopgn-new-*` from `import` into a new database, `import --overwrite`, or `merge`. If it holds `old.*` files, they are the original files, and a database file can be missing: move them back to open the database as it was.
   - This doesn't protect against a power loss.
-- **Search patterns count Unicode characters.** In a header search pattern, `?` matches one Unicode character, as in Tcl 8.6.13. SCID built with Tcl 8.5 or an early 8.6, such as 8.6.0, counts each byte of a character above U+FFFF, such as an emoji, as a character. scidtopgn follows Tcl 8.6.13 (`matches_patterns_as_tcl` in `crates/scidtopgn/src/search.rs`).
-- **Variation limits** ([#4](https://github.com/intermezzo-chess/scidtopgn/issues/4)). A game with variations nested more than 100 levels deep, or with more than 255 variations of one move, is rejected, whether it is read from PGN or from a database, so that deep nesting can't overflow the stack. SCID has no limit on nesting, and counts a move's variations modulo 256. See [General differences](#general-differences).
+- **Search patterns count Unicode characters.** In a header search pattern, `?` matches one Unicode character, as in [Tcl 8.6.13](https://github.com/tcltk/tcl/blob/core-8-6-13/generic/tclUtil.c). SCID passes the pattern to Tcl ([`Tcl_StringMatch`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/tkscid.cpp#l17470)). SCID built with Tcl 8.5 or an early 8.6, such as [8.6.0](https://github.com/tcltk/tcl/blob/core-8-6-0/generic/tclUtil.c), counts each byte of a character above U+FFFF, such as an emoji, as a character. scidtopgn follows Tcl 8.6.13 (`matches_patterns_as_tcl` in `crates/scidtopgn/src/search.rs`).
+- **Variation limits** ([#4](https://github.com/intermezzo-chess/scidtopgn/issues/4)). A game with variations nested more than 100 levels deep, or with more than 255 variations of one move, is rejected, whether it is read from PGN or from a database, so that deep nesting can't overflow the stack. SCID has no limit on nesting of its own ([`Game::DecodeVariation`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4617)), and counts a move's variations modulo 256 ([`numVariations`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.h#l147)). See [General differences](#general-differences).
 
 ## Limits shared with SCID
 
@@ -154,6 +174,8 @@ These lose information, but SCID loses it the same way.
 - **Record size.** A game's record can be at most 131,071 bytes, the most an index entry can record. A longer game can't be stored: import skips it with a warning, or stops with `--on-error=abort` (`test_add_game_rejects_a_game_too_large_to_store` and `test_cli_import_warns_about_games_too_large_to_store`).
 - **NAGs and tags.** A move keeps at most 7 NAGs, a tag longer than 255 bytes is dropped, and a game keeps at most 40 tags besides those with fields of their own. scidtopgn drops the 41st and later ones without a warning ([#155](https://github.com/intermezzo-chess/scidtopgn/issues/155)). SCID vs. PC 4.26 holds 40 too, but crashes at the 41st. [General differences](#general-differences) has these and other limits of PGN import.
 
+**SCID's source:** event dates, [`IndexEntry::SetEventDate`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.cpp#l137); years, [`date_EncodeFromString`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/date.cpp#l63); record size, [`SetLength`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l354) and [`MAX_GAME_LENGTH`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4961), which lets one more byte through; NAGs, [`Game::AddNag`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.h#l560); tags, [`PgnParser::ExtractPgnTag`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnparse.cpp#l312) and [`Game::AddPgnTag`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l763).
+
 ## Out of scope
 
 scidtopgn reads and writes SCID databases. It doesn't offer SCID's application features, such as board and material search, opening tree statistics, ECO classification, sorting, editing or correcting names, and spellchecking. Its header search and twin deletion select games as SCID does, so that games can be exported or deleted.
@@ -161,6 +183,8 @@ scidtopgn reads and writes SCID databases. It doesn't offer SCID's application f
 ## Using a database with SCID
 
 Don't write to a database with scidtopgn while SCID vs. PC has it open. SCID reads the index and names into memory when it opens a database, so it doesn't see changes made after that, and changes it writes later can overwrite them. scidtopgn doesn't detect that SCID has the database open. This is untested.
+
+**SCID's source:** [`sc_base_open`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/tkscid.cpp#l938) and [`Index::ReadEntireFile`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.cpp#l1071), which read the index and names into memory.
 
 ## How compatibility is checked
 
@@ -171,11 +195,22 @@ Neither tests SCID vs. PC's GUI, or any other version of SCID.
 
 ## PGN import compared with SCID
 
-This section lists how `scidtopgn` reads PGN notation that isn't standard, and compares each case with SCID. It uses three PGN terms: SAN (standard algebraic notation) is how moves are written, such as `Nf3` or `exd5`. FEN is the notation for a position, used by the `FEN` tag to set a game's start position. A NAG (numeric annotation glyph) is an annotation written as `$n`, such as `$1` for a good move, or as a symbol, such as `!`. In this section, "SCID" means the SCID vs. PC sources in `scid-cpp/scid` (`pgnparse.cpp`, `Position::ReadMove` in `position.cpp`, and `game_parseNag` in `game.cpp`), together with the C++ reference converter in `scid-cpp/src/main.cpp`.
+This section lists how `scidtopgn` reads PGN notation that isn't standard, and compares each case with SCID. It links to the code of SCID vs. PC 4.26 (SourceForge r3570, as [SCID_FORMAT.md](SCID_FORMAT.md#sources-and-verification) explains). It uses three PGN terms: SAN (standard algebraic notation) is how moves are written, such as `Nf3` or `exd5`. FEN is the notation for a position, used by the `FEN` tag to set a game's start position. A NAG (numeric annotation glyph) is an annotation written as `$n`, such as `$1` for a good move, or as a symbol, such as `!`. In this section, "SCID" means the PGN parser of SCID vs. PC 4.26, [`PgnParser::ParseGame`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnparse.cpp#l1224), which both of its importers use: `pgnscid`, and the import of the program itself, `sc_base import`. They differ from each other, and from the C++ reference converter in `scid-cpp/src/main.cpp`, in what they do around the parser:
+
+| | `pgnscid` | `sc_base import` | Reference converter |
+| --- | --- | --- | --- |
+| A game for which the parser reports an error, such as one without a result | Stores it | Stores it | Skips it |
+| Text before a game | Keeps it, unless run with an option | Ignores it | Keeps it |
+| A `PlyCount` tag | Drops it | Keeps it | Keeps it |
+| Text that isn't UTF-8 | Detects its encoding, and converts it | The same | Stores its bytes |
+| The parser's messages | In a `.err` file | Returns them | Doesn't print them |
+| Code | [`SetPreGameText`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnscid.cpp#l184), [`AddIgnoredTag`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnscid.cpp#l188), [`ParseGame`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnscid.cpp#l191) | [`IgnorePreGameText`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/tkscid.cpp#l1669), [`ParseGame`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/tkscid.cpp#l1672) | [`main.cpp`](../scid-cpp/src/main.cpp) |
+
+Conversion is done in [`PgnParser::DoCharsetConversion`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnparse.cpp#l1350), which the reference converter's copy of the sources replaces with a stub. Its `pgnparse.cpp` is otherwise the same as 4.26's, apart from which headers it includes, and its `position.cpp` is the same.
 
 Each case is marked **Same** or **Differs** in its **Comparison** column. "Same" means `scidtopgn` reads the input and stores the game the way SCID does, apart from the [general differences](#general-differences). **It doesn't mean that the game comes back unchanged when `scidtopgn` exports it to PGN.** Export writes moves in canonical SAN and can drop parts of the game, as [Export and round trips](#export-and-round-trips) explains. Each difference also says what changes for someone moving from SCID, and why `scidtopgn` behaves that way.
 
-The case numbers match [#37](https://github.com/intermezzo-chess/scidtopgn/issues/37). Most cases are games in [`tests/data/notation.pgn`](../tests/data/notation.pgn), where each game's `Event` tag starts with the case number. Both products' behavior was checked by running them on that file (see [How SCID's behavior was checked](#how-scids-behavior-was-checked)).
+The case numbers match [#37](https://github.com/intermezzo-chess/scidtopgn/issues/37). Most cases are games in [`tests/data/notation.pgn`](../tests/data/notation.pgn), where each game's `Event` tag starts with the case number. Both programs' behavior was checked by running them on that file (see [How SCID's behavior was checked](#how-scids-behavior-was-checked)).
 
 ### Summary of differences
 
@@ -187,7 +222,6 @@ The case numbers match [#37](https://github.com/intermezzo-chess/scidtopgn/issue
 - **#22** A piece move with `-+` or `-/+` attached, such as `Bb5-+`, is read with its annotation. SCID drops the move, and usually fails at the next one.
 - **#22c** `e4--+` and `e4->` are read with the symbol written, $21 and $41. SCID reads `e4--+` as $19 and fails at `e4->`.
 - **#23** `e4~` is read with its annotation, `$13`. SCID fails at the move.
-- **#28** A game whose moves don't end with a result is imported with a warning, with the `Result` tag's result, or `*` without one. SCID skips it.
 - A result inside a variation is skipped with a warning, and the whole game is imported. SCID ends the game at the result and reads the rest of the moves as text before the next game ([#60](https://github.com/intermezzo-chess/scidtopgn/issues/60)).
 - `\"` and `\\` in a tag value are read as `"` and `\`, as the PGN standard specifies. SCID ends the value at its first `"`, and keeps `\\` as two backslashes (#60).
 - A move right after a stray `]`, as in `]Bc5`, is read. SCID drops it (#60).
@@ -209,7 +243,7 @@ The case numbers match [#37](https://github.com/intermezzo-chess/scidtopgn/issue
 - **#25** Every unknown symbol gives a warning. SCID warns about most, but not about a word that starts with `D`, such as `Diagram`.
 - **#27c** A result after the moves gives no warning when the game has no `Result` tag. SCID warns.
 - **#27d** An unrecognized `Result` tag, such as `1-0 (time)`, gives a warning only when the result after the moves isn't `*`. SCID reads the tag as `1-0` and warns when the results differ.
-- **#33** The CLI prints every warning. The SCID converter never prints them.
+- **#33** The CLI prints every warning. `pgnscid` writes them to a file, and the reference converter doesn't print them.
 - A NAG after a move's first 7 is dropped with a warning. SCID drops it without a message ([#57](https://github.com/intermezzo-chess/scidtopgn/issues/57)).
 
 PGN export:
@@ -220,7 +254,9 @@ PGN export:
 
 Text before and between games ([#41](https://github.com/intermezzo-chess/scidtopgn/issues/41)):
 
-- Text before a game, including moves with no tags, is kept as the comment before the game's first move, as in SCID. `;`, `%`, and `{...}` lines between games are skipped, where SCID keeps them in the text. A line starting with `[` that isn't a tag is reported as a failed game, where SCID logs an error and ignores it. A `[` after a result on the same line is text, where SCID reads it as a tag. See [Text before and between games](#text-before-and-between-games).
+- Text before a game, including moves with no tags, is kept as the comment before the game's first move, as in `pgnscid`. SCID's own import ignores it. `;`, `%`, and `{...}` lines between games are skipped, where `pgnscid` keeps them in the text. A line starting with `[` that isn't a tag is reported as a failed game, where SCID logs an error and ignores it. A `[` after a result on the same line is text, where SCID reads it as a tag. See [Text before and between games](#text-before-and-between-games).
+
+**#28:** a game whose moves don't end with a result is imported with a warning, with the `Result` tag's result, or `*` without one. SCID's importers store it too, with a message in their log. The reference converter skips it. This isn't a difference from SCID.
 
 Other known differences, which these cases don't cover, are listed in [Known differences outside these cases](#known-differences-outside-these-cases).
 
@@ -229,7 +265,7 @@ Other known differences, which these cases don't cover, are listed in [Known dif
 These apply to every case below.
 
 - **A move that can't be read.** SCID keeps the game up to that move and adds the comment `{Error reading move: ...}`. `scidtopgn` skips the game and reports which game and move failed (#29). When this section says that SCID rejects a move, SCID still keeps the game up to that move.
-- **Warnings.** SCID's parser logs warnings, but the SCID converter never prints them. `scidtopgn` prints each warning (#33). See [Warnings](#warnings).
+- **Warnings.** SCID's parser logs warnings. `pgnscid` writes them to a `.err` file, `sc_base import` returns them, and the reference converter doesn't print them. `scidtopgn` prints each warning (#33). See [Warnings](#warnings).
 - **Canonical SAN.** `scidtopgn` stores and exports the SAN it generates, with `O-O`, `=` before a promotion piece, `x` for a capture, and check and mate signs only when they are correct. SCID does the same.
 - **Where annotations attach (#38).** As in SCID, a NAG or comment attaches to the move it follows, in the main line and in variations. An annotation symbol attaches the same way as the `$n` NAG it stands for. Both products also handle these cases the same way:
   - A NAG or comment after a variation's `)` attaches to the move the variation replaces. In `1. e4 (1. d4) $1`, `$1` is on `1. e4`.
@@ -239,12 +275,14 @@ These apply to every case below.
   - **A NAG before the first move of the game or of a variation is dropped, without a warning.** In `$1 1. e4 ($2 1. d4)`, neither NAG is kept. SCID keeps such a NAG in memory, but it neither saves it to the database nor exports it, so the result is the same.
   - `$0` means no annotation, and isn't stored.
   - **A move keeps at most 7 NAGs ([#57](https://github.com/intermezzo-chess/scidtopgn/issues/57)).** SCID holds a move's NAGs in an array of 8 that ends with a 0, so it keeps the first 7 and drops the rest. `scidtopgn` does the same, and warns about each NAG it drops. NAGs from `$n`, from symbols attached to the move or written on their own, and after a variation's `)` count toward one limit, in the order they appear. In `1. e4 $1 $2 $3 $4 $5 $6 $7 $8 $9`, `1. e4` keeps NAGs 1 to 7, with a warning each for `$8` and `$9`. `$0` isn't counted or warned about. A game read from a SCID database also keeps the first 7 NAGs of each move, without a warning, as SCID does. The library's `MoveNode::nags` documents the limit.
-- **A `{...}` comment between tags.** `scidtopgn` ignores it and reads one game. SCID reads the tags before it as a game without moves, logs `PGN header '[' seen inside game`, and starts another game at the next tag, so the tags are split between two games. The reference converter skips the first of them, and `pgnscid` 4.26 stores it.
+- **A `{...}` comment between tags.** `scidtopgn` ignores it and reads one game. SCID reads the tags before it as a game without moves, logs `PGN header '[' seen inside game`, and starts another game at the next tag, so the tags are split between two games. SCID's importers store both, and the reference converter skips the first.
 - **Variation limits ([issue 4](https://github.com/intermezzo-chess/scidtopgn/issues/4)).** A game with variations nested more than 100 levels deep, or with more than 255 variations of one move, is rejected with an error, whether it is read from PGN or from a SCID database. Reading and writing a game recurse once per level of nesting, so deeper nesting could overflow the stack. SCID has no limit on nesting. It counts a move's variations in a byte, which wraps: of 256 variations it keeps none, and of 257, one.
 - **Tag and name lengths ([#53](https://github.com/intermezzo-chess/scidtopgn/issues/53), [#82](https://github.com/intermezzo-chess/scidtopgn/issues/82)).** As in SCID, a tag whose name or value is longer than 255 bytes is dropped, whatever tag it is, and the rest of the game is imported. A dropped `White`, `Black`, `Event`, `Site`, or `Round` tag leaves `?`, and a dropped duplicate leaves the earlier value. SCID logs `Error reading tag`, and `scidtopgn` warns. When the game is stored, a tag name longer than 240 bytes is cut to 240, as SCID cuts it. Lengths count the bytes of the UTF-8 that is stored, after escapes are read. Two things differ from SCID:
-  - Text read as Windows-1252 (#42) takes more bytes in UTF-8, so it can pass the limit where SCID, which stores the bytes unchanged, keeps it.
+  - Both convert text that isn't UTF-8, which takes more bytes, but SCID checks the length before converting it ([`PgnParser::ExtractPgnTag`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnparse.cpp#l312)), and `scidtopgn` after. `scidtopgn` drops a tag whose converted value is over 255 bytes. SCID keeps it: a name is cut to 255 bytes ([`NameBase::AddName`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/namebase.cpp#l357)), which can leave part of a character, and another value is written with a length that has wrapped around ([`encodeTags`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4694)), so the record can't be read. From an `Annotator` of 200 Latin-1 `é`s, `pgnscid` 4.26 wrote a record that SCID can't decode.
   - A cut that would split a character ends before that character. SCID cuts in the middle of it.
   - A player name is [tidied](#player-names-and-ratings), which adds a space after a comma that has none, so it is checked again once tidied and without its rating. A name over 255 bytes then is dropped in the same way. SCID writes the tidied name into its 256-byte buffer without checking its length (#43).
+
+**SCID's source:** tags and their lengths, [`PgnParser::ExtractPgnTag`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnparse.cpp#l312); where annotations attach, [`PgnParser::ParseMoves`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnparse.cpp#l1044), [`Game::AddVariation`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l1036), and [`Game::AddNag`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.h#l560); what is stored, [`encodeVariation`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4564); variations of a move, [`numVariations`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.h#l147); comments between tags, [`PgnParser::ParseGame`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnparse.cpp#l1224).
 
 ### Warnings
 
@@ -269,6 +307,8 @@ A game that fails to parse is reported by its error only, without its warnings.
 | `dropped NAG $8 because a move keeps at most 7` | A NAG after the first 7 on a move. The NAG is dropped, as in SCID, which drops it without a message. | #57 |
 | `read text that isn't UTF-8 as Windows-1252` | The game's text, including text before it that is kept as its first comment, has bytes that aren't valid UTF-8. Those bytes are read as Windows-1252. Given once per game, on the first line with such bytes. In the library, only `PgnParser::from_bytes` and `PgnParser::from_reader` read such input; the CLI uses `from_reader`. | #42 |
 
+**SCID's source:** [`PgnParser::LogError`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnparse.cpp#l181).
+
 ### Already accepted by both
 
 `scidtopgn` already read these the same way as SCID before #37, except for a null move while in check (A5b).
@@ -286,6 +326,8 @@ A game that fails to parse is reported by its error only, without its warnings.
 | A8 | `++` for check | `Qh5++` | Corrected | Corrected | Same |
 
 **A5b: a null move while in check.** *What changes:* a game that SCID imports is skipped and reported. *Why:* after a null move in check, the side that moves next could capture the king, so the position can't continue as a game of chess. shakmaty can't represent it, and [#20](https://github.com/intermezzo-chess/scidtopgn/issues/20) chose to reject it.
+
+**SCID's source:** [`PgnParser::GetGameToken`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnparse.cpp#l785), [`Position::ReadMove`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/position.cpp#l2335).
 
 ### Move notation
 
@@ -314,6 +356,8 @@ A game that fails to parse is reported by its error only, without its warnings.
 **#8d: `a8b`.** *What changes:* a game that SCID truncates at `a8b` is imported in full. *Why:* SCID reads the `b` as a file, since its reader allows a second file after a pawn's first. A pawn on the last rank must promote, so `a8b` can only mean `a8=B`. SCID already reads `a7a8b` as `a8=B`.
 
 **#9: `a8=n`.** *What changes:* the pawn promotes to the piece written instead of a queen. *Why:* SCID only reads an uppercase letter after `=`. It reads `=n` as an unknown annotation, then promotes to a queen by default. `scidtopgn` reads lowercase promotion letters everywhere else, so it reads them after `=` too.
+
+**SCID's source:** [`PgnParser::GetRestOfMove`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnparse.cpp#l633), [`PgnParser::GetRestOfPawnMove`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnparse.cpp#l681), [`Position::ReadMove`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/position.cpp#l2335), [`Position::ReadCoordMove`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/position.cpp#l2287).
 
 ### Castling
 
@@ -344,6 +388,8 @@ Before #37, `scidtopgn` couldn't export a SCID database containing such a castle
 **#18: castling with no rook.** *What changes:* a game that SCID imports in a corrupt state is skipped and reported. *Why:* when SCID retries castling without the castling right, it checks the squares between the king and rook, but not that the rook is there. It moves the king, and the game can't continue correctly. `scidtopgn` lets shakmaty check castling with the right restored, which requires the rook.
 
 **#20: `O-O` played as `O-O-O`.** *What changes:* a warning names the move. *Why:* SCID guesses that the writer meant queenside castling. `scidtopgn` follows SCID, but says so, because the guess changes the move that was written.
+
+**SCID's source:** [`PgnParser::GetRestOfCastling`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnparse.cpp#l593), [`Position::ReadMove`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/position.cpp#l2335).
 
 ### Annotation symbols
 
@@ -390,6 +436,8 @@ Before #37, `scidtopgn` couldn't export a SCID database containing such a castle
 
 **#25: `Diagram`.** *What changes:* a warning names the skipped word. *Why:* SCID reads a word that starts with `D` as an annotation, finds no NAG for it, and drops it without a message. `scidtopgn` warns about any text it skips.
 
+**SCID's source:** [`PgnParser::GetGameToken`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnparse.cpp#l785), [`PgnParser::GetRestOfSuffix`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnparse.cpp#l537), [`game_parseNag`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l249).
+
 ### Results and the start position
 
 | # | Case | Example | SCID | scidtopgn | Comparison |
@@ -399,9 +447,9 @@ Before #37, `scidtopgn` couldn't export a SCID database containing such a castle
 | 27b | `*` after the moves with a `Result` tag | `[Result "1-0"]`, moves end `*` | Uses `*` and logs the mismatch | Uses `*`, with a warning | Same |
 | 27c | Result after the moves with no `Result` tag | moves end `1-0` | Uses `1-0` and logs the mismatch | Uses `1-0`, without a warning | **Differs** (warning) |
 | 27d | `*` after the moves with an unrecognized `Result` tag | `[Result "1-0 (time)"]`, moves end `*` | Reads the tag as `1-0`, uses `*`, and logs the mismatch | Uses `*`, without a warning, since it reads the tag as `*` | **Differs** (warning) |
-| 28a | No result before the next game | `1. e4 e5` followed by `[Event ...]` | Logs `PGN header '[' seen inside game (result missing ?)` and skips the game | Imports the game with the `Result` tag's result, with a warning | **Differs** |
-| 28b | No result at the end of the input | `1. e4 e5` at the end of the file | Logs `End of input reached in game (result missing ?)` and skips the game | Imports the game with the `Result` tag's result, with a warning | **Differs** |
-| 28c | No result after the moves and no `Result` tag | `1. e4 e5` followed by `[Event ...]` | Skips the game, as in #28a | Imports the game with the result `*`, with a warning | **Differs** |
+| 28a | No result before the next game | `1. e4 e5` followed by `[Event ...]` | Logs `PGN header '[' seen inside game (result missing ?)`, and stores the game with the `Result` tag's result | Imports the game with the `Result` tag's result, with a warning | Same |
+| 28b | No result at the end of the input | `1. e4 e5` at the end of the file | Logs `End of input reached in game (result missing ?)`, and stores the game with the `Result` tag's result | Imports the game with the `Result` tag's result, with a warning | Same |
+| 28c | No result after the moves and no `Result` tag | `1. e4 e5` followed by `[Event ...]` | Stores the game with the result `*`, with a message as in #28a | Imports the game with the result `*`, with a warning | Same |
 | 29 | A move that can't be read | `2. Nf6` | Keeps `1. e4 e5 {Error reading move: Nf6}` | Skips the game and reports it | **Differs** |
 | 30 | `[SetUp "1"]` without `FEN` | | Standard start, without a warning | Standard start, without a warning | Same |
 | 31a | `FEN` castling rights that don't fit | `4k3/8/8/8/8/8/8/4K3 w KQkq -` | Keeps `KQkq` | Drops them, with a warning | **Differs** |
@@ -415,7 +463,7 @@ A `FEN` tag sets the start position with or without `SetUp`, in both products.
 
 **#27d: an unrecognized `Result` tag.** *What changes:* no warning when the moves end with `*`. *Why:* SCID reads a `Result` tag by its first characters, so `1-0 (time)` is `1-0`. `scidtopgn` reads only the four PGN results, so it treats the tag as `*`, which agrees with the moves. Reading tags like SCID does is listed in [Known differences outside these cases](#known-differences-outside-these-cases).
 
-**#28: no result after the moves.** *What changes:* games that SCID skips are imported, with a warning naming the game. The game's result is the `Result` tag's, or `*` if there is no tag. *Why:* the moves were read without error. Skipping the whole game loses them, and the `Result` tag, if present, still gives the result.
+**#28: no result after the moves.** SCID's parser reports an error for such a game, but its importers store it with what was read. The reference converter skips it, and earlier versions of this document took that for SCID's behavior. `scidtopgn` prints a warning with the game's number and the result it used.
 
 **#29: a move that can't be read.** *What changes:* SCID imports the start of the game and marks the bad move with a comment. `scidtopgn` imports none of the game, and reports the game number, its first line, and the move. With `--on-error abort`, the import stops. *Why:* [#26](https://github.com/intermezzo-chess/scidtopgn/issues/26) chose to report such games rather than store part of a game that looks complete.
 
@@ -425,9 +473,11 @@ A `FEN` tag sets the start position with or without `SetUp`, in both products.
 
 **#32: `Variant` tag.** *What changes:* games in other variants, such as Chess960, are skipped and reported instead of being read as standard chess. *Why:* reading them as standard chess gives wrong moves or fails partway through. Chess960 is [#14](https://github.com/intermezzo-chess/scidtopgn/issues/14). `Variant` values that mean standard chess are accepted: `Standard`, `Chess`, `Normal`, and Lichess's `From Position`.
 
+**SCID's source:** [`PgnParser::ParseMoves`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnparse.cpp#l1044), [`strGetResult`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/misc.cpp#l1141), [`Position::ReadFromFEN`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/position.cpp#l2850), [`Position::PrintFEN`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/position.cpp#l3013); storing after an error, [`ParseGame`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnscid.cpp#l191) and [`ParseGame`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/tkscid.cpp#l1672).
+
 ### Text before and between games
 
-As in SCID, a game starts at its first tag line: a line whose first character other than whitespace is `[`. Everything before that line, from the start of the input or from the previous game's result, is text, and the text is kept as the comment before the game's first move. These cases were added by [#41](https://github.com/intermezzo-chess/scidtopgn/issues/41).
+As in SCID, a game starts at its first tag line: a line whose first character other than whitespace is `[`. Everything before that line, from the start of the input or from the previous game's result, is text, and the text is kept as the comment before the game's first move. `pgnscid` keeps it too, unless it is told not to, and the **SCID** column below is what it does. SCID's own import, `sc_base import`, ignores all such text. These cases were added by [#41](https://github.com/intermezzo-chess/scidtopgn/issues/41).
 
 | Case | Example | SCID | scidtopgn | Comparison |
 | --- | --- | --- | --- | --- |
@@ -455,6 +505,8 @@ Lines inside the text, including blank lines, are joined by line breaks. Text th
 **A line starting with `[` that isn't a tag.** *What changes:* the line is reported as a failed game instead of being logged and ignored. *Why:* #41 only changed text that doesn't start with `[`. A malformed tag can't be told apart from a game whose tags are broken.
 
 **A `[` after a result or a comment on the same line.** *What changes:* it is text, so `1-0 [Event "B"]` doesn't start a game, and `1-0 [Round 2 notes]` isn't reported as a failed game. *Why:* `scidtopgn` starts a game only at a tag line, as it does where a game without a result ends and where it resumes after a failed game. Before #41, `scidtopgn` read the `[` as a tag, as SCID does.
+
+**SCID's source:** [`PgnParser::ParseGame`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnparse.cpp#l1224), [`PgnParser::GetLine`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnparse.cpp#l198), [`IgnorePreGameText`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/tkscid.cpp#l1669).
 
 ### Comments, tag values, results in variations, and stray brackets
 
@@ -487,6 +539,8 @@ In a comment, each run of whitespace, including line breaks, becomes one space, 
 **A long comment in the moves.** *What changes:* a comment that SCID would cut short is kept in full. *Why:* SCID reads it into a buffer of `MAX_COMMENT_SIZE` bytes. `scidtopgn` has no fixed buffer.
 
 **A move right after a `]`.** *What changes:* the move is played instead of dropped. *Why:* SCID reads the `]` and the text after it as one unknown symbol. `scidtopgn` reads a `]` on its own, as it reads a `}`, so the move after it is read either way.
+
+**SCID's source:** [`PgnParser::GetComment`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnparse.cpp#l512), [`strSingleSpace`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/misc.cpp#l734), [`PgnParser::ExtractPgnTag`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnparse.cpp#l312), [`PgnParser::ParseMoves`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnparse.cpp#l1044), [`PgnParser::GetGameToken`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnparse.cpp#l785).
 
 ### Player names and ratings
 
@@ -555,9 +609,11 @@ With a 64-bit `unsigned long`, as on macOS, where these were run:
 
 Where `unsigned long` has 32 bits, as on Windows, every value from 2³² on is too large, so SCID would store 4,000. This wasn't run. `scidtopgn` reads a negative value as no rating, and any value above 4,000 as 4,000.
 
+**SCID's source:** [`standardPlayerName`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnparse.cpp#l269), [`standardDutchName`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnparse.cpp#l248), [`PgnParser::ExtractPgnTag`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnparse.cpp#l312), [`strGetUnsigned`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/misc.cpp#l1089); export, [`Game::WritePGN`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l3565).
+
 ### Known differences outside these cases
 
-#37 doesn't change these. The first and the last were checked against SCID's sources in `scid-cpp/scid` and `scidtopgn` as of #37, and the others by importing the examples with `pgnscid` 4.26 and `scidtopgn` ([#145](https://github.com/intermezzo-chess/scidtopgn/issues/145)).
+#37 doesn't change these. All were checked by importing the examples with `pgnscid` 4.26, and where it differs `sc_base import`, and with `scidtopgn` ([#145](https://github.com/intermezzo-chess/scidtopgn/issues/145)).
 
 | Case | Example | SCID | scidtopgn |
 | --- | --- | --- | --- |
@@ -567,7 +623,11 @@ Where `unsigned long` has 32 bits, as on Windows, every value from 2³² on is t
 | A month above 12 | `2020.13.01` | Month and day unknown | Month unknown, day 1 |
 | An empty name tag | `[White ""]` | Ignores the tag, so the name is `?` or that of an earlier tag | Stores an empty name |
 | Several tags on one line | `[Event "E"] [Site "S"]` | Reads the first, and ignores the rest of the line | Reads each |
-| Text that isn't UTF-8 | A Latin-1 `é` in a tag | Stores the bytes unchanged | Reads each byte that isn't valid UTF-8 as Windows-1252, stores UTF-8, and warns (#42). Valid UTF-8 is unchanged, even on the same line, so a name written in Latin-1 and in UTF-8 is stored once. Latin-1 bytes that happen to be valid UTF-8, such as `Ã©`, are read as UTF-8, without a warning. The five bytes Windows-1252 leaves undefined are read as the control characters U+0081, U+008D, U+008F, U+0090, and U+009D. |
+| A `ScidFlags` tag | `[ScidFlags "DN1"]` | Sets the game's flags, here deleted, novelty, and custom flag 1, and doesn't store the tag | Stores it as an ordinary tag, and sets no flags |
+| A `PlyCount` tag | `[PlyCount "2"]` | `pgnscid` drops it, and `sc_base import` keeps it | Keeps it |
+| Text that isn't UTF-8 | A Latin-1 `é` in a tag | Detects an encoding for the game's text, and converts it to UTF-8. The encoding found can be another one: `pgnscid` 4.26 converted a name of many Latin-1 `é`s to Hebrew letters. The reference converter stores the bytes | Reads each byte that isn't valid UTF-8 as Windows-1252, stores UTF-8, and warns (#42). Valid UTF-8 is unchanged, even on the same line, so a name written in Latin-1 and in UTF-8 is stored once. Latin-1 bytes that happen to be valid UTF-8, such as `Ã©`, are read as UTF-8, without a warning. The five bytes Windows-1252 leaves undefined are read as the control characters U+0081, U+008D, U+008F, U+0090, and U+009D. |
+
+**SCID's source:** [`strGetResult`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/misc.cpp#l1141), [`date_EncodeFromString`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/date.cpp#l63), [`PgnParser::ExtractPgnTag`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnparse.cpp#l312); flags, [`SetFlagStr`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4918); encodings, [`PgnParser::DoCharsetConversion`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnparse.cpp#l1350) and [`PgnParser::ConvertToUTF8`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnparse.cpp#l1310).
 
 ### Export and round trips
 
@@ -607,11 +667,13 @@ gives this from `scidtopgn`:
 *
 ```
 
-The SCID converter gives this:
+The reference converter gives this, with SCID's [`Game::WritePGN`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l3565):
 
 ```text
 1.e4 e5 ( 1...c5 2.Nf3 ) 2.Nf3 += {Develops} 2...Nc6 +-- 3.Bb5 *
 ```
+
+**SCID's source:** [`Game::WritePGN`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l3565), [`Game::WriteMoveList`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l3090), [`Game::WriteComment`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l3037), [`date_DecodeToString`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/date.cpp#l23).
 
 #### How NAGs are exported (#34)
 
@@ -624,13 +686,15 @@ The symbols both read back are `!` `?` `!!` `??` `!?` `?!` (NAGs 1 to 6), `=` (1
 
 **#34: NAGs without a symbol both read back.** *What changes:* `scidtopgn` writes `$40` where SCID writes `→`, for example. *Why:* many of SCID's symbols are Unicode or words that neither SCID nor `scidtopgn` reads, so a game exported with them loses those annotations when it is imported again. `$n` is the standard PGN form, and every PGN reader reads it. Before #37, `scidtopgn` exported most NAGs, such as $20 and $41, as nothing, and others as Unicode symbols, such as `⩲`, that it couldn't import again.
 
+**SCID's source:** [`evalNagsRegular`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/nagtext.h#l16), [`game_parseNag`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l249).
+
 ### How SCID's behavior was checked
 
-[`scid-cpp/tools/pgn_probe.cpp`](../scid-cpp/tools/pgn_probe.cpp) runs SCID's PGN parser from `scid-cpp/scid` on a PGN file. For each game, it prints:
+[`scid-cpp/tools/pgn_probe.cpp`](../scid-cpp/tools/pgn_probe.cpp) runs SCID's PGN parser from `scid-cpp/scid`, or of SCID vs. PC 4.26, on a PGN file. For each game, it prints:
 
-- whether SCID would skip the game
-- the game as SCID would store it, without tags whose value is `?`
-- the messages SCID logged for the game
+- `OK`, or `ERROR` if the parser reports an error, for which the reference converter skips the game and SCID's importers don't
+- the game as the parser reads it, without tags whose value is `?`
+- the messages the parser logged for the game
 
 Build and run it from the repository root with a C++17 compiler and zlib:
 
@@ -641,6 +705,18 @@ c++ -std=c++17 -Wno-register -w -Iscid-cpp/scid \
     -lz -o pgn_probe
 ./pgn_probe tests/data/notation.pgn
 ```
+
+To build it with the unmodified sources of 4.26 instead, on macOS, after `compat/build-scidvspc`:
+
+```sh
+V=$PWD/target/compat/scidvspc
+objs=$(ls $V/obj/*.o | grep -v -E '/(cql_.*|tcscid|pgnscid|tree|filter|pbook|crosstab|spellchk|probe|optable|engine|recog)\.o')
+c++ -std=c++11 -O1 -w -fsigned-char -DTCL_ONLY -DPROBE_TCL -I$V/scid_vs_pc-4.26/src -I$V/scid_vs_pc-4.26/src/cql \
+    -I$(xcrun --show-sdk-path)/System/Library/Frameworks/Tcl.framework/Headers \
+    scid-cpp/tools/pgn_probe.cpp $objs -framework Tcl -lz -o pgn_probe_426
+```
+
+Both print the same for `tests/data/notation.pgn`, and the examples of the sections below were run with the second.
 
 `scid-cpp/CMakeLists.txt` doesn't build `pgn_probe`, so these commands call the compiler directly. To build the reference converter itself, for example to write a test database such as `tests/data/castling`, follow [The C++ reference converter](../CONTRIBUTING.md#the-c-reference-converter-scid-cpp) in `CONTRIBUTING.md`. Then run it from the repository root as `scid-cpp/build/scidtopgn <database> <pgn-file>`.
 
@@ -745,9 +821,9 @@ game 64: OK | [Event "27c result with no result tag"] [Result "1-0"] 1.e4 e5 1-0
     logged: (game 64, line 284) Result did not match the header result
 game 65: OK | [Event "27d unrecognized result tag and unknown result"] [Result "*"] 1.e4 e5 *
     logged: (game 65, line 289) Result did not match the header result
-game 66: ERROR (SCID skips this game) | [Event "28a no result before the next game"] [Result "1-0"] 1.e4 e5 1-0
+game 66: ERROR | [Event "28a no result before the next game"] [Result "1-0"] 1.e4 e5 1-0
     logged: (game 66, line 296) PGN header '[' seen inside game (result missing ?)
-game 67: ERROR (SCID skips this game) | [Event "28c no result and no result tag"] [Result "*"] 1.e4 e5 *
+game 67: ERROR | [Event "28c no result and no result tag"] [Result "*"] 1.e4 e5 *
     logged: (game 67, line 300) PGN header '[' seen inside game (result missing ?)
 game 68: OK | [Event "29 move that can't be read"] [Result "*"] 1.e4 e5 {Error reading move: Nf6} *
     logged: (game 68, line 302) Error reading move in game ? - ?, 0: Nf6
@@ -756,7 +832,7 @@ game 70: OK | [Event "31a FEN castling rights that don't fit"] [Result "*"] [FEN
 game 71: OK | [Event "31b FEN en passant square that doesn't fit"] [Result "*"] [FEN "4k3/8/8/8/8/8/8/4K3 w - e3 0 1"] 1.Kd1 *
 game 72: OK | [Event "31c FEN en passant square with no capture"] [Result "*"] [FEN "4k3/8/8/8/4P3/8/8/4K3 b - e3 0 1"] 1...Kd7 *
 game 73: OK | [Event "32 Variant tag"] [Result "*"] [Variant "Chess960"] 1.e4 *
-game 74: ERROR (SCID skips this game) | [Event "28b no result at the end of the input"] [Result "0-1"] 1.e4 e5 0-1
+game 74: ERROR | [Event "28b no result at the end of the input"] [Result "0-1"] 1.e4 e5 0-1
     logged: (game 74, line 333) End of input reached in game (result missing ?)
 ```
 

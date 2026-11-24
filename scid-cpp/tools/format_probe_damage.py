@@ -78,6 +78,8 @@ game("d4", b"\0\0\xbf\x0f", pawns="01c0")
 record("knight15", b"\0\0\x6f\x0f")
 record("queen", b"\0\0\x43\x10\x0f")
 record("illegal", b"\0\0\x18\x0f")
+# 1. e4 d5 2. exd5, then Black's number 15, which the capture freed.
+record("stalepiece", b"\0\0\xcf\xbf\xc0\xf1\x0f")
 record("nag0", E4 + b"\x0b\0\x0f")
 record("nag9", E4 + b"".join(bytes([11, n]) for n in range(1, 10)) + b"\x0f")
 game("twocomments", E4 + b"\x0c\x0c\x0fa\0", comments=1)

@@ -70,6 +70,8 @@ python3 -I scid-cpp/tools/format_probe.py probes/db/counts > b.txt
 cmp a.txt b.txt
 ```
 
+`limits` is [`format_probe_limits.cpp`](../scid-cpp/tools/format_probe_limits.cpp), built as `format_probe.cpp` is, which calls SCID's code with counts too large to reach with a file. It is run as `./format_probe_limits probes/big probes/damage/firstbyte`, and passes.
+
 `meta` is `five` after `compat/tcl/meta.tcl set`. `flags` is `counts` with user flag *n* set on game *n*:
 
 ```tcl
@@ -143,6 +145,7 @@ SCID's error numbers are from `error.h`: 109 and 110 are versions, 152 is corrup
 | `e4`, `d4` | Nothing: 1. e4 and 1. d4 | Reads | No damage |
 | `knight15`, `queen` | Invalid value, invalid second byte | Error 406 | Damaged |
 | `illegal` | Rook to its own square | Reads | Damaged |
+| `stalepiece` | A piece number its side no longer has | Reads, as a move of the piece that had it | Damaged |
 | `nag0` | NAG 0 | Reads without it | No damage |
 | `nag9` | 9 NAGs | Reads the first 7 | No damage |
 | `twocomments` | Two markers, one text | Reads one comment | No damage |
@@ -175,11 +178,11 @@ So the conflict doesn't affect them as evidence. No rule rests only on `one` or 
 ## Remaining uncertainties
 
 - **Versions.** Only SCID vs. PC 4.26 was checked. Other releases, the original SCID, and other index versions weren't.
-- **Source only.** These were read in SCID's source and not exercised: the most games and names; that SCID doesn't lower a maximum frequency and counts frequencies when it opens a database; that a NUL ends a name; lookups in a file with first bytes out of order; piece numbers above the count; more than 255 variations of a move.
+- **Component runs.** The most games and names, and a frequency of 2²⁴, were tried by calling SCID's code (`limits`), not with a database of that size. Whether `pgnscid` can reach that frequency wasn't tried.
 - **Undefined behavior.** What SCID does after the buffer overrun of `tag255`, with `spare`, and with more than 40 tags depends on the build.
 - **Base types** are numbers to the format. What SCID's interface calls them wasn't audited.
 - **`COMPATIBILITY.md`** was audited [separately](#audit-of-compatibilitymd), with its own uncertainties.
-- **Stored lines.** The codes' values come from a table in SCID's source, which the probes print but don't derive. `tests/data/stored` has 12 cases.
+- **Platforms.** All runs were on macOS on Apple silicon. The unsigned `char` results are from a build with that option.
 - **Links** to SourceForge depend on that site. The tarball's SHA-256 identifies the source without it.
 
 ## Follow-up issues
@@ -216,6 +219,29 @@ A reviewer audited `docs/COMPATIBILITY.md` at `ec9696c`, all 351 paragraphs, tab
 | F15 | An unknown ECO code isn't stored | [Export and round trips](COMPATIBILITY.md#export-and-round-trips) |
 | F16 | Two test paths were wrong, and one test doesn't run SCID | [Tests](COMPATIBILITY.md#tests) |
 | F17 | A line feed in a name or other tag value, and spaces and tabs at a player name's ends, don't survive a round trip. A line feed in the last tag loses the whole game | [Export and round trips](COMPATIBILITY.md#export-and-round-trips), [#153](https://github.com/intermezzo-chess/scidtopgn/issues/153) |
+
+### Second review
+
+At `1e33e31`, the reviewer checked all five documents against 4.26's source and runs of it, not against other documents. Each finding was reproduced before it was corrected.
+
+| | Finding | Correction |
+| --- | --- | --- |
+| S1 | The PGN section described the reference converter, not 4.26. `pgnscid` stores games without a result, drops `PlyCount`, and converts text | The section now describes 4.26's parser and importers, with [a table of how they differ](COMPATIBILITY.md#pgn-import-compared-with-scid). #28 is no longer a difference |
+| S2 | Names that SCID writes aren't always UTF-8 | [SN4](SN4_FORMAT.md#text-encoding-and-legacy-names), [Reading](COMPATIBILITY.md#reading) |
+| S3 | SCID can store ratings above 4,000 | [Ratings](SI4_FORMAT.md#ratings) |
+| S4 | A second rating tag is stored in the record | [Tags](SG4_FORMAT.md#tags) |
+| S5 | `ScidFlags` sets flags in SCID | [Known differences](COMPATIBILITY.md#known-differences-outside-these-cases) |
+| S6 | Frequencies and PGN dates weren't marked as differences | [SN4](SN4_FORMAT.md#header-sections-ids-and-frequencies), [SI4](SI4_FORMAT.md#dates-and-event-dates), [Append](COMPATIBILITY.md#append) |
+| S7 | SCID clears some of the unused header bytes | [Header](SI4_FORMAT.md#file-header-and-database-metadata) |
+| S8 | A failed write by SCID can leave a readable database | [Deliberate differences](COMPATIBILITY.md#deliberate-differences) |
+| S9 | Citations that didn't establish the claim, and a claim about older versions of SCID | Citations added or replaced, and the claim removed |
+| S10 | A frequency of 2²⁴ wraps | [SN4](SN4_FORMAT.md#header-sections-ids-and-frequencies) |
+
+Reproducing them showed three more: `sc_base import` ignores text before games; neither importer skips a game with an error; and 4.26 writes a record it can't read when a tag value is over 255 bytes after conversion.
+
+`COMPATIBILITY.md` had no links to SCID's source. It now links the code for each section's claims. The PGN tables' examples were run again with the unmodified 4.26 parser, which agreed with each, apart from S1. Its `pgnparse.cpp` differs from the copy in `scid-cpp/scid` only in which headers it includes, and `position.cpp` doesn't differ.
+
+### Not verified
 
 Not verified by either:
 
@@ -285,7 +311,7 @@ Not verified by either:
 | 352 | **Name Storage Format** | Confirmed |  | S, `names*`, `maxfreq` | [SN4_FORMAT](SN4_FORMAT.md#header-sections-ids-and-frequencies) |
 | 354 | **Front-Coding Compression Algorithm** | Confirmed |  | S, `accents`, `namecases`, order files | [SN4_FORMAT](SN4_FORMAT.md#front-coding-and-name-ordering) |
 | 364–370 | text block | Corrected | The names weren't in the required order ("Carlsen, Magnus" before "Carlsen, Henrik"). Replaced by fixture bytes | S, `accents`, `namecases`, order files | [SN4_FORMAT](SN4_FORMAT.md#front-coding-and-name-ordering) |
-| 372 | **Name Order** | Qualified | Right, and tested with both kinds of `char`. Platform dependence made explicit. "Can't look its names up" is from source only | S, `accents`, `namecases`, order files | [SN4_FORMAT](SN4_FORMAT.md#front-coding-and-name-ordering) |
+| 372 | **Name Order** | Qualified | Right, and tested with both kinds of `char`. Platform dependence made explicit. "Can't look its names up" is confirmed by `limits` | S, `accents`, `namecases`, order files | [SN4_FORMAT](SN4_FORMAT.md#front-coding-and-name-ordering) |
 | 381–383 | text block | Confirmed | The same order as `accents.sn4` | S, `accents`, `namecases`, order files | [SN4_FORMAT](SN4_FORMAT.md#front-coding-and-name-ordering) |
 | 387 | **Name Record Structure** | Corrected |  | S, `names*`, `maxfreq` | [SN4_FORMAT](SN4_FORMAT.md#header-sections-ids-and-frequencies) |
 | 391–396 | text block | Corrected | The prefix length was missing from the diagram and the field list | S, `names*`, `maxfreq` | [SN4_FORMAT](SN4_FORMAT.md#header-sections-ids-and-frequencies) |

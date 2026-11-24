@@ -79,7 +79,7 @@ SCID can also keep a `.stc` file, a cache of its opening tree, which isn't neede
 | Tags of a game | 40 | SCID's limit: 4.26 [crashes above it](SG4_FORMAT.md#tags). The record can have more |
 | Year | 2047 | 11 bits |
 | Event date | 3 years from the game's year | [3 bits](SI4_FORMAT.md#dates-and-event-dates) |
-| Rating | 4,000 | SCID's limit. 12 bits hold 4,095 |
+| Rating | 4,095 | 12 bits. SCID reads more than 4,000 as 4,000, and its PGN import stores at most that |
 | Half-moves | Stored modulo 1,024 | 10 bits. The record can have more |
 | Counts of variations, comments, and NAGs | 50 | [4-bit codes](SI4_FORMAT.md#result-and-counts). The record can have more |
 | NAGs of a move | 7 | SCID's limit. The record can have more |
@@ -136,10 +136,10 @@ A capture that renumbers pieces and a game with variations and comments are work
 - [`format_probe.cpp`](../scid-cpp/tools/format_probe.cpp) reads it with SCID 4.26's own code.
 - [`format_probe.py`](../scid-cpp/tools/format_probe.py) reads it as these documents describe, without code from SCID or scidtopgn. It also works out each entry's derived fields, except the stored line, from its game, and checks the bounds above.
 
-[SCID_FORMAT_AUDIT.md](SCID_FORMAT_AUDIT.md#verification) gives the commands, the databases, and the results. The names in the **Evidence** columns, such as `dates`, are its databases. "Source only" means that a rule was read in SCID's source and not exercised. Tests that only write and read with scidtopgn aren't used as evidence.
+[SCID_FORMAT_AUDIT.md](SCID_FORMAT_AUDIT.md#verification) gives the commands, the databases, and the results. The names in the **Evidence** columns, such as `dates`, are its databases. Tests that only write and read with scidtopgn aren't used as evidence.
 
 **Not resolved:**
 
 - Other versions and programs, as above.
-- The rules marked "Source only".
+- Counts too large for a file that could be tried, such as the most games. They were tried by calling SCID's code.
 - What base types mean, beyond the number: SCID's interface defines them.

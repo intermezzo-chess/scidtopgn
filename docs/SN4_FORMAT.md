@@ -86,7 +86,7 @@ A section with fewer than 256 names still has 2-byte IDs: only frequencies can t
 
 **Frequencies** count the uses of a name by index entries, counting deleted games, and counting a player twice for a game against itself. A name no game uses can stay, with frequency 0.
 
-**SCID's behavior.** SCID doesn't rely on the stored frequencies: it counts them again when it opens a database, unless a fast open is requested. The maximum frequency rises with a name's frequency, but SCID doesn't lower it when that frequency falls.
+**SCID's behavior.** SCID doesn't rely on the stored frequencies: it counts them again when it opens a database, unless a fast open is requested. The maximum frequency rises with a name's frequency, but SCID doesn't lower it when that frequency falls. SCID doesn't check that a frequency fits in 3 bytes: at 16,777,216, its maximum wraps to 0 in the header while the records are written with 3-byte frequencies, and it reads the file back with a wrong name. Only adding to one name's frequency in memory was tried, not a database with that many uses.
 
 | Rule | SCID vs. PC 4.26 | Evidence | scidtopgn |
 | --- | --- | --- | --- |
@@ -95,8 +95,8 @@ A section with fewer than 256 names still has 2-byte IDs: only frequencies can t
 | ID width | [`numNames`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/namebase.cpp#l182), [`numNames`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/namebase.cpp#l282) | Probes `names255`, `names256`, `names65535`, `names65536`, `names66000` | The same functions |
 | Frequency width | [`maxFrequency`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/namebase.cpp#l191), [`maxFrequency`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/namebase.cpp#l289) | The same probes, with those numbers as frequencies; `maxfreq` for a maximum no name has | The same functions |
 | IDs | [`numNames`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/namebase.cpp#l384) | Every probe database | [`add_name`](../crates/scidtopgn/src/namebase.rs). Differs: [names can get new IDs](COMPATIBILITY.md#names-that-arent-utf-8) |
-| Most names | [`NAME_MAX_ID`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/namebase.h#l46), [`NAME_MAX_ID`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/namebase.cpp#l361) | Source only | [`max_id`](../crates/scidtopgn/src/namebase.rs) |
-| Frequencies | [`NameBase::IncFrequency`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/namebase.h#l254), [`recalcNameFrequencies`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/tkscid.cpp#l310) | Probes `names*`; counting when opening, and not lowering the maximum, are from source only | [`increment_frequency`](../crates/scidtopgn/src/namebase.rs) |
+| Most names | [`NAME_MAX_ID`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/namebase.h#l46), [`NAME_MAX_ID`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/namebase.cpp#l361) | Probe `limits` | [`max_id`](../crates/scidtopgn/src/namebase.rs) |
+| Frequencies | [`NameBase::IncFrequency`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/namebase.h#l254), [`recalcNameFrequencies`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/tkscid.cpp#l310), [`fastOpen`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/tkscid.cpp#l1047) | Probes `names*`, `limits`; opening `tests/data/castling`, whose frequencies are 0, with and without `-fast` | [`increment_frequency`](../crates/scidtopgn/src/namebase.rs). Differs: [doesn't count again](COMPATIBILITY.md#append) |
 | Timestamp | [`SetTimeStamp`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnscid.cpp#l256) | Every probe database has 0 | Kept as stored |
 
 ## Front coding and name ordering
@@ -151,12 +151,12 @@ Two names of a section can't be the same.
 | --- | --- | --- | --- |
 | Front coding | [`nameStr`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/namebase.cpp#l208), [`strPrefix`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/misc.cpp#l386) | Probe `namecases`, `tests/data/accents` | [`read_sn4`](../crates/scidtopgn/src/namebase.rs), [`compute_prefix`](../crates/scidtopgn/src/namebase.rs) |
 | Order within a first byte | [`StrTree<C>::AddLast`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/strtree.h#l485), [`strCompare_INLINE`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/misc.h#l193) | Probes `order`, `signed`, `unsigned`, `duplicate`, with both kinds of `char` | [`scid_order`](../crates/scidtopgn/src/namebase.rs). Differs when reading: [any order is accepted](COMPATIBILITY.md#files-scid-refuses-or-misreads) |
-| Order of first bytes | [`StrTree<C>::MakeList`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/strtree.h#l273), [`StrTree<C>::MakeTree`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/strtree.h#l340) | Probe `firstbyte`; the effect on lookups is from source only | [`scid_order`](../crates/scidtopgn/src/namebase.rs) |
+| Order of first bytes | [`StrTree<C>::MakeList`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/strtree.h#l273), [`StrTree<C>::MakeTree`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/strtree.h#l340) | Probes `firstbyte`, `limits` | [`scid_order`](../crates/scidtopgn/src/namebase.rs) |
 
 ## Text encoding and legacy names
 
 - A name is a sequence of 0 to 255 bytes. The file doesn't record or check an encoding.
-- `pgnscid` and SCID's PGN import write UTF-8: they convert the PGN they read. Other programs, and older versions of SCID, can have stored Latin-1 or Windows-1252 bytes, and one file can hold both. The `latin1` and `mixed` fixtures, written by the reference converter in `scid-cpp`, hold such names.
+- `pgnscid` and SCID's PGN import convert PGN text that isn't UTF-8 to UTF-8, with the encoding they detect. A name that is then longer than 255 bytes is cut there, inside a character if need be, so even their files can hold a name that isn't valid UTF-8. Other programs can store other encodings, and one file can hold several. The `latin1` and `mixed` fixtures, written by the reference converter in `scid-cpp`, hold such names.
 - Names are read as stored. Control characters are kept, and nothing is filtered or trimmed, so names that differ only by a control character or a space are different names.
 - A name can be empty.
 - SCID holds names as C strings, so a byte of 0 in a name ends it when SCID reads it. SCID never writes one.
@@ -166,5 +166,6 @@ How a program shows or converts bytes that aren't UTF-8 isn't part of the format
 | Rule | SCID vs. PC 4.26 | Evidence | scidtopgn |
 | --- | --- | --- | --- |
 | Bytes kept as stored | [`readString`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/namebase.cpp#l218), [`writeString`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/namebase.cpp#l303) | Probes `namecases`, `controls`, `latin1` and `mixed` fixtures | [`read_sn4`](../crates/scidtopgn/src/namebase.rs). Differs: [bytes that aren't UTF-8 are converted](COMPATIBILITY.md#reading) |
+| Conversion on import | [`PgnParser::DoCharsetConversion`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnparse.cpp#l1350), [`PgnParser::ConvertToUTF8`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnparse.cpp#l1310) | `pgnscid` run on Latin-1 names, one of which it cut inside a character | Differs: [read as Windows-1252](COMPATIBILITY.md#known-differences-outside-these-cases) |
 | Length limit | [`strlen`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/namebase.cpp#l374) | Probe `namecases`: 255 bytes | [`stored_name`](../crates/scidtopgn/src/namebase.rs). Differs: [a cut never splits a character](COMPATIBILITY.md#general-differences) |
-| NUL ends a name | [`nameStr`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/namebase.cpp#l221) | Source only | Differs: the whole name is read |
+| NUL ends a name | [`nameStr`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/namebase.cpp#l221) | A name with a NUL that scidtopgn wrote, read by SCID | Differs: [the whole name is read](COMPATIBILITY.md#reading) |
