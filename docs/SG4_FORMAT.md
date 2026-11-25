@@ -1,6 +1,6 @@
 # Game file (.sg4)
 
-The game file holds each game's record: the tags the [index](SI4_FORMAT.md) has no field for, the starting position if it isn't the standard one, the moves with their variations and NAGs, and the comments. It has no header.
+The game file holds each game's record: the tags the [index](SI4_FORMAT.md) has no field for, the starting position if one was given, the moves with their variations and NAGs, and the comments. It has no header.
 
 [SCID_FORMAT.md](SCID_FORMAT.md) states which version this describes, its terms, and [how each rule was checked](SCID_FORMAT.md#sources-and-verification). "SCID" means SCID vs. PC 4.26.
 
@@ -82,14 +82,14 @@ f7               2c "accelerated fianchetto, Gurgenidze variation"
 ```text
   7  6  5  4  3    2              1           0
 ┌───────────────┬──────────────┬───────────┬──────────────────┐
-│ 0             │ underpromo-  │ promotion │ nonstandard start│
+│ 0             │ underpromo-  │ promotion │ has a FEN        │
 │               │ tion         │           │                  │
 └───────────────┴──────────────┴───────────┴──────────────────┘
 ```
 
-The bits mean the same as [bits 0 to 2 of the index entry's flags](SI4_FORMAT.md#flags). SCID writes the other bits as 0, and ignores them.
+The bits mean the same as [bits 0 to 2 of the index entry's flags](SI4_FORMAT.md#flags), where bit 0 can also be set without a starting position. SCID writes the other bits as 0, and ignores them.
 
-If bit 0 is set, a FEN follows, ending with a NUL. SCID writes all six fields, and reads a FEN without its last fields too. Without it, the game starts from the standard position.
+If bit 0 is set, a FEN follows, ending with a NUL. It can be of the standard position: SCID sets the bit whenever a starting position was given ([`Game::SetStartFen`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l737)). SCID writes all six fields, and reads a FEN without its last fields too. If it isn't set, the game starts from the standard position.
 
 | Rule | SCID vs. PC 4.26 | Evidence | scidtopgn |
 | --- | --- | --- | --- |

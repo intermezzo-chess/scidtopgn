@@ -622,9 +622,10 @@ Where `unsigned long` has 32 bits, as on Windows, every value from 2³² on is t
 | A date part that isn't only digits | `2024x.05.06`, `20a0.01.01` | Reads the digits it starts with: 2024, 20 | The part is unknown |
 | A date with another separator | `2020-05-06` | Reads the year, 2020 | Unknown |
 | A month above 12 | `2020.13.01` | Month and day unknown | Month unknown, day 1 |
+| A date part of 2³² or more | `4294967297.01.01` | Wraps around, here to the year 1, where `unsigned long` has 64 bits, as for [ratings](#player-names-and-ratings). Windows wasn't run | The part is unknown |
 | An empty name tag | `[White ""]` | Ignores the tag, so the name is `?` or that of an earlier tag | Stores an empty name |
 | Several tags on one line | `[Event "E"] [Site "S"]` | Reads the first, and ignores the rest of the line | Reads each |
-| A `ScidFlags` tag | `[ScidFlags "DN1"]` | Sets the game's flags, here deleted, novelty, and custom flag 1, and doesn't store the tag | Stores it as an ordinary tag, and sets no flags |
+| A `ScidFlags` tag | `[ScidFlags "DN1"]` | Sets the game's flags, here deleted, novelty, and custom flag 1, and doesn't store the tag. A character that isn't a flag's letter sets the [start flag](SI4_FORMAT.md#flags) | Stores it as an ordinary tag, and sets no flags |
 | A `PlyCount` tag | `[PlyCount "2"]` | `pgnscid` drops it, and `sc_base import` keeps it | Keeps it |
 | Text that isn't UTF-8 | A Latin-1 `é` in a tag | Detects an encoding for the game's text, and converts it to UTF-8. The encoding found can be another one: `pgnscid` 4.26 converted a name of many Latin-1 `é`s to Hebrew letters. The reference converter stores the bytes | Reads each byte that isn't valid UTF-8 as Windows-1252, stores UTF-8, and warns (#42). Valid UTF-8 is unchanged, even on the same line, so a name written in Latin-1 and in UTF-8 is stored once. Latin-1 bytes that happen to be valid UTF-8, such as `Ã©`, are read as UTF-8, without a warning. The five bytes Windows-1252 leaves undefined are read as the control characters U+0081, U+008D, U+008F, U+0090, and U+009D. |
 

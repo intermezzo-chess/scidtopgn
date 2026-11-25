@@ -121,7 +121,7 @@ Two SCID limits differ from the 17 bits. SCID's encoder accepts a record of exac
 
 | Bit | Mask | Meaning | SCID's letter |
 | --- | --- | --- | --- |
-| 0 | `0001` | Starts from a position other than the standard one | |
+| 0 | `0001` | Its record has a [starting position](SG4_FORMAT.md#flags-and-starting-position) | |
 | 1 | `0002` | Has a promotion in the main line | |
 | 2 | `0004` | Has a promotion to a rook, bishop, or knight in the main line | |
 | 3 | `0008` | Marked as deleted | `D` |
@@ -138,7 +138,7 @@ Two SCID limits differ from the 17 bits. SCID's encoder accepts a record of exac
 | 14 | `4000` | Blunder or bad play | `?` |
 | 15 | `8000` | User-defined | `U` |
 
-SCID derives bits 0 to 2 from the game; the rest are set by the user. Custom flags 1 to 6, letters `1` to `6`, are in [byte 6](#record-length-and-custom-flags).
+SCID derives bits 0 to 2 from the game, and the rest are set by the user. Bit 0 doesn't depend on which position it is: a PGN `FEN` tag sets it, even if the FEN is of the standard position. It can also be set without a starting position: when SCID imports a PGN `ScidFlags` tag, each character that isn't a flag's letter, such as `x`, sets bit 0. Custom flags 1 to 6, letters `1` to `6`, are in [byte 6](#record-length-and-custom-flags).
 
 ### Name IDs
 
@@ -210,7 +210,7 @@ The rating has 12 bits, 0 to 4,095; 0 means none. SCID's PGN import stores at mo
 | Entry layout | [`IndexEntry::Read`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.cpp#l173), [`IndexEntry::Write`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.cpp#l239), [`INDEX_ENTRY_SIZE`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l579) | Probe `fixtures`, every probe database | [`IndexEntry`](../crates/scidtopgn/src/index.rs) |
 | Record length | [`GetLength`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l263), [`SetLength`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l354) | Probes `long`, `blocks`, `size131071` | [`get_length`](../crates/scidtopgn/src/index.rs) |
 | Length 131,072 and over | [`MAX_GAME_LENGTH`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l28), [`MAX_GAME_LENGTH`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4961) | Probes `size131072`, `size131073` | Differs: [refuses both](COMPATIBILITY.md#limits-shared-with-scid) |
-| Flags | [`IDX_FLAG_START`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l87), [`GetFlag`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l295), [`IndexEntry::CharToFlag`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.cpp#l295) | Probe `flags`, which sets each user flag; `tests/data/derived` | [`get_flag`](../crates/scidtopgn/src/index.rs), [`get_custom_flag`](../crates/scidtopgn/src/index.rs) |
+| Flags | [`IDX_FLAG_START`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l87), [`GetFlag`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l295), [`IndexEntry::CharToFlag`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.cpp#l295), [`Game::SetStartFen`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l737), [`SetStartFlag`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4914), [`IndexEntry::SetFlagStr`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.cpp#l327) | Probe `flags`, which sets each user flag; `tests/data/derived`; `pgnscid` run on a FEN of the standard position, and on `[ScidFlags "x"]` | [`get_flag`](../crates/scidtopgn/src/index.rs), [`get_custom_flag`](../crates/scidtopgn/src/index.rs). Differs: [`ScidFlags`](COMPATIBILITY.md#known-differences-outside-these-cases) |
 | Name IDs | [`IndexEntry::GetWhite`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l484) to [`IndexEntry::GetRound`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l558), [`NAME_MAX_ID`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/namebase.h#l46) | Probes `names66000`, `limits` | [`get_white`](../crates/scidtopgn/src/index.rs) to [`get_round`](../crates/scidtopgn/src/index.rs) |
 | Invalid ID | [`IndexEntry::Verify`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.cpp#l95), [`VerifyFile`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/tkscid.cpp#l1038) | Probe `badname` | Differs: [reads the name as `?`](COMPATIBILITY.md#files-scid-refuses-or-misreads) |
 | Counts and result | [`EncodeCount`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l329), [`DecodeCount`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l338), [`GetResult`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l286) | Probes `counts` (0 to 55 of each), `fixtures` | [`encode_count`](../crates/scidtopgn/src/index.rs), [`get_result`](../crates/scidtopgn/src/index.rs) |
@@ -261,13 +261,13 @@ month           1100   = 12
 day            10011   = 19                        2022.12.19
 ```
 
-**PGN import.** How PGN date text becomes these parts isn't part of the format. SCID's reader stores a year over 2047 as 0, a month over 12 as 0 with the day, and a day over 31 as 0.
+**PGN import.** How PGN date text becomes these parts isn't part of the format. SCID's reader stores a year over 2047 as 0, a month over 12 as 0 with the day, and a day over 31 as 0. It compares each part after converting it to 32 bits, which wraps a large number around: where `unsigned long` has 64 bits, `4294967297.01.01` is stored as 0001.01.01.
 
 | Rule | SCID vs. PC 4.26 | Evidence | scidtopgn |
 | --- | --- | --- | --- |
 | Packing | [`DATE_MAKE`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/date.h#l44), [`YEAR_MAX`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/date.h#l42), [`GetDate`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.h#l280) | Probe `dates` | [`Date`](../crates/scidtopgn/src/date.rs), [`get_date`](../crates/scidtopgn/src/index.rs) |
 | Event date | [`IndexEntry::GetEventDate`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.cpp#l120), [`IndexEntry::SetEventDate`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.cpp#l137) | Probe `dates`: 2015 to 2025 for a game in 2020, and game years 0 to 3 | [`get_event_date`](../crates/scidtopgn/src/index.rs), [`set_event_date`](../crates/scidtopgn/src/index.rs) |
-| PGN dates | [`date_EncodeFromString`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/date.cpp#l63) | Probe `dates` | [`from_string`](../crates/scidtopgn/src/date.rs). Differs: [dates that aren't all digits, and months above 12](COMPATIBILITY.md#known-differences-outside-these-cases) |
+| PGN dates | [`date_EncodeFromString`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/date.cpp#l63), [`strGetUnsigned`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/misc.cpp#l1089) | Probe `dates`; `pgnscid` run on parts of 2³² or more | [`from_string`](../crates/scidtopgn/src/date.rs). Differs: [dates that aren't all digits, months above 12, and parts of 2³² or more](COMPATIBILITY.md#known-differences-outside-these-cases) |
 
 ## Search fields and derived game metadata
 
@@ -285,7 +285,7 @@ SCID computes these fields from the main line when it stores a game, and its sea
 
 The low 24 bits count the pieces at the end of the main line. Queens, rooks, bishops, and knights count at most 3 each, and a higher count is stored as 3. Pawns have 4 bits.
 
-The top 8 bits are the code of a stored line: one of 254 openings in SCID's source, numbered from 1. It is the longest line whose moves all start the game, comparing from- and to-squares, and the first of those with the same length. 0 means that no line matches or that the game doesn't start from the standard position.
+The top 8 bits are the code of a stored line: one of 254 openings in SCID's source, numbered from 1. It is the longest line whose moves all start the game, comparing from- and to-squares, and the first of those with the same length. 0 means that no line matches or that the record has a starting position, even if it is the standard one.
 
 In `tests/data/one.si4`, offset 215, `9c 29 72 87` is stored line 156, and 2 rooks, 2 bishops, 1 knight, and 7 pawns against 2 rooks, 2 bishops, and 7 pawns.
 
@@ -308,13 +308,13 @@ In `tests/data/one.si4`, offset 215, `9c 29 72 87` is stored line 156, and 2 roo
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Pawn | a2 | b2 | c2 | d2 | e2 | f2 | g2 | h2 | a7 | b7 | c7 | d7 | e7 | f7 | g7 | h7 |
 
-A game that doesn't start from the standard position lists none, and its promotion flags and half-moves are still set from its moves.
+A game whose record has a starting position, even the standard one, lists none, and its promotion flags and half-moves are still set from its moves.
 
 In `tests/data/one.si4`, offset 219, `25 09 b5 c1 d4 ae 70` is 37 half-moves and 9 pawns: e2, c7, d2, g7, c2, d7, f2, b2, a7. In `tests/data/derived.si4`, offset 219, `2e 43` is 0x12E = 302 half-moves and 3 pawns.
 
 | Rule | SCID vs. PC 4.26 | Evidence | scidtopgn |
 | --- | --- | --- | --- |
 | Material | [`SHIFT_WQ`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/matsig.h#l47), [`matsig_Make`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/matsig.cpp#l92) | Every probe game, derived again from its moves | [`material_sig`](../crates/scidtopgn/src/index.rs) |
-| Stored lines | [`storedLineText`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/stored.cpp#l49), [`storedLineCode`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4930) | All 254 lines, each imported by `pgnscid`; `tests/data/stored` | [`code`](../crates/scidtopgn/src/stored_line.rs) |
+| Stored lines | [`storedLineText`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/stored.cpp#l49), [`storedLineCode`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4930), [`NonStandardStart`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4931) | All 254 lines, each imported by `pgnscid`; `tests/data/stored` | [`code`](../crates/scidtopgn/src/stored_line.rs) |
 | Half-moves | [`NumHalfMoves`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.cpp#l218), [`NumHalfMoves`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/index.cpp#l279) | Probe `moves`: 0 to 2,049 | [`MAX_HALF_MOVES`](../crates/scidtopgn/src/index.rs) |
-| Home pawns | [`Game::MakeHomePawnList`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l1379), [`Position::GetHPSig`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/position.cpp#l536) | Every probe game, derived again from its moves | [`HomePawnList`](../crates/scidtopgn/src/index.rs) |
+| Home pawns | [`Game::MakeHomePawnList`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l1379), [`NonStandardStart`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l1388), [`Position::GetHPSig`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/position.cpp#l536) | Every probe game, derived again from its moves | [`HomePawnList`](../crates/scidtopgn/src/index.rs) |

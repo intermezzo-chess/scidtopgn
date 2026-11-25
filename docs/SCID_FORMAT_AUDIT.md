@@ -270,11 +270,21 @@ At `81b5721`, the reviewer checked the corrections above. Each finding was repro
 
 At `8724c38`, the reviewer found these resolved, and one more: a frequency above 16,777,215 doesn't always make the file unreadable (T5). It was reproduced and corrected.
 
+### Fourth review
+
+At `ca3a6aa`, a reviewer checked `SI4_FORMAT.md` alone, 119 claims, against the code it links to. Each finding was reproduced before it was corrected.
+
+| | Finding | Correction |
+| --- | --- | --- |
+| U1 | A `FEN` tag of the standard position sets the start flag, and leaves the stored-line code 0 and the home pawns empty. scidtopgn does the same | [Flags](SI4_FORMAT.md#flags), [Search fields](SI4_FORMAT.md#search-fields-and-derived-game-metadata), [SG4](SG4_FORMAT.md#flags-and-starting-position) |
+| U2 | `[ScidFlags "x"]` sets the start flag without a starting position | [Flags](SI4_FORMAT.md#flags), [Known differences](COMPATIBILITY.md#known-differences-outside-these-cases) |
+| U3 | The limits of date parts apply after a conversion that wraps | [Dates](SI4_FORMAT.md#dates-and-event-dates), [Known differences](COMPATIBILITY.md#known-differences-outside-these-cases) |
+
 ### Not verified
 
 Not verified by either:
 
-- Ratings where `unsigned long` has 32 bits, such as on Windows. The document says so.
+- Ratings and dates where `unsigned long` has 32 bits, such as on Windows. The documents say so.
 - Which Tcl SCID vs. PC 4.27 for macOS bundles. The document no longer says. How Tcl 8.6.13 and 8.6.0 match was read in their source, and 8.6.0's functions were run on their own, not in SCID.
 - SCID's GUI, two programs writing at once, power loss, and every way a file operation can fail.
 - What "Before #..." statements say about old versions, beyond the linked issues.
