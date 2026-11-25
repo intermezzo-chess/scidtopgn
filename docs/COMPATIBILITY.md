@@ -65,7 +65,7 @@ scidtopgn reads some files that SCID vs. PC 4.26 doesn't, and the other way arou
 | A record with more than 40 tags | Crashes when it decodes the tags | Keeps the first 40, without a warning. Import does the same, where `pgnscid` crashes |
 | Names out of [order](SN4_FORMAT.md#order), or the same name twice | Refuses to open the database, or can't look names up | Reads them. A write puts them in order, and [merges](#names-that-arent-utf-8) the same names |
 | An entry with a name ID that no name has | Refuses to open the database | Reads the name as `?` |
-| A move of a piece number its side doesn't have, or an illegal move that has a destination | Plays it as written, from the square the number last had | Refuses the game (`rejects_illegal_bytes` in `crates/scidtopgn/src/mov.rs`) |
+| A move of a piece number its side doesn't have, or an illegal move that has a destination | Plays it as written, from the square the number last had, if a piece is on it | Refuses the game (`rejects_illegal_bytes` in `crates/scidtopgn/src/mov.rs`) |
 
 `scidtopgn validate` reports damage only in games scidtopgn can't read, so it finds only the last of these.
 

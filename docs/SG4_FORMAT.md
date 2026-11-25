@@ -140,7 +140,7 @@ Black    ...  c7   d5   ...  g7   h7     →      Black    ...  c7   h7   ...  g
 
 A variation starts from the position **before** the move it replaces, with the numbers the pieces had then. A reader can copy the position before each move, or undo the move and its renumbering exactly, as SCID does.
 
-A number at or above the side's number of pieces is invalid. SCID doesn't check it: its list can still hold the square of a piece that was captured or renumbered.
+A number at or above the side's number of pieces is invalid. SCID doesn't compare it with that number. Its list can still hold the square of a piece that was captured or renumbered, and SCID moves the piece that is on that square now. If the square is empty, or isn't on the board, it reports a decoding error.
 
 | Rule | SCID vs. PC 4.26 | Evidence | scidtopgn |
 | --- | --- | --- | --- |
@@ -148,7 +148,7 @@ A number at or above the side's number of pieces is invalid. SCID doesn't check 
 | FEN | [`Position::AddPiece`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/position.cpp#l700), [`AddPiece`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/position.cpp#l2898) | Probes `random` (200 games), `edge` | [`from_board`](../crates/scidtopgn/src/position.rs) |
 | Changes | [`Position::DoSimpleMove`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/position.cpp#l1804) | Probe `random`: 600 games with captures, en passant, promotions, and castling | [`PieceList`](../crates/scidtopgn/src/position.rs) |
 | Variations | [`Game::AddVariation`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l1036), [`Position::UndoSimpleMove`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/position.cpp#l1956) | Probes `random`, `comments`, `edge` | [`decode_variation`](../crates/scidtopgn/src/game.rs) |
-| Invalid number | [`from`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4499) | Probe `stalepiece` | [`decode_move`](../crates/scidtopgn/src/mov.rs). Differs: [refused](COMPATIBILITY.md#files-scid-refuses-or-misreads) |
+| Invalid number | [`from`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4499), [`movingPiece`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4502) | Probes `stalepiece`, `staleempty` | [`decode_move`](../crates/scidtopgn/src/mov.rs). Differs: [refused](COMPATIBILITY.md#files-scid-refuses-or-misreads) |
 
 ## Piece-specific move encoding
 
@@ -209,7 +209,7 @@ a0     3... cxd4   piece 10, pawn c5, value 0: 34 - 7 = 27
 
 The piece number is part of the byte, so 1. e4 is `cf` and 1. d4 is `bf`. `6f` isn't a pawn move: number 6 is a knight, for which 15 is invalid.
 
-**Damaged records.** A king value over 10, an invalid knight value, or a second queen byte outside 64 to 127 makes SCID report a decoding error, and so does a bishop destination off the board. SCID checks nothing else: a move that isn't legal is played as it is written. `18` at the start of a game, a rook's move to its own square, is played as a move from a1 to a1.
+**Damaged records.** An invalid knight value, a second queen byte outside 64 to 127, or a bishop destination off the board makes SCID report a decoding error, and so do some [invalid numbers](#changes). The bytes `0b` to `0f` aren't moves of the king, but [markers](#variations-comments-and-annotations), and are read as such. SCID checks nothing else about a move. A king, knight, or pawn destination off the board is undefined, as SCID writes outside its board: in the probe's build, `61` at the start of a game is read as a knight's move from g1 to square 245. Any other move that isn't legal is played as it is written. `18` at the start of a game, a rook's move to its own square, is played as a move from a1 to a1.
 
 | Rule | SCID vs. PC 4.26 | Evidence | scidtopgn |
 | --- | --- | --- | --- |
@@ -220,7 +220,7 @@ The piece number is part of the byte, so 1. e4 is `cf` and 1. d4 is `bf`. `6f` i
 | Bishop | [`encodeBishop`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4277), [`decodeBishop`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4299) | Probe `random` | [`decode_move`](../crates/scidtopgn/src/mov.rs) |
 | Queen | [`encodeQueen`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4317), [`decodeQueen`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4360) | Probes `random`, `queen` | [`decode_move`](../crates/scidtopgn/src/mov.rs) |
 | Pawn | [`encodePawn`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4383), [`decodePawn`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4427) | Probe `random`, `edge` | [`PAWN_SQDIFF`](../crates/scidtopgn/src/mov.rs), [`PAWN_PROMO`](../crates/scidtopgn/src/mov.rs) |
-| Illegal moves | [`decodeMove`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4492) | Probe `illegal` | Differs: [refused](COMPATIBILITY.md#files-scid-refuses-or-misreads) |
+| Illegal moves | [`decodeMove`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4492) | Probes `illegal`, `knightoff` | Differs: [refused](COMPATIBILITY.md#files-scid-refuses-or-misreads) |
 
 ## Variations, comments, and annotations
 
@@ -247,7 +247,7 @@ That is `tests/data/edge.sg4` from offset 2.
 
 **NAGs.** A NAG is 1 to 255. What each means isn't part of the format; 1 to 6 are `!`, `?`, `!!`, `??`, `!?`, and `?!`.
 
-**Comments** follow the end of the game, each ending with a NUL. There is one text for each move, or start of a line, that has at least one marker. A marker before the first move of a line is for the start of that line, and its text is the comment before the line's first move. No encoding is recorded. SCID's PGN import converts comments that aren't UTF-8 to UTF-8 ([`PgnParser::ConvertComments`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnparse.cpp#l1388)).
+**Comments** follow the end of the game, each ending with a NUL. There is one text for each move, or start of a line, that has at least one marker. A marker before the first move of a line is for the start of that line, and its text is the comment before the line's first move. No encoding is recorded. SCID's PGN import converts comments to UTF-8 when it converts [the game's other text](SN4_FORMAT.md#text-encoding-and-legacy-names) ([`PgnParser::ConvertComments`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnparse.cpp#l1388)). `sc_base import file` doesn't if the file starts with a UTF-8 byte order mark ([`PgnParser::Reset`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnparse.cpp#l72)), and then stores their bytes as they are.
 
 The texts are in the order of the game's tree, not of the markers in the bytes: the start of a line, then each of its moves in turn, and after each move its variations, each in the same way. A writer that puts a move's marker before its variations, as SCID does, gives the two the same order. A reader has to use the tree, because SCID also reads a marker after the variations, as for this record:
 

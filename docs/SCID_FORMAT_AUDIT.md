@@ -159,6 +159,8 @@ SCID's error numbers are from `error.h`: 109 and 110 are versions, 152 is corrup
 | `knight15`, `queen` | Invalid value, invalid second byte | Error 406 | Damaged |
 | `illegal` | Rook to its own square | Reads | Damaged |
 | `stalepiece` | A piece number its side no longer has | Reads, as a move of the piece that had it | Damaged |
+| `staleempty` | The same, after that piece has moved | Error 406 | Damaged |
+| `knightoff` | Knight from g1 to 11 squares before a1 | Reads, as a move to square 245 | Damaged |
 | `nag0` | NAG 0 | Reads without it | No damage |
 | `nag9` | 9 NAGs | Reads the first 7 | No damage |
 | `twocomments` | Two markers, one text | Reads one comment | No damage |
@@ -192,7 +194,7 @@ So the conflict doesn't affect them as evidence. No rule rests only on `one` or 
 
 - **Versions.** Only SCID vs. PC 4.26 was checked. Other releases, the original SCID, and other index versions weren't.
 - **Component runs.** The most games and names were tried by calling SCID's code (`limits`), not with a database of that size. A frequency of 2²⁴ was tried both ways, but not by importing that many games with `pgnscid`.
-- **Undefined behavior.** What SCID does after the buffer overrun of `tag255`, with `spare`, and with more than 40 tags depends on the build.
+- **Undefined behavior.** What SCID does after the buffer overrun of `tag255`, with `spare`, with `knightoff`, and with more than 40 tags depends on the build.
 - **Base types** are numbers to the format. What SCID's interface calls them wasn't audited.
 - **`COMPATIBILITY.md`** was audited [separately](#audit-of-compatibilitymd), with its own uncertainties.
 - **Platforms.** All runs were on macOS on Apple silicon. The unsigned `char` results are from a build with that option.
@@ -289,6 +291,15 @@ At `25c2389`, the reviewer confirmed these, and then checked `SN4_FORMAT.md` in 
 | U6 | Names out of order can open without a warning, and then not be found | [Order](SN4_FORMAT.md#order) |
 
 Reproducing them showed one more: `pgnscid` reads the line with the mark as text before the game.
+
+At `d907547`, the reviewer confirmed these. A check of `SG4_FORMAT.md` in the same way stopped before it was complete, with two findings. Both were reproduced and corrected.
+
+| | Finding | Correction |
+| --- | --- | --- |
+| U7 | Comments aren't converted from a file that starts with a byte order mark | [Comments](SG4_FORMAT.md#variations-comments-and-annotations) |
+| U8 | Bytes `0b` to `0f` are markers, not king moves that are refused | [Damaged records](SG4_FORMAT.md#piece-specific-move-encoding) |
+
+Reproducing them showed two more: SCID refuses an invalid piece number whose square is empty, and doesn't refuse a king, knight, or pawn destination off the board.
 
 ### Not verified
 
