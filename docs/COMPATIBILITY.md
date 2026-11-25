@@ -294,7 +294,7 @@ A game that fails to parse is reported by its error only, without its warnings.
 
 | Warning | When | Case |
 | --- | --- | --- |
-| `skipped unknown text "zz"` | Text in the moves that isn't a move, an annotation symbol, or a result, such as `zz`, `Diagram`, `B` on its own, or `nf3`. Also text after the annotation symbols attached to a move, as in `e4!x`, and each `}` or `]` outside a comment, unless nothing comes before it in the moves: `} ] e4` gives no warning, where `1. } e4` gives one ([#158](https://github.com/intermezzo-chess/scidtopgn/issues/158)). | #12, #25, #60 |
+| `skipped unknown text "zz"` | Text in the moves that isn't a move, an annotation symbol, or a result, such as `zz`, `Diagram`, `B` on its own, or `nf3`. Also text after the annotation symbols attached to a move, as in `e4!x`, and each `}` or `]` outside a comment, once the moves have started. For this, the moves start at the first letter, digit, `$`, `*`, `(`, or `-` after the tags. A `}` or `]` before that, even after a comment or an annotation symbol, gets no warning: `} ] e4` and `{Intro} ]e4` give none, where `1. } e4` and `$0 ]e4` give one ([#158](https://github.com/intermezzo-chess/scidtopgn/issues/158)). | #12, #25, #60 |
 | `skipped result "1-0" inside a variation` | A result inside a variation, at any depth. The game goes on. | #60 |
 | `"O-O" castles without the castling right` | Castling after the king or rook has moved and returned, or when the `FEN` gives no castling right. | #16 |
 | `read "O-O" as O-O-O because only queenside castling is legal` | `O-O` when only queenside castling is legal. | #20 |
@@ -526,7 +526,7 @@ These cases were added by [#60](https://github.com/intermezzo-chess/scidtopgn/is
 | A long comment in the moves | 17,000 `a`s in braces | Keeps the first 15,999 bytes, without a message | Keeps all of it, up to the [record size](#limits-shared-with-scid) | **Differs** |
 | A `}` outside a comment | `1. e4 } e5` | Skips it and logs `"}" seen outside a comment`, once per game | Skips it, with a warning for each | Same |
 | A `]` in the moves | `1. e4 ] e5` | Skips it and logs `Unexpected symbol: ]` | Skips it with a warning | Same |
-| A move right after a `]` | `]Bc5` | Drops the move and logs `Unexpected symbol: ]Bc5` | Skips the `]`, with a warning unless nothing comes before it in the moves, and plays `Bc5` | **Differs** |
+| A move right after a `]` | `]Bc5` | Drops the move and logs `Unexpected symbol: ]Bc5` | Skips the `]`, with a warning once the moves have started, as [Warnings](#warnings) describes, and plays `Bc5` | **Differs** |
 
 In a comment, each run of whitespace, including line breaks, becomes one space, and whitespace at the ends is dropped, as in SCID. Whitespace means what C's `isspace` matches: space, tab, line feed, carriage return, vertical tab, and form feed. Other characters, such as a no-break space, are kept. A comment of only whitespace is empty, as `{}` is. This applies to comments in the moves and after the tags, not to [text before a game](#text-before-and-between-games), which keeps its line breaks. Before #60, `scidtopgn` kept a comment's whitespace as written.
 
