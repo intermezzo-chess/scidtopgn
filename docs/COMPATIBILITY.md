@@ -245,7 +245,7 @@ The case numbers match [#37](https://github.com/intermezzo-chess/scidtopgn/issue
 - **#25** Every unknown symbol gives a warning. SCID warns about most, but not about a word that starts with `D`, such as `Diagram`.
 - **#27c** A result after the moves gives no warning when the game has no `Result` tag. SCID warns.
 - **#27d** An unrecognized `Result` tag, such as `1-0 (time)`, gives a warning only when the result after the moves isn't `*`. SCID reads the tag as `1-0` and warns when the results differ.
-- **#33** The CLI prints every warning. `pgnscid` writes them to a file, and the reference converter doesn't print them.
+- **#33** The CLI prints every warning, unless run with `--quiet`, and `--log` also writes them to a file. `pgnscid` writes them to a file, and the reference converter doesn't print them.
 - A NAG after a move's first 7 is dropped with a warning. SCID drops it without a message ([#57](https://github.com/intermezzo-chess/scidtopgn/issues/57)).
 
 PGN export:
@@ -267,7 +267,7 @@ Other known differences, which these cases don't cover, are listed in [Known dif
 These apply to every case below.
 
 - **A move that can't be read.** SCID keeps the game up to that move and adds the comment `{Error reading move: ...}`. `scidtopgn` skips the game and reports which game and move failed (#29). When this section says that SCID rejects a move, SCID still keeps the game up to that move.
-- **Warnings.** SCID's parser logs warnings. `pgnscid` writes them to a `.err` file, `sc_base import` returns them, and the reference converter doesn't print them. `scidtopgn` prints each warning (#33). See [Warnings](#warnings).
+- **Warnings.** SCID's parser logs warnings. `pgnscid` writes them to a `.err` file, `sc_base import` returns them, and the reference converter doesn't print them. The CLI prints each warning, unless run with `--quiet`, and `--log` also writes them to a file (#33). See [Warnings](#warnings).
 - **Canonical SAN.** `scidtopgn` stores and exports the SAN it generates, with `O-O`, `=` before a promotion piece, `x` for a capture, and check and mate signs only when they are correct. SCID does the same.
 - **Where annotations attach (#38).** As in SCID, a NAG or comment attaches to the move it follows, in the main line and in variations. An annotation symbol attaches the same way as the `$n` NAG it stands for. Both products also handle these cases the same way:
   - A NAG or comment after a variation's `)` attaches to the move the variation replaces. In `1. e4 (1. d4) $1`, `$1` is on `1. e4`.
@@ -279,7 +279,7 @@ These apply to every case below.
   - **A move keeps at most 7 NAGs ([#57](https://github.com/intermezzo-chess/scidtopgn/issues/57)).** SCID holds a move's NAGs in an array of 8 that ends with a 0, so it keeps the first 7 and drops the rest. `scidtopgn` does the same, and warns about each NAG it drops. NAGs from `$n`, from symbols attached to the move or written on their own, and after a variation's `)` count toward one limit, in the order they appear. In `1. e4 $1 $2 $3 $4 $5 $6 $7 $8 $9`, `1. e4` keeps NAGs 1 to 7, with a warning each for `$8` and `$9`. `$0` isn't counted or warned about. A game read from a SCID database also keeps the first 7 NAGs of each move, without a warning, as SCID does. The library's `MoveNode::nags` documents the limit.
 - **A `{...}` comment between tags.** `scidtopgn` ignores it and reads one game. SCID reads the tags before it as a game without moves, logs `PGN header '[' seen inside game`, and starts another game at the next tag, so the tags are split between two games. SCID's importers store both, and the reference converter skips the first.
 - **Variation limits ([issue 4](https://github.com/intermezzo-chess/scidtopgn/issues/4)).** A game with variations nested more than 100 levels deep, or with more than 255 variations of one move, is rejected with an error, whether it is read from PGN or from a SCID database. Reading and writing a game recurse once per level of nesting, so deeper nesting could overflow the stack. SCID has no limit on nesting. It counts a move's variations in a byte, which wraps: of 256 variations it keeps none, and of 257, one.
-- **Tag and name lengths ([#53](https://github.com/intermezzo-chess/scidtopgn/issues/53), [#82](https://github.com/intermezzo-chess/scidtopgn/issues/82)).** As in SCID, a tag whose name or value is longer than 255 bytes is dropped, whatever tag it is, and the rest of the game is imported. A dropped `White`, `Black`, `Event`, `Site`, or `Round` tag leaves `?`, and a dropped duplicate leaves the earlier value. SCID logs `Error reading tag`, and `scidtopgn` warns. When the game is stored, a tag name longer than 240 bytes is cut to 240, as SCID cuts it. Lengths count the bytes of the UTF-8 that is stored, after escapes are read. Two things differ from SCID:
+- **Tag and name lengths ([#53](https://github.com/intermezzo-chess/scidtopgn/issues/53), [#82](https://github.com/intermezzo-chess/scidtopgn/issues/82)).** As in SCID, a tag whose name or value is longer than 255 bytes is dropped, whatever tag it is, and the rest of the game is imported. A dropped `White`, `Black`, `Event`, `Site`, or `Round` tag leaves `?`, and a dropped duplicate leaves the earlier value. SCID logs `Error reading tag`, and `scidtopgn` warns. A tag name longer than 240 bytes is cut to 240, as SCID cuts it. SCID cuts it when it reads the tag ([`Game::AddPgnTag`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l763)), and `scidtopgn` when it stores the game. So two tags with the same long name are one tag in `scidtopgn`, with the later value, and two in SCID's record, which SCID reads back as one, with the later value. Lengths count the bytes of the UTF-8 that is stored, after escapes are read. Two things differ from SCID:
   - Both convert text that isn't UTF-8, which takes more bytes, but SCID checks the length before converting it ([`PgnParser::ExtractPgnTag`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnparse.cpp#l312)), and `scidtopgn` after. `scidtopgn` drops a tag whose converted value is over 255 bytes. SCID keeps it. It means to cut a name to 255 bytes ([`NameBase::AddName`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/namebase.cpp#l357)), which can leave part of a character, but doesn't terminate the cut name, so it can [stay longer](SN4_FORMAT.md#text-encoding-and-legacy-names). Another value is written with a length that has wrapped around ([`encodeTags`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4694)). Its remaining bytes are then read as more of the record ([`Game::DecodeTags`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4729)), which fails, or gives other tags without an error. From an `Annotator` of 200 Latin-1 `é`s, `pgnscid` 4.26 wrote a record that SCID can't decode. From one of 254 bytes that became 256, it wrote a record that SCID decodes with an empty `Annotator` and a tag that wasn't in the PGN.
   - A cut that would split a character ends before that character. SCID cuts in the middle of it.
   - A player name is [tidied](#player-names-and-ratings), which adds a space after a comma that has none, so it is checked again once tidied and without its rating. A name over 255 bytes then is dropped in the same way. SCID writes the tidied name into its 256-byte buffer without checking its length (#43).
@@ -288,13 +288,13 @@ These apply to every case below.
 
 ### Warnings
 
-A warning doesn't stop a game from being imported. The CLI prints each warning to stderr, in both `--on-error` modes, as `Warning: PGN game <number>, line <line>: <message>`. A game with warnings isn't counted as skipped, and warnings don't change the exit status. In the library, a game's warnings are in `Game::warnings`, as `PgnWarning` values with the game number, the line, and a `PgnWarningKind`.
+A warning doesn't stop a game from being imported. The CLI prints each warning to stderr, in both `--on-error` modes, unless run with `--quiet`. With `--log`, it also writes each to that file. It prints them as `Warning: PGN game <number>, line <line>: <message>`. A game with warnings isn't counted as skipped, and warnings don't change the exit status. In the library, a game's warnings are in `Game::warnings`, as `PgnWarning` values with the game number, the line, and a `PgnWarningKind`.
 
 A game that fails to parse is reported by its error only, without its warnings.
 
 | Warning | When | Case |
 | --- | --- | --- |
-| `skipped unknown text "zz"` | Text in the moves that isn't a move, an annotation symbol, or a result, such as `zz`, `Diagram`, `B` on its own, or `nf3`. Also text after the annotation symbols attached to a move, as in `e4!x`, and each `}` or `]` outside a comment. | #12, #25, #60 |
+| `skipped unknown text "zz"` | Text in the moves that isn't a move, an annotation symbol, or a result, such as `zz`, `Diagram`, `B` on its own, or `nf3`. Also text after the annotation symbols attached to a move, as in `e4!x`, and each `}` or `]` outside a comment once the moves have started. Those before the first move, as in `} ] e4`, are skipped without a warning. | #12, #25, #60 |
 | `skipped result "1-0" inside a variation` | A result inside a variation, at any depth. The game goes on. | #60 |
 | `"O-O" castles without the castling right` | Castling after the king or rook has moved and returned, or when the `FEN` gives no castling right. | #16 |
 | `read "O-O" as O-O-O because only queenside castling is legal` | `O-O` when only queenside castling is legal. | #20 |
@@ -463,7 +463,7 @@ A `FEN` tag sets the start position with or without `SetUp`, in both products.
 
 **#27c: no `Result` tag.** *What changes:* no warning. *Why:* without a `Result` tag there is nothing to contradict, so the result after the moves is simply the game's result.
 
-**#27d: an unrecognized `Result` tag.** *What changes:* no warning when the moves end with `*`. *Why:* SCID reads a `Result` tag by its first characters, so `1-0 (time)` is `1-0`. `scidtopgn` reads only the four PGN results, so it treats the tag as `*`, which agrees with the moves. Reading tags like SCID does is listed in [Known differences outside these cases](#known-differences-outside-these-cases).
+**#27d: an unrecognized `Result` tag.** *What changes:* no warning when the moves end with `*`. *Why:* SCID reads a `Result` tag by its first characters, so `1-0 (time)` is `1-0`. `scidtopgn` reads only the four PGN results, and `½-½` as `1/2-1/2`, so it treats the tag as `*`, which agrees with the moves. Reading tags like SCID does is listed in [Known differences outside these cases](#known-differences-outside-these-cases).
 
 **#28: no result after the moves.** SCID's parser reports an error for such a game, but its importers store it with what was read. The reference converter skips it, and earlier versions of this document took that for SCID's behavior. `scidtopgn` prints a warning with the game's number and the result it used.
 
@@ -479,7 +479,7 @@ A `FEN` tag sets the start position with or without `SetUp`, in both products.
 
 ### Text before and between games
 
-As in SCID, a game starts at its first tag line: a line whose first character other than whitespace is `[`. Everything before that line, from the start of the input or from the previous game's result, is text, and the text is kept as the comment before the game's first move. `pgnscid` keeps it too, unless it is told not to, and the **SCID** column below is what it does. SCID's own import, `sc_base import`, ignores all such text. These cases were added by [#41](https://github.com/intermezzo-chess/scidtopgn/issues/41).
+As in SCID, a game starts at its first tag line: a line whose first character other than whitespace is `[`. Where a game without a result ends, and where reading resumes after a failed game, `scidtopgn` allows only spaces and tabs before the `[`. After other whitespace, such as a vertical tab, the line doesn't start a game, so the game before it fails, and the game the line starts is skipped with it. SCID stores both. Everything before that line, from the start of the input or from the previous game's result, is text, and the text is kept as the comment before the game's first move. `pgnscid` keeps it too, unless it is told not to, and the **SCID** column below is what it does. SCID's own import, `sc_base import`, ignores all such text. These cases were added by [#41](https://github.com/intermezzo-chess/scidtopgn/issues/41).
 
 | Case | Example | SCID | scidtopgn | Comparison |
 | --- | --- | --- | --- | --- |
@@ -487,16 +487,16 @@ As in SCID, a game starts at its first tag line: a line whose first character ot
 | Text between games | `Round 2 starts here.` after a game's result, on the same line or below it | Keeps it as the comment before the next game's first move | Keeps it as the comment before the next game's first move | Same |
 | Moves with no tags | `1. c4 c5 *` above `[Event ...]` | Keeps them as text, as above | Keeps them as text, as above | Same |
 | Text or moves after the last game | `The end.` at the end of the input | Drops it, without a message | Drops it, without a message | Same |
-| Text and a comment before the first move | `Notes` above the tags, then `{Intro} 1. e4` | `Notes` and `Intro` on separate lines | `Notes Intro` | **Differs** |
-| Blank lines and spaces around the text | Blank lines after the text, spaces at the end of a line | Drops blank lines before the text, keeps the spaces and one line break at the end | Drops blank lines before and after the text, and the spaces at the end of each line and before text after a result | **Differs** |
+| Text and a comment before the first move | `Notes` above the tags, then `{Intro} 1. e4` | Joins them with the line breaks left at the end of the text: none as in the example, so `Notes Intro`, and one if a blank line comes before the tags | `Notes Intro` | **Differs** |
+| Blank lines and spaces around the text | Blank lines after the text, spaces at the end of a line | Drops blank lines before the text, and keeps the spaces and all but one line break at its end | Drops blank lines before and after the text, and the spaces at the end of each line and before text after a result | **Differs** |
 | Long text | Text of 16,000 bytes or more | Keeps lines while the text stays under 16,000 bytes, and drops the others without a message. Reads a longer line in pieces | Keeps all of it | **Differs** |
 | Comments between games | `; note`, `% note`, or `{note}` on its own line | Keeps each line in the text as written, with its `;`, `%`, or braces | Skips them | **Differs** |
-| A line starting with `[` that isn't a tag | `[Note: see below]` above `[Event ...]` | Logs `Error reading tag` and reads the next tags into the same game | Reports a failed game, so the next game's number is one higher | **Differs** |
+| A line starting with `[` that isn't a tag | `[Note: see below]` above `[Event ...]` | Logs `Error reading tag` and reads the next tags into the same game | Reports a failed game. If a blank line comes before the next tags, the next game's number is one higher. If not, as in the example, those tags are part of the failed game, and the game is lost | **Differs** |
 | A `[` after a result or a comment on the same line | `1-0 [Round 2 notes]` | Reads it as a tag. If it isn't one, logs `Error reading tag` | Keeps it as text, like other text after a result | **Differs** |
 
 Lines inside the text, including blank lines, are joined by line breaks. Text that is only whitespace isn't stored. Text after a game that fails to parse is skipped with that game, so it isn't attached to the next game. Before #41, `scidtopgn` read text before a game as the moves of a game, which failed and was reported as an extra game. It also imported moves with no tags as a game, so a file of games without tags now imports no games, as in SCID.
 
-**Text and a comment before the first move.** *What changes:* the text and the comment are joined with a space instead of a line break. *Why:* `scidtopgn` joins every comment it stores in one place the same way, as [Where annotations attach](#general-differences) describes.
+**Text and a comment before the first move.** *What changes:* the text and the comment are always joined with a space, where SCID keeps the line breaks after the text but one. *Why:* `scidtopgn` joins every comment it stores in one place the same way, as [Where annotations attach](#general-differences) describes.
 
 **Blank lines and spaces around the text.** *What changes:* the stored comment has no blank lines or spaces at its ends, and no spaces at the end of its lines. *Why:* they come from the layout of the file, not from the text.
 
@@ -504,7 +504,7 @@ Lines inside the text, including blank lines, are joined by line breaks. Text th
 
 **Comments between games.** *What changes:* they aren't kept in the text. *Why:* `;` and `{...}` are comments in PGN, and a `%` line is an escape for other programs. `scidtopgn` skipped them between games before #41 and still does. Reading a brace comment as a comment also keeps a line starting with `[` inside it from starting a game.
 
-**A line starting with `[` that isn't a tag.** *What changes:* the line is reported as a failed game instead of being logged and ignored. *Why:* #41 only changed text that doesn't start with `[`. A malformed tag can't be told apart from a game whose tags are broken.
+**A line starting with `[` that isn't a tag.** *What changes:* the line is reported as a failed game instead of being logged and ignored, and without a blank line after it, the game whose tags follow is skipped with it. *Why:* #41 only changed text that doesn't start with `[`. A malformed tag can't be told apart from a game whose tags are broken.
 
 **A `[` after a result or a comment on the same line.** *What changes:* it is text, so `1-0 [Event "B"]` doesn't start a game, and `1-0 [Round 2 notes]` isn't reported as a failed game. *Why:* `scidtopgn` starts a game only at a tag line, as it does where a game without a result ends and where it resumes after a failed game. Before #41, `scidtopgn` read the `[` as a tag, as SCID does.
 
@@ -526,7 +526,7 @@ These cases were added by [#60](https://github.com/intermezzo-chess/scidtopgn/is
 | A long comment in the moves | 17,000 `a`s in braces | Keeps the first 15,999 bytes, without a message | Keeps all of it, up to the [record size](#limits-shared-with-scid) | **Differs** |
 | A `}` outside a comment | `1. e4 } e5` | Skips it and logs `"}" seen outside a comment`, once per game | Skips it, with a warning for each | Same |
 | A `]` in the moves | `1. e4 ] e5` | Skips it and logs `Unexpected symbol: ]` | Skips it with a warning | Same |
-| A move right after a `]` | `]Bc5` | Drops the move and logs `Unexpected symbol: ]Bc5` | Skips the `]` with a warning, and plays `Bc5` | **Differs** |
+| A move right after a `]` | `]Bc5` | Drops the move and logs `Unexpected symbol: ]Bc5` | Skips the `]`, with a warning unless it comes before the first move, and plays `Bc5` | **Differs** |
 
 In a comment, each run of whitespace, including line breaks, becomes one space, and whitespace at the ends is dropped, as in SCID. Whitespace means what C's `isspace` matches: space, tab, line feed, carriage return, vertical tab, and form feed. Other characters, such as a no-break space, are kept. A comment of only whitespace is empty, as `{}` is. This applies to comments in the moves and after the tags, not to [text before a game](#text-before-and-between-games), which keeps its line breaks. Before #60, `scidtopgn` kept a comment's whitespace as written.
 
@@ -548,9 +548,9 @@ In a comment, each run of whitespace, including line breaks, becomes one space, 
 
 These cases were added by [#43](https://github.com/intermezzo-chess/scidtopgn/issues/43). Before #43, `scidtopgn` stored player names as written, read a rating only from `WhiteElo` and `BlackElo`, and exported every rating as `WhiteElo` or `BlackElo`.
 
-As SCID's `standardPlayerName` does, the value of a `White` or `Black` tag is tidied: spaces at the start are dropped, each comma that something follows gets exactly one space after it, and spaces and tabs at the end are dropped. Other characters, including other spaces, are kept. This gives the PGN standard's `Surname, Given name` form, so `Carlsen,Magnus` and `Carlsen, Magnus` are one player. Other tags aren't tidied.
+As SCID's `standardPlayerName` does, the value of a `White` or `Black` tag is tidied: spaces at the start are dropped, each comma that something other than a comma follows gets exactly one space after it, so `A,,B` is `A,, B`, and spaces and tabs at the end are dropped. Other characters, including other spaces, are kept. This gives the PGN standard's `Surname, Given name` form, so `Carlsen,Magnus` and `Carlsen, Magnus` are one player. Other tags aren't tidied.
 
-Names that the tidying above leaves keep their control characters other than NUL, as in SCID ([#142](https://github.com/intermezzo-chess/scidtopgn/issues/142)): a control character inside a name, one at its start, and one at its end are stored as written, and export writes them as SCID does. The exception is a tab at the end, which that tidying drops with the trailing spaces: a `White` value of `A` followed by a tab is stored as `A`, and a name that is only a tab is stored as an empty string. A name whose remaining characters are all control characters is stored as written, and names that differ only by control characters stay different players. A NUL in a tag value is kept, where SCID drops the tag and logs `Error reading tag`, so the player is `?`. A tag value in a PGN file can't contain a line feed, which is an error in both. This is the tidying of a `White` or `Black` tag read from a PGN file: names read from a stored `.sn4` name file are kept as the file stores them, with no filtering or trimming, as [Reading](#reading) describes. The same holds for `Event`, `Site`, and `Round` names, which import stores as written.
+Names that the tidying above leaves keep their control characters other than NUL, as in SCID ([#142](https://github.com/intermezzo-chess/scidtopgn/issues/142)): a control character inside a name, one at its start, and one at its end are stored as written, and export writes them as SCID does. The exception is a tab at the end, which that tidying drops with the trailing spaces: a `White` value of `A` followed by a tab is stored as `A`, and a name that is only a tab is stored as an empty string. A name whose remaining characters are all control characters is stored as written, and names that differ only by control characters stay different players. A NUL in a tag value is kept, where SCID drops the tag and logs `Error reading tag`, so the player is `?`. So is a carriage return, in any tag, where SCID ends the tag's line there ([`PgnParser::GetLine`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/pgnparse.cpp#l198)), and drops it in the same way. A tag value in a PGN file can't contain a line feed, which is an error in both. This is the tidying of a `White` or `Black` tag read from a PGN file: names read from a stored `.sn4` name file are kept as the file stores them, with no filtering or trimming, as [Reading](#reading) describes. The same holds for `Event`, `Site`, and `Round` names, which import stores as written.
 
 A rating is read from three places, as SCID's `ExtractPgnTag` reads it:
 
@@ -640,11 +640,11 @@ The cases above compare how a game is imported and stored. Exporting the stored 
 - **A NAG after a move's first 7** is dropped on import, as in SCID (#57). In the library, a move's `nags` can be set directly to more than 7 NAGs, or to NAG 0. The game is then stored and exported with only the first 7 that aren't 0, the NAGs SCID can hold, and the index's NAG count counts only those, as SCID's encoder does. So SCID reads back each NAG `scidtopgn` stores.
 - **The en passant square** of a `FEN` is exported only when an en passant capture is legal (#31c).
 - **A rating tag kept as an ordinary tag** isn't exported when it has the same name as the player's rating tag, such as a second `WhiteElo`, or when the player has no rating (#43). See [Player names and ratings](#player-names-and-ratings).
-- **Tags after a game's 40th** are dropped on import, without a warning ([#155](https://github.com/intermezzo-chess/scidtopgn/issues/155)). See [Limits shared with SCID](#limits-shared-with-scid).
+- **Tags after a game's 40th tag without a field of its own** are dropped on import, without a warning ([#155](https://github.com/intermezzo-chess/scidtopgn/issues/155)). See [Limits shared with SCID](#limits-shared-with-scid).
 - **A comment that contains `}`**, which text before a game can give and SCID databases can hold, is exported as it is, so the comment ends there when the export is read. The rest is skipped with a warning, or read as moves or a result, which can change the game ([#152](https://github.com/intermezzo-chess/scidtopgn/issues/152)). SCID's export has the same text.
 - **A name or other tag value with a line feed**, which PGN can't give but a database can hold, is exported over two lines. Reading the export skips the game up to the next tag line, and reads the rest as a game without what was skipped, such as its players or result. If none of its tag lines follows, as when the value is the last tag's, **the whole game is lost** ([#153](https://github.com/intermezzo-chess/scidtopgn/issues/153)).
 - **Spaces at either end of a player name, and tabs at its end**, which PGN can't give but a database can hold, are dropped when the export is imported, by the [tidying of player names](#player-names-and-ratings).
-- **Some dates with unknown parts** are stored in full but exported wrongly, and event dates too. With an unknown year, an unknown month or day is written as `00`. With a known year and an unknown month, a known day is written as `??` and lost. SCID writes `??` for each unknown part and keeps the known ones ([#154](https://github.com/intermezzo-chess/scidtopgn/issues/154)).
+- **Some dates with unknown parts** are stored in full but exported wrongly, and event dates too. With an unknown year, an unknown month or day is written as `00` unless the whole date is unknown: `????.01.??` is written as `????.01.00`. With a known year and an unknown month, a known day is written as `??` and lost. SCID writes `??` for each unknown part and keeps the known ones ([#154](https://github.com/intermezzo-chess/scidtopgn/issues/154)).
 - **An ECO code that SCID doesn't know**, such as `BAD`, isn't stored, as in SCID. A game that was parsed and not stored still exports it.
 - **A player name that still ends in a rating** once its rating is removed, such as `X (2850)` from `X (2850) (1234)`, is exported as it is. Reading it back removes ` (2850)` from the name and makes it the rating, as SCID also does with its own export (#43).
 
@@ -657,7 +657,7 @@ The moves themselves are exported as canonical SAN, so `ed` comes back as `exd5`
 
 Import reads both back. The standard allows tags in any order on import. Symbols other than `!`, `?`, `!!`, `??`, `!?`, and `?!`, such as `+=`, are extensions that SCID and `scidtopgn` read, and other programs may not.
 
-For example, importing and exporting
+For example, importing and exporting a game with these moves
 
 ```text
 1. e4 e5 (1... c5 2. Nf3) 2. Nf3 $14 {Develops} Nc6 +-- 3. Bb5 *
@@ -687,7 +687,7 @@ The reference converter gives this, with SCID's [`Game::WritePGN`](https://sourc
 
 The symbols both read back are `!` `?` `!!` `??` `!?` `?!` (NAGs 1 to 6), `=` (10), `~` (13), `+=` (14), `=+` (15), `+/-` (16), `-/+` (17), `+-` (18), `-+` (19), `+--` (20), `--+` (21), `=/&` (44), `R` (144), `N` (146), and `D` (201). Every NAG from 1 to 255 can be imported again from `scidtopgn`'s export.
 
-**#34: NAGs without a symbol both read back.** *What changes:* `scidtopgn` writes `$40` where SCID writes `→`, for example. *Why:* many of SCID's symbols are Unicode or words that neither SCID nor `scidtopgn` reads, so a game exported with them loses those annotations when it is imported again. `$n` is the standard PGN form, and every PGN reader reads it. Before #37, `scidtopgn` exported most NAGs, such as $20 and $41, as nothing, and others as Unicode symbols, such as `⩲`, that it couldn't import again.
+**#34: NAGs without a symbol both read back.** *What changes:* `scidtopgn` writes `$40` where SCID writes `→`, for example. *Why:* many of SCID's symbols are Unicode or words that neither SCID nor `scidtopgn` reads, so a game exported with them loses those annotations when it is imported again. `$n` is the standard PGN form. Before #37, `scidtopgn` exported most NAGs, such as $20 and $41, as nothing, and others as Unicode symbols, such as `⩲`, that it couldn't import again.
 
 **SCID's source:** [`evalNagsRegular`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/nagtext.h#l16), [`game_parseNag`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l249).
 
@@ -719,7 +719,7 @@ c++ -std=c++11 -O1 -w -fsigned-char -DTCL_ONLY -DPROBE_TCL -I$V/scid_vs_pc-4.26/
     scid-cpp/tools/pgn_probe.cpp $objs -framework Tcl -lz -o pgn_probe_426
 ```
 
-Both print the same for `tests/data/notation.pgn`, and the examples of the sections below were run with the second.
+Both print the same for `tests/data/notation.pgn`, and the examples of the sections above were run with the second.
 
 `scid-cpp/CMakeLists.txt` doesn't build `pgn_probe`, so these commands call the compiler directly. To build the reference converter itself, for example to write a test database such as `tests/data/castling`, follow [The C++ reference converter](../CONTRIBUTING.md#the-c-reference-converter-scid-cpp) in `CONTRIBUTING.md`. Then run it from the repository root as `scid-cpp/build/scidtopgn <database> <pgn-file>`.
 

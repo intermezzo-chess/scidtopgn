@@ -302,6 +302,23 @@ At `d907547`, the reviewer confirmed these. A check of `SG4_FORMAT.md` in the sa
 
 Reproducing them showed two more: SCID refuses an invalid piece number whose square is empty, and doesn't refuse a king, knight, or pawn destination off the board.
 
+At `81d22d4`, a new reviewer audited `SG4_FORMAT.md` in full, and found nothing. Another audited the PGN section of `COMPATIBILITY.md` in full, with both programs. Each finding was reproduced before it was corrected.
+
+| | Finding | Correction |
+| --- | --- | --- |
+| P1 | After a line starting with `[` that isn't a tag, the next game is lost unless a blank line comes first | [Text before and between games](COMPATIBILITY.md#text-before-and-between-games) |
+| P2 | Where a game without a result ends, only spaces and tabs may come before `[` | The same |
+| P3 | A carriage return in a tag value is kept, where SCID drops the tag | [Player names and ratings](COMPATIBILITY.md#player-names-and-ratings) |
+| P4 | SCID keeps all but one line break after the text before a game | [Text before and between games](COMPATIBILITY.md#text-before-and-between-games) |
+| P5 | `--quiet` hides warnings, and `--log` writes them to a file | [Warnings](COMPATIBILITY.md#warnings) |
+| P6 | A `}` or `]` before the first move gives no warning | The same |
+| P7 | The 40 tags are those without a field of their own | [Export and round trips](COMPATIBILITY.md#export-and-round-trips) |
+| P8 | SCID cuts a long tag name when it reads the tag, so it keeps two tags of the same long name | [General differences](COMPATIBILITY.md#general-differences) |
+| P9 | `A,,B` gets one space, after the second comma | [Player names and ratings](COMPATIBILITY.md#player-names-and-ratings) |
+| P10 | `scidtopgn` reads a `Result` tag of `½-½` | [Results](COMPATIBILITY.md#results-and-the-start-position) |
+
+It also qualified the date export bug, a claim about every PGN reader, and the example of export.
+
 ### Not verified
 
 Not verified by either:
