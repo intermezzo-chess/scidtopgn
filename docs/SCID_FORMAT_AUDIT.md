@@ -317,7 +317,7 @@ At `81d22d4`, a new reviewer audited `SG4_FORMAT.md` in full, and found nothing.
 | P9 | `A,,B` gets one space, after the second comma | [Player names and ratings](COMPATIBILITY.md#player-names-and-ratings) |
 | P10 | `scidtopgn` reads a `Result` tag of `½-½` | [Results](COMPATIBILITY.md#results-and-the-start-position) |
 
-It also qualified the date export bug, a claim about every PGN reader, and the example of export.
+It also qualified the date export bug, a claim about every PGN reader, and the example of export. Checking the corrections, it qualified three of them again: the warning for a `}` or `]` before any move, which tags the 40-tag limit drops, and the library functions that read a game without tags.
 
 ### Not verified
 
