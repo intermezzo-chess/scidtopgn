@@ -205,7 +205,7 @@ Found by the probes above, and not changed here.
 1. **`validate` reports no damage in databases that SCID refuses** ([#149](https://github.com/intermezzo-chess/scidtopgn/issues/149)). It is documented to check only that each game's record can be read, so this is a possible improvement. Reproduce with `scidtopgn validate` on the `badname`, `order`, `duplicate`, `cross`, and `firstbyte` databases.
 2. **SCID 4.26 can't read a tag value of 255 bytes safely** ([#150](https://github.com/intermezzo-chess/scidtopgn/issues/150)). The bug is SCID's: `Game::DecodeTags` writes 1 byte past a 255-byte buffer, which AddressSanitizer reports for `tag255` written by `pgnscid` and by scidtopgn. Both programs import such a value without a warning, and write the same record. The issue is to decide whether scidtopgn should.
 
-The [audit of `COMPATIBILITY.md`](#audit-of-compatibilitymd) led to five more, all bugs: #151 to #155.
+The [audit of `COMPATIBILITY.md`](#audit-of-compatibilitymd) led to six more, all bugs: #151 to #156.
 
 `GFile::read_game`'s comment said that SCID reads a record that crosses a block. The comment is corrected; the behavior is unchanged.
 
@@ -264,7 +264,7 @@ At `81b5721`, the reviewer checked the corrections above. Each finding was repro
 | T2 | A further rating tag is stored as a tag only once the player's rating isn't 0. `[WhiteUSCF "0"]` and then `[WhiteElo "2400"]` stores no tag | [Tags](SG4_FORMAT.md#tags) |
 | T3 | The reference converter's copy doesn't replace `DoCharsetConversion`, but the detector and converter | [PGN import](COMPATIBILITY.md#pgn-import-compared-with-scid) |
 | T4 | Functions that read were cited for writing | [Reading](COMPATIBILITY.md#reading) |
-| T5 | A frequency of 2²⁴ can be reached with a database | [SN4](SN4_FORMAT.md#header-sections-ids-and-frequencies), [Append](COMPATIBILITY.md#append). scidtopgn writes the same file, which was found while reproducing this |
+| T5 | A frequency of 2²⁴ can be reached with a database | [SN4](SN4_FORMAT.md#header-sections-ids-and-frequencies), [Append](COMPATIBILITY.md#append). scidtopgn writes the same file, which was found while reproducing this ([#156](https://github.com/intermezzo-chess/scidtopgn/issues/156)) |
 
 `README.md`, `CONTRIBUTING.md`, and doc comments made the claims about older versions of SCID and about SCID vs. PC 4.27 that had been removed from `COMPATIBILITY.md`. They are removed there too.
 
