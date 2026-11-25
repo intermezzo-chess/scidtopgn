@@ -307,7 +307,7 @@ read_comments(line):
         for each variation of the move, in order: read_comments(the variation)
 ```
 
-**SCID's behavior.** SCID keeps a move's first 7 NAGs that aren't 0 and ignores the rest. It drops a NAG before a line's first move. It writes a move's NAGs and at most one marker before the move's variations, but reads them after the variations too, and reads repeated markers as one. SCID counts a move's variations in 1 byte, so it can hold 255.
+**SCID's behavior.** SCID keeps a move's first 7 NAGs that aren't 0 and ignores the rest. It reads a NAG before a line's first move, and keeps it in memory for the line's start, but doesn't write it again ([`encodeVariation`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l4564)). It writes a move's NAGs and at most one marker before the move's variations, but reads them after the variations too, and reads repeated markers as one. SCID counts a move's variations in 1 byte, so it can hold 255.
 
 | Rule | SCID vs. PC 4.26 | Evidence | scidtopgn |
 | --- | --- | --- | --- |

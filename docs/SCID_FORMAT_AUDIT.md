@@ -167,7 +167,7 @@ SCID's error numbers are from `error.h`: 109 and 110 are versions, 152 is corrup
 | `commentafter` | Marker after a variation | Reads | No damage |
 | `commentorder` | Markers in another order than the tree | Reads the texts in the tree's order | No damage |
 | `nagafter` | NAG after a variation | Reads it as the move's | No damage |
-| `nagfirst` | NAG before the first move | Reads without it | No damage |
+| `nagfirst` | NAG before the first move | Reads it, but doesn't write or export it | No damage |
 | `nocomment` | Marker without text | Error 602 | Damaged |
 | `varfirst` | Variation before a move | Error 402 | Damaged |
 | `emptyvar` | Variation without moves | Reads | No damage |
@@ -292,12 +292,13 @@ At `25c2389`, the reviewer confirmed these, and then checked `SN4_FORMAT.md` in 
 
 Reproducing them showed one more: `pgnscid` reads the line with the mark as text before the game.
 
-At `d907547`, the reviewer confirmed these. A check of `SG4_FORMAT.md` in the same way stopped before it was complete, with two findings. Both were reproduced and corrected.
+At `d907547`, the reviewer confirmed these. A check of `SG4_FORMAT.md` in the same way stopped before it was complete, with three findings. They were reproduced and corrected.
 
 | | Finding | Correction |
 | --- | --- | --- |
 | U7 | Comments aren't converted from a file that starts with a byte order mark | [Comments](SG4_FORMAT.md#variations-comments-and-annotations) |
 | U8 | Bytes `0b` to `0f` are markers, not king moves that are refused | [Damaged records](SG4_FORMAT.md#piece-specific-move-encoding) |
+| U9 | A NAG before a line's first move is dropped when the game is written, not when it is read | [Annotations](SG4_FORMAT.md#variations-comments-and-annotations) |
 
 Reproducing them showed two more: SCID refuses an invalid piece number whose square is empty, and doesn't refuse a king, knight, or pawn destination off the board.
 
