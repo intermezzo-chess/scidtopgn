@@ -280,6 +280,16 @@ At `ca3a6aa`, a reviewer checked `SI4_FORMAT.md` alone, 119 claims, against the 
 | U2 | `[ScidFlags "x"]` sets the start flag without a starting position | [Flags](SI4_FORMAT.md#flags), [Known differences](COMPATIBILITY.md#known-differences-outside-these-cases) |
 | U3 | The limits of date parts apply after a conversion that wraps | [Dates](SI4_FORMAT.md#dates-and-event-dates), [Known differences](COMPATIBILITY.md#known-differences-outside-these-cases) |
 
+At `25c2389`, the reviewer confirmed these, and then checked `SN4_FORMAT.md` in the same way. Each finding was reproduced before it was corrected.
+
+| | Finding | Correction |
+| --- | --- | --- |
+| U4 | `AddName` doesn't terminate the name it cuts. A name of 300 bytes was kept as 257 after a function that filled its stack, and as 255 otherwise | [SN4](SN4_FORMAT.md#text-encoding-and-legacy-names), [Tag and name lengths](COMPATIBILITY.md#general-differences) |
+| U5 | `sc_base import file` doesn't convert a file that starts with a byte order mark | [SN4](SN4_FORMAT.md#text-encoding-and-legacy-names), [Reading](COMPATIBILITY.md#reading), [PGN import](COMPATIBILITY.md#pgn-import-compared-with-scid) |
+| U6 | Names out of order can open without a warning, and then not be found | [Order](SN4_FORMAT.md#order) |
+
+Reproducing them showed one more: `pgnscid` reads the line with the mark as text before the game.
+
 ### Not verified
 
 Not verified by either:
