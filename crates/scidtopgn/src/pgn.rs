@@ -692,6 +692,16 @@ impl<'a> PgnParser<'a> {
                 Some(c) if c.is_ascii_alphanumeric() || matches!(c, '$' | '*' | '(' | '-') => {
                     break;
                 }
+                // A stray closing brace or bracket before the first move
+                // warns, as it does after a move. Other characters the
+                // header loop skips stay silent: they are annotation symbols
+                // or move-number punctuation, not stray closers.
+                Some(c @ ('}' | ']')) => {
+                    let line = self.line;
+                    self.advance();
+                    let text = c.to_string();
+                    self.warn(&mut game, line, PgnWarningKind::UnknownText { text });
+                }
                 Some(_) => {
                     self.advance();
                 }
