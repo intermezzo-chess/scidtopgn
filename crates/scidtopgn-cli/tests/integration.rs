@@ -3197,3 +3197,57 @@ fn test_cli_rejects_bad_search_options() {
         assert!(stderr.contains(message), "{args:?}: {stderr}");
     }
 }
+
+#[test]
+fn test_cli_append_recounts_a_stale_frequency_at_the_limit() {
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().join("db");
+    let clean = temp.path().join("clean");
+    let pgn = temp.path().join("one.pgn");
+    let game =
+        "[Event \"E\"]\n[Site \"S\"]\n[White \"A\"]\n[Black \"B\"]\n[Round \"1\"]\n\n1. e4 *\n";
+    std::fs::write(&pgn, game).unwrap();
+    let import = |input: &Path, output: &Path| {
+        let result = cli()
+            .arg("import")
+            .arg(input)
+            .arg("-o")
+            .arg(output)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    };
+    import(&pgn, &path);
+    // #156's one-game reproduction: every field fits individually, but
+    // adding one to the event's stored count used to corrupt the file.
+    let mut names = b"Scid.sn\0".to_vec();
+    names.extend([0; 4]);
+    for n in [2u32, 1, 1, 1, 1, 0xFF_FFFF, 1, 1] {
+        names.extend_from_slice(&n.to_be_bytes()[1..]);
+    }
+    names.extend_from_slice(b"\0\0\x01\x01A\0\x01\x01\x01\0B");
+    names.extend_from_slice(b"\0\0\xff\xff\xff\x01E");
+    names.extend_from_slice(b"\0\0\x01\x01S\0\0\x01\x011");
+    std::fs::write(path.with_extension("sn4"), &names).unwrap();
+    let before = database_bytes(&path);
+    assert!(cli().arg("info").arg(&path).status().unwrap().success());
+    assert_eq!(
+        database_bytes(&path),
+        before,
+        "reading must not repair counts"
+    );
+    import(&pgn, &path);
+    std::fs::write(&pgn, game.repeat(2)).unwrap();
+    import(&pgn, &clean);
+    assert_eq!(database_bytes(&path), database_bytes(&clean));
+    let mut db = scidtopgn::Database::open(&path).unwrap();
+    assert_eq!(db.num_games(), 2);
+    assert_eq!(
+        db.get_game(0).unwrap().to_pgn(),
+        db.get_game(1).unwrap().to_pgn()
+    );
+}

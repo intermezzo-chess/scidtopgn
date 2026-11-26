@@ -242,7 +242,7 @@ fn test_clear_and_timestamp() {
     let mut nb = NameBase::default();
     nb.set_timestamp(42);
     let id = nb.add_name(NameType::Site, "Wijk aan Zee").unwrap();
-    nb.increment_frequency(NameType::Site, id);
+    nb.increment_frequency(NameType::Site, id).unwrap();
     assert_eq!(nb.timestamp(), 42);
     assert_eq!(
         nb.get_all_names(NameType::Site),
@@ -295,11 +295,11 @@ fn test_roundtrip_wide_ids_and_frequencies() {
             .unwrap();
     }
     for _ in 0..65_536 {
-        nb.increment_frequency(NameType::Event, 7);
+        nb.increment_frequency(NameType::Event, 7).unwrap();
     }
     let site = nb.add_name(NameType::Site, "Site").unwrap();
     for _ in 0..300 {
-        nb.increment_frequency(NameType::Site, site);
+        nb.increment_frequency(NameType::Site, site).unwrap();
     }
 
     let mut bytes = Vec::new();

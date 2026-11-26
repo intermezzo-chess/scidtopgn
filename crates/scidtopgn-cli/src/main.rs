@@ -256,7 +256,15 @@ fn import_command(args: &ImportArgs, reporter: &Reporter) -> Result<()> {
         };
         match err {
             None => added += 1,
-            Some(err) if abort_on_error => return Err(discard(reporter, db, &args.output, err)),
+            Some(err)
+                if abort_on_error
+                    || matches!(
+                        err.downcast_ref::<Error>(),
+                        Some(Error::NameFrequencyOverflow { .. })
+                    ) =>
+            {
+                return Err(discard(reporter, db, &args.output, err))
+            }
             Some(err) => {
                 reporter.warn(format_args!("skipping {err:#}"));
                 skipped += 1;

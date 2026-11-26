@@ -15,6 +15,16 @@ pub(crate) const NAMEBASE_MAGIC: &[u8; 8] = b"Scid.sn\0";
 pub(crate) const NUM_NAME_TYPES: usize = 4;
 /// The longest name the name file stores, in bytes.
 const MAX_NAME_LEN: usize = 255;
+/// The most references to a name that the three-byte frequency can store.
+pub(crate) const MAX_FREQUENCY: u32 = 0xFF_FFFF;
+
+/// Checks arithmetic and the on-disk limit together.
+fn checked_frequency(name_type: NameType, current: u32, added: u32) -> Result<u32> {
+    current
+        .checked_add(added)
+        .filter(|&n| n <= MAX_FREQUENCY)
+        .ok_or(Error::NameFrequencyOverflow { name_type })
+}
 
 /// A kind of name in the name file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -200,6 +210,15 @@ impl NameBase {
         }
     }
 
+    /// Builds boundary cases without millions of games. Production code
+    /// changes frequencies only through checked counting.
+    #[cfg(test)]
+    pub(crate) fn set_frequency(&mut self, ntype: NameType, id: u32, frequency: u32) {
+        let idx = ntype.as_usize();
+        self.by_id[idx][id as usize].as_mut().unwrap().frequency = frequency;
+        self.max_frequency[idx] = self.max_frequency[idx].max(frequency);
+    }
+
     /// Returns the highest frequency of any name of kind `ntype`.
     #[cfg(test)]
     pub(crate) fn max_frequency(&self, ntype: NameType) -> u32 {
@@ -250,7 +269,6 @@ impl NameBase {
 
     /// Returns the ID of `name`, or `None` if it isn't present. A name
     /// longer than 255 bytes is cut as [`add_name`](Self::add_name) cuts it.
-    #[cfg(test)]
     pub(crate) fn find_name(&self, ntype: NameType, name: &str) -> Option<u32> {
         self.trees[ntype.as_usize()].get(stored_name(name)).copied()
     }
@@ -264,7 +282,6 @@ impl NameBase {
     }
 
     /// Returns the frequency of the name with ID `id`, or 0 if there is none.
-    #[cfg(test)]
     pub(crate) fn get_frequency(&self, ntype: NameType, id: u32) -> u32 {
         self.by_id[ntype.as_usize()]
             .get(id as usize)
@@ -272,23 +289,119 @@ impl NameBase {
             .unwrap_or(0)
     }
 
-    /// Adds 1 to the frequency of the name with ID `id`, if there is one.
-    pub(crate) fn increment_frequency(&mut self, ntype: NameType, id: u32) {
+    /// Returns the lowest ID of the name that `id` reads as. A recount
+    /// holds a shared name's references at that ID until names are merged.
+    fn canonical_id(&self, ntype: NameType, id: u32) -> u32 {
         let idx = ntype.as_usize();
-        if let Some(Some(entry)) = self.by_id[idx].get_mut(id as usize) {
-            entry.frequency += 1;
-            if entry.frequency > self.max_frequency[idx] {
-                self.max_frequency[idx] = entry.frequency;
+        if self.trees[idx].len() == self.num_names[idx] as usize {
+            return id;
+        }
+        self.get_name(ntype, id)
+            .and_then(|name| self.trees[idx].get(name).copied())
+            .unwrap_or(id)
+    }
+
+    /// Recounts the index without applying the storage limit to an
+    /// intermediate result. An update or compaction can remove references
+    /// from a normalized group whose old total exceeds that limit.
+    pub(crate) fn recount(
+        &mut self,
+        references: impl Iterator<Item = (NameType, u32)>,
+    ) -> Result<()> {
+        self.clear_frequencies();
+        for (ntype, id) in references {
+            let id = self.canonical_id(ntype, id);
+            let idx = ntype.as_usize();
+            if let Some(Some(entry)) = self.by_id[idx].get_mut(id as usize) {
+                // Even two references per game in a full index fit in u32.
+                entry.frequency = entry
+                    .frequency
+                    .checked_add(1)
+                    .ok_or(Error::NameFrequencyOverflow { name_type: ntype })?;
+                self.max_frequency[idx] = self.max_frequency[idx].max(entry.frequency);
             }
         }
+        Ok(())
+    }
+
+    /// Checks the complete replacement before any names or records change.
+    /// Missing old names contribute nothing, as when replacing a damaged game.
+    pub(crate) fn check_frequencies(
+        &self,
+        added: &[(NameType, &str)],
+        removed: &[(NameType, u32)],
+    ) -> Result<()> {
+        let check = |ntype, id, name: &str| {
+            let removals = removed
+                .iter()
+                .filter(|&&(kind, old)| kind == ntype && self.canonical_id(kind, old) == id)
+                .count() as u32;
+            let additions = added
+                .iter()
+                .filter(|&&(kind, other)| kind == ntype && stored_name(other) == name)
+                .count() as u32;
+            checked_frequency(
+                ntype,
+                self.get_frequency(ntype, id).saturating_sub(removals),
+                additions,
+            )
+            .map(|_| ())
+        };
+        // Only an initial recount can produce an over-limit count. Check
+        // these groups even if the operation doesn't add a reference to them.
+        // Ordinary appends inspect only the five incoming names.
+        for (idx, &maximum) in self.max_frequency.iter().enumerate() {
+            if maximum > MAX_FREQUENCY {
+                for entry in self.by_id[idx]
+                    .iter()
+                    .flatten()
+                    .filter(|e| e.frequency > MAX_FREQUENCY)
+                {
+                    check(NameType::try_from(idx)?, entry.id, &entry.name)?;
+                }
+            }
+        }
+        for &(ntype, name) in added {
+            if let Some(id) = self.find_name(ntype, name) {
+                check(ntype, id, stored_name(name))?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Counts a reference to the shared name, after recounting from the index.
+    pub(crate) fn increment_reference(&mut self, ntype: NameType, id: u32) -> Result<()> {
+        self.increment_frequency(ntype, self.canonical_id(ntype, id))
+    }
+
+    /// Adds 1 to the frequency of the name with ID `id`, if there is one.
+    pub(crate) fn increment_frequency(&mut self, ntype: NameType, id: u32) -> Result<()> {
+        let idx = ntype.as_usize();
+        if let Some(Some(entry)) = self.by_id[idx].get_mut(id as usize) {
+            entry.frequency = checked_frequency(ntype, entry.frequency, 1)?;
+            self.max_frequency[idx] = self.max_frequency[idx].max(entry.frequency);
+        }
+        Ok(())
     }
 
     /// Subtracts 1 from the frequency of the name with ID `id`, if there is
-    /// one and its frequency isn't 0. The highest frequency stays as it was,
-    /// which only makes the name file store frequencies wider than needed.
+    /// one and its frequency isn't 0. A representable maximum stays as it
+    /// was, which only makes the name file store frequencies wider than needed.
     pub(crate) fn decrement_frequency(&mut self, ntype: NameType, id: u32) {
-        if let Some(Some(entry)) = self.by_id[ntype.as_usize()].get_mut(id as usize) {
+        let id = self.canonical_id(ntype, id);
+        let idx = ntype.as_usize();
+        if let Some(Some(entry)) = self.by_id[idx].get_mut(id as usize) {
             entry.frequency = entry.frequency.saturating_sub(1);
+        }
+        // An update can bring a recounted group back into range. Do not
+        // leave its old, unrepresentable maximum in the file header.
+        if self.max_frequency[idx] > MAX_FREQUENCY {
+            self.max_frequency[idx] = self.by_id[idx]
+                .iter()
+                .flatten()
+                .map(|e| e.frequency)
+                .max()
+                .unwrap_or(0);
         }
     }
 
@@ -309,16 +422,16 @@ impl NameBase {
     ///
     /// A name file can skip IDs, but [`add_name`](Self::add_name) gives a new
     /// name the ID after the number of names, which may already be taken.
-    pub(crate) fn without_unused(&self) -> Option<(NameBase, NewIds)> {
+    pub(crate) fn without_unused(&self) -> Result<Option<(NameBase, NewIds)>> {
         let all_used = self
             .by_id
             .iter()
             .flatten()
             .all(|e| e.as_ref().is_some_and(|e| e.frequency > 0));
         if all_used && !self.has_duplicates() {
-            return None;
+            return Ok(None);
         }
-        Some(self.renumbered(|e| e.frequency > 0))
+        self.renumbered(|e| e.frequency > 0).map(Some)
     }
 
     /// Returns a name base in which the names of a kind that are the same
@@ -331,8 +444,10 @@ impl NameBase {
     /// the sum of theirs. Within each kind, the new IDs count from 0, without
     /// gaps, in the order of the old ones, and a merged name takes the place
     /// of its lowest old ID.
-    pub(crate) fn merged(&self) -> Option<(NameBase, NewIds)> {
-        self.has_duplicates().then(|| self.renumbered(|_| true))
+    pub(crate) fn merged(&self) -> Result<Option<(NameBase, NewIds)>> {
+        self.has_duplicates()
+            .then(|| self.renumbered(|_| true))
+            .transpose()
     }
 
     /// Returns whether two names of a kind are the same.
@@ -346,24 +461,24 @@ impl NameBase {
     /// Returns a name base with the names for which `keep` is true, those
     /// that are the same made one, and the new ID of each old ID, by kind,
     /// as [`merged`](Self::merged) describes.
-    fn renumbered(&self, keep: impl Fn(&NameEntry) -> bool) -> (NameBase, NewIds) {
+    fn renumbered(&self, keep: impl Fn(&NameEntry) -> bool) -> Result<(NameBase, NewIds)> {
         let mut kept = NameBase::new();
         kept.timestamp = self.timestamp;
-        let new_ids = std::array::from_fn(|idx| {
-            self.by_id[idx]
-                .iter()
-                .map(|entry| {
-                    let entry = entry.as_ref().filter(|e| keep(e))?;
-                    Some(kept.add_counted(idx, &entry.name, entry.frequency))
-                })
-                .collect()
-        });
-        (kept, new_ids)
+        let mut new_ids: NewIds = Default::default();
+        for (idx, ids) in new_ids.iter_mut().enumerate() {
+            for entry in &self.by_id[idx] {
+                ids.push(match entry.as_ref().filter(|e| keep(e)) {
+                    Some(entry) => Some(kept.add_counted(idx, &entry.name, entry.frequency)?),
+                    None => None,
+                });
+            }
+        }
+        Ok((kept, new_ids))
     }
 
     /// Adds `frequency` to the frequency of `name`, of the kind at `idx`,
     /// adding the name if it isn't present, and returns its ID.
-    fn add_counted(&mut self, idx: usize, name: &str, frequency: u32) -> u32 {
+    fn add_counted(&mut self, idx: usize, name: &str, frequency: u32) -> Result<u32> {
         let id = match self.trees[idx].get(name) {
             Some(&id) => id,
             None => {
@@ -381,9 +496,9 @@ impl NameBase {
         let entry = self.by_id[idx][id as usize]
             .as_mut()
             .expect("the IDs of a name base without gaps index its names");
-        entry.frequency += frequency;
+        entry.frequency = checked_frequency(NameType::try_from(idx)?, entry.frequency, frequency)?;
         self.max_frequency[idx] = self.max_frequency[idx].max(entry.frequency);
-        id
+        Ok(id)
     }
 
     /// Returns the ID, name, and frequency of every name of kind `ntype`, in
@@ -626,8 +741,16 @@ impl NameBase {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Io`] if the data can't be written.
+    /// Returns [`Error::NameFrequencyOverflow`] before writing anything if
+    /// a frequency or maximum cannot fit, and [`Error::Io`] if writing fails.
     pub(crate) fn write_sn4<W: Write>(&self, writer: &mut W) -> Result<()> {
+        for (idx, entries) in self.by_id.iter().enumerate() {
+            let ntype = NameType::try_from(idx)?;
+            checked_frequency(ntype, self.max_frequency[idx], 0)?;
+            for entry in entries.iter().flatten() {
+                checked_frequency(ntype, entry.frequency, 0)?;
+            }
+        }
         writer.write_all(NAMEBASE_MAGIC)?;
         write_four_bytes(writer, self.timestamp)?;
 
@@ -688,6 +811,113 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_frequency_limit_is_checked_before_writing() {
+        for frequency in [0xFF_FFFE, 0xFF_FFFF, 0x100_0000] {
+            let mut nb = NameBase::new();
+            let id = nb.add_name(NameType::Event, "E").unwrap();
+            nb.by_id[1][id as usize].as_mut().unwrap().frequency = frequency;
+            nb.max_frequency[1] = frequency;
+            let mut bytes = Vec::new();
+            let result = nb.write_sn4(&mut bytes);
+            if frequency > 0xFF_FFFF {
+                assert!(
+                    result.is_err(),
+                    "an overflowing frequency must not be written"
+                );
+                assert!(bytes.is_empty(), "validation must precede every write");
+            } else {
+                result.unwrap();
+                let mut read = NameBase::new();
+                read.read_sn4(&mut bytes.as_slice()).unwrap();
+                assert_eq!(read.get_frequency(NameType::Event, id), frequency);
+            }
+        }
+    }
+
+    #[test]
+    fn test_counting_and_merging_respect_the_frequency_limit() {
+        let mut nb = NameBase::new();
+        let id = nb.add_name(NameType::Player, "A").unwrap();
+        nb.set_frequency(NameType::Player, id, MAX_FREQUENCY - 1);
+        nb.increment_frequency(NameType::Player, id).unwrap();
+        assert!(nb.increment_frequency(NameType::Player, id).is_err());
+        assert_eq!(nb.get_frequency(NameType::Player, id), MAX_FREQUENCY);
+        assert!(nb.add_counted(0, "A", 1).is_err());
+        assert!(nb.add_counted(0, "A", u32::MAX).is_err());
+        assert_eq!(nb.get_frequency(NameType::Player, id), MAX_FREQUENCY);
+
+        for extra in [1, 2] {
+            let mut nb = three_millers();
+            for entry in nb.by_id[0].iter_mut().flatten() {
+                entry.frequency = 0;
+            }
+            // IDs 0, 2 and 3 are the same name, encoded three ways.
+            nb.set_frequency(NameType::Player, 0, MAX_FREQUENCY - 1);
+            nb.set_frequency(NameType::Player, 2, extra);
+            let result = nb.merged();
+            if extra == 1 {
+                let (merged, _) = result.unwrap().unwrap();
+                let id = merged.find_name(NameType::Player, "Müller, Hans").unwrap();
+                assert_eq!(merged.get_frequency(NameType::Player, id), MAX_FREQUENCY);
+            } else {
+                assert!(matches!(result, Err(Error::NameFrequencyOverflow { .. })));
+            }
+        }
+    }
+
+    #[test]
+    fn test_writer_checks_the_header_and_each_frequency_independently() {
+        for invalid_header in [false, true] {
+            let mut nb = players(&[("A", 1)]);
+            if invalid_header {
+                nb.max_frequency[0] = MAX_FREQUENCY + 1;
+            } else {
+                nb.by_id[0][0].as_mut().unwrap().frequency = MAX_FREQUENCY + 1;
+            }
+            let mut bytes = Vec::new();
+            assert!(nb.write_sn4(&mut bytes).is_err());
+            assert!(bytes.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_recount_validates_the_result_of_a_replacement() {
+        let mut nb = players(&[("A", 1), ("B", 1)]);
+        nb.set_frequency(NameType::Player, 0, MAX_FREQUENCY + 1);
+        let removed = [(NameType::Player, 0)];
+        assert!(nb
+            .check_frequencies(&[(NameType::Player, "A")], &removed)
+            .is_err());
+        assert!(nb
+            .check_frequencies(&[(NameType::Player, "B")], &[])
+            .is_err());
+        assert!(nb
+            .check_frequencies(&[(NameType::Event, "new")], &[])
+            .is_err());
+        nb.check_frequencies(&[(NameType::Player, "B")], &removed)
+            .unwrap();
+        nb.decrement_frequency(NameType::Player, 0);
+        nb.increment_reference(NameType::Player, 1).unwrap();
+        let mut bytes = Vec::new();
+        nb.write_sn4(&mut bytes).unwrap();
+        let read = read(&bytes);
+        assert_eq!(read.get_frequency(NameType::Player, 0), MAX_FREQUENCY);
+        assert_eq!(read.max_frequency(NameType::Player), MAX_FREQUENCY);
+    }
+
+    #[test]
+    fn test_recount_keeps_true_counts_until_the_final_operation_is_checked() {
+        let mut nb = players(&[("A", 0)]);
+        nb.recount(std::iter::repeat_n(
+            (NameType::Player, 0),
+            MAX_FREQUENCY as usize + 1,
+        ))
+        .unwrap();
+        assert_eq!(nb.get_frequency(NameType::Player, 0), MAX_FREQUENCY + 1);
+        assert!(nb.write_sn4(&mut Vec::new()).is_err());
+    }
+
+    #[test]
     fn test_name_type() {
         assert_eq!(NameType::Player.max_id(), 1_048_575);
         assert_eq!(NameType::Event.max_id(), 524_287);
@@ -699,8 +929,8 @@ mod tests {
     fn test_decrement_frequency() {
         let mut nb = NameBase::new();
         let id = nb.add_name(NameType::Event, "Open").unwrap();
-        nb.increment_frequency(NameType::Event, id);
-        nb.increment_frequency(NameType::Event, id);
+        nb.increment_frequency(NameType::Event, id).unwrap();
+        nb.increment_frequency(NameType::Event, id).unwrap();
 
         nb.decrement_frequency(NameType::Event, id);
         assert_eq!(nb.get_frequency(NameType::Event, id), 1);
@@ -719,7 +949,7 @@ mod tests {
         nb.set_timestamp(7);
         for &(name, uses) in names {
             let id = nb.add_name(NameType::Player, name).unwrap();
-            (0..uses).for_each(|_| nb.increment_frequency(NameType::Player, id));
+            (0..uses).for_each(|_| nb.increment_frequency(NameType::Player, id).unwrap());
         }
         nb
     }
@@ -727,7 +957,7 @@ mod tests {
     #[test]
     fn test_without_unused_renumbers_the_names_left() {
         let nb = players(&[("A", 2), ("B", 0), ("C", 1), ("D", 0)]);
-        let (kept, new_ids) = nb.without_unused().unwrap();
+        let (kept, new_ids) = nb.without_unused().unwrap().unwrap();
 
         assert_eq!(new_ids[0], [Some(0), None, Some(1), None]);
         assert!(new_ids[1..].iter().all(Vec::is_empty));
@@ -743,8 +973,11 @@ mod tests {
 
     #[test]
     fn test_without_unused_is_none_when_every_name_is_used() {
-        assert!(players(&[("A", 1), ("B", 3)]).without_unused().is_none());
-        assert!(NameBase::new().without_unused().is_none());
+        assert!(players(&[("A", 1), ("B", 3)])
+            .without_unused()
+            .unwrap()
+            .is_none());
+        assert!(NameBase::new().without_unused().unwrap().is_none());
     }
 
     #[test]
@@ -754,7 +987,7 @@ mod tests {
         let b = nb.by_id[0].pop().unwrap().map(|e| NameEntry { id: 2, ..e });
         nb.by_id[0].extend([None, b]);
         nb.trees[0].insert("B".to_string(), 2);
-        let (kept, new_ids) = nb.without_unused().unwrap();
+        let (kept, new_ids) = nb.without_unused().unwrap().unwrap();
 
         assert_eq!(new_ids[0], [Some(0), None, Some(1)]);
         assert_eq!(
@@ -768,7 +1001,7 @@ mod tests {
         // A damaged name file can have names that are the same once read.
         let mut nb = players(&[("A", 1), ("B", 0), ("C", 2)]);
         nb.by_id[0][2].as_mut().unwrap().name = "A".to_string();
-        let (kept, new_ids) = nb.without_unused().unwrap();
+        let (kept, new_ids) = nb.without_unused().unwrap().unwrap();
 
         assert_eq!(new_ids[0], [Some(0), None, Some(0)]);
         assert_eq!(
@@ -814,17 +1047,17 @@ mod tests {
         let id = nb.add_name(NameType::Player, "Carlsen, Magnus").unwrap();
         assert_eq!(nb.get_frequency(NameType::Player, id), 0);
 
-        nb.increment_frequency(NameType::Player, id);
+        nb.increment_frequency(NameType::Player, id).unwrap();
         assert_eq!(nb.get_frequency(NameType::Player, id), 1);
 
-        nb.increment_frequency(NameType::Player, id);
+        nb.increment_frequency(NameType::Player, id).unwrap();
         assert_eq!(nb.get_frequency(NameType::Player, id), 2);
         assert_eq!(nb.max_frequency(NameType::Player), 2);
 
         // A less frequent name, or an ID with no name, leaves the maximum.
         let other = nb.add_name(NameType::Player, "Caruana, Fabiano").unwrap();
-        nb.increment_frequency(NameType::Player, other);
-        nb.increment_frequency(NameType::Player, 99);
+        nb.increment_frequency(NameType::Player, other).unwrap();
+        nb.increment_frequency(NameType::Player, 99).unwrap();
         assert_eq!(nb.get_frequency(NameType::Player, other), 1);
         assert_eq!(nb.get_frequency(NameType::Player, 99), 0);
         assert_eq!(nb.max_frequency(NameType::Player), 2);
@@ -1089,7 +1322,7 @@ mod tests {
 
     #[test]
     fn test_merged_makes_names_that_are_the_same_one() {
-        let (merged, new_ids) = three_millers().merged().unwrap();
+        let (merged, new_ids) = three_millers().merged().unwrap().unwrap();
 
         assert_eq!(new_ids[0], [Some(0), Some(1), Some(0), Some(0)]);
         assert!(new_ids[1..].iter().all(Vec::is_empty));
@@ -1104,13 +1337,13 @@ mod tests {
         assert_eq!(merged.count(NameType::Player), 2);
         assert_eq!(merged.max_frequency(NameType::Player), 6);
         assert!(merged.converted_names().is_empty());
-        assert!(merged.merged().is_none());
+        assert!(merged.merged().unwrap().is_none());
     }
 
     #[test]
     fn test_merged_is_none_without_names_that_are_the_same() {
-        assert!(players(&[("A", 1), ("B", 0)]).merged().is_none());
-        assert!(NameBase::new().merged().is_none());
+        assert!(players(&[("A", 1), ("B", 0)]).merged().unwrap().is_none());
+        assert!(NameBase::new().merged().unwrap().is_none());
     }
 
     #[test]
@@ -1120,6 +1353,7 @@ mod tests {
             (1, 1, 0, "Müller".as_bytes()),
         ]))
         .without_unused()
+        .unwrap()
         .unwrap();
         assert_eq!(new_ids[0], [Some(0), Some(0)]);
         assert_eq!(

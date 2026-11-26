@@ -41,6 +41,14 @@ use crate::namebase::NameType;
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum Error {
+    /// A name would have more references than the name file can store.
+    #[error("The {name_type} frequency exceeds 16,777,215")]
+    #[non_exhaustive]
+    NameFrequencyOverflow {
+        /// The kind of name whose frequency cannot be stored.
+        name_type: NameType,
+    },
+
     /// An I/O error from the operating system.
     #[error(transparent)]
     Io(#[from] std::io::Error),

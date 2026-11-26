@@ -94,14 +94,26 @@ use shakmaty::{Board, Position, Role};
 /// and SCID can't open a name file with both. [`flush`](Self::flush),
 /// [`compact_games`](Self::compact_games), and
 /// [`compact_names`](Self::compact_names) merge them into one name, whose
-/// frequency is the sum of theirs, and give the names of that kind new IDs.
+/// frequency counts all their references, and give the names of that kind new IDs.
 /// Every game reads back with the same names as before.
+///
+/// # Name frequencies
+///
+/// Before the first record change, or when writing other changes, name
+/// frequencies are counted from the index, including logically deleted games.
+/// Stored counts are not trusted. Reading and closing an unchanged database
+/// writes nothing. Repeated changes reuse the counts; they do not recount.
+/// A name can have at most 16,777,215 references, and a player appearing as
+/// both White and Black contributes two. A change exceeding that limit returns
+/// [`Error::NameFrequencyOverflow`] before adding names or a game record.
 pub struct Database {
     path: PathBuf,
     index: Index,
     gfile: GFile,
     nfile: NFile,
     modified: bool,
+    /// Whether frequencies have been counted from this index.
+    frequencies_counted: bool,
     /// The game file's length when the database was opened, created, or
     /// last flushed, which [`discard`](Self::discard) restores.
     saved_game_size: u64,
@@ -201,6 +213,7 @@ impl Database {
             gfile,
             nfile,
             modified: false,
+            frequencies_counted: false,
             saved_game_size,
             tree_cache_stale: false,
         })
@@ -255,6 +268,7 @@ impl Database {
             gfile,
             nfile,
             modified: false,
+            frequencies_counted: true,
             saved_game_size: 0,
             tree_cache_stale: false,
         })
@@ -452,7 +466,8 @@ impl Database {
     /// [`Error::InvalidFen`] if the game's moves or starting position can't
     /// be stored, [`Error::ReadOnly`] if the database was opened with
     /// [`open_read_only`](Self::open_read_only), and [`Error::Io`] if the
-    /// game file can't be written.
+    /// game file can't be written. Returns [`Error::NameFrequencyOverflow`]
+    /// if a resulting name frequency cannot be stored, leaving the game unchanged.
     ///
     /// # Examples
     ///
@@ -470,7 +485,7 @@ impl Database {
     /// ```
     pub fn add_game(&mut self, game: &Game) -> Result<u32> {
         self.check_writable()?;
-        let entry = self.store_game(game)?;
+        let entry = self.store_game(game, None)?;
         let game_num = self.index.add_entry(entry)?;
         let entry = self
             .index
@@ -479,8 +494,8 @@ impl Database {
         count_names(
             self.nfile.namebase_mut(),
             entry,
-            NameBase::increment_frequency,
-        );
+            NameBase::increment_reference,
+        )?;
 
         self.modified = true;
 
@@ -510,7 +525,8 @@ impl Database {
     /// was opened with [`open_read_only`](Self::open_read_only), and
     /// [`Error::Io`] if its game file can't be written. After an error, the
     /// index and the name frequencies are unchanged, though a new name or
-    /// the record may stay in the files unused.
+    /// the record may stay in the files unused. A
+    /// [`Error::NameFrequencyOverflow`] changes no names or records.
     ///
     /// # Examples
     ///
@@ -554,6 +570,14 @@ impl Database {
             .read_game_data(entry.get_offset(), entry.get_length())
             .map_err(|e| in_game(game_num, e))?;
 
+        self.ensure_frequencies()?;
+        self.nfile.namebase().check_frequencies(
+            &names
+                .iter()
+                .map(|(kind, name)| (*kind, name.as_str()))
+                .collect::<Vec<_>>(),
+            &[],
+        )?;
         let nb = self.nfile.namebase_mut();
         let ids = names
             .iter()
@@ -574,8 +598,8 @@ impl Database {
         count_names(
             self.nfile.namebase_mut(),
             entry,
-            NameBase::increment_frequency,
-        );
+            NameBase::increment_reference,
+        )?;
 
         self.modified = true;
 
@@ -638,14 +662,16 @@ impl Database {
             })?
             .clone();
 
-        let mut entry = self.store_game(game)?;
+        let mut entry = self.store_game(game, Some(&old))?;
         entry.copy_user_flags(&old);
 
         // The old names lose 1 first, so a name the game keeps ends at 1 or
         // more, even if its count was wrongly 0.
         let nb = self.nfile.namebase_mut();
-        count_names(nb, &old, NameBase::decrement_frequency);
-        count_names(nb, &entry, NameBase::increment_frequency);
+        for (ntype, id) in name_ids(&old) {
+            nb.decrement_frequency(ntype, id);
+        }
+        count_names(nb, &entry, NameBase::increment_reference)?;
 
         *self
             .index
@@ -862,15 +888,41 @@ impl Database {
         Ok(())
     }
 
+    /// Counts once before changing records. Read-only opens keep the stored
+    /// counts, and repeated appends do not scan the index again.
+    fn ensure_frequencies(&mut self) -> Result<()> {
+        if !self.frequencies_counted {
+            self.nfile
+                .namebase_mut()
+                .recount(self.index.entries().flat_map(name_ids))?;
+            self.frequencies_counted = true;
+        }
+        Ok(())
+    }
+
     /// Adds `game`'s record to the game file and its names to the name base,
     /// and returns its index entry. The names' frequencies don't change.
-    fn store_game(&mut self, game: &Game) -> Result<IndexEntry> {
+    fn store_game(&mut self, game: &Game, old: Option<&IndexEntry>) -> Result<IndexEntry> {
         let (encoded_data, summary) = self.encode_game(game)?;
-        let buf = ByteBuffer::from_slice(&encoded_data);
-        let offset = self.gfile.add_game(&buf)?;
+        if encoded_data.len() > crate::gfile::MAX_GAME_LENGTH {
+            return Err(Error::GameTooLarge {
+                length: encoded_data.len(),
+                max: crate::gfile::MAX_GAME_LENGTH,
+            });
+        }
+        self.ensure_frequencies()?;
+        self.nfile.namebase().check_frequencies(
+            &[
+                (NameType::Player, &game.white),
+                (NameType::Player, &game.black),
+                (NameType::Event, &game.event),
+                (NameType::Site, &game.site),
+                (NameType::Round, &game.round),
+            ],
+            old.map(name_ids).as_ref().map_or(&[], |ids| ids.as_slice()),
+        )?;
 
         let mut entry = IndexEntry::new();
-        entry.set_offset(offset);
         entry.set_length(encoded_data.len() as u32);
         entry.set_start_flag(game.start_position.is_some());
         summary.set_fields(&mut entry);
@@ -915,6 +967,8 @@ impl Database {
             }
         }
 
+        let buf = ByteBuffer::from_slice(&encoded_data);
+        entry.set_offset(self.gfile.add_game(&buf)?);
         Ok(entry)
     }
 
@@ -1170,13 +1224,14 @@ impl Database {
             return Ok(());
         }
 
+        self.ensure_frequencies()?;
+        let merged = self.nfile.namebase().merged()?;
         self.gfile.flush()?;
         check_replaceable(&self.path)?;
 
         // The index is renumbered as it is written, and changed only once the
         // new files are in place, so that a large index isn't held twice and
         // is as it was if writing fails.
-        let merged = self.nfile.namebase().merged();
         let mut new = NewFiles::new(&self.path)?;
         match &merged {
             Some((namebase, new_ids)) => {
@@ -1356,9 +1411,16 @@ impl Database {
         self.check_writable()?;
         self.flush()?;
 
-        let (mut namebase, new_ids) = match self.nfile.namebase().merged() {
-            Some((namebase, new_ids)) => (namebase, Some(new_ids)),
-            None => (self.nfile.namebase().clone(), None),
+        // Only retained games determine the compacted frequencies. Merging
+        // the old counts first could reject a result that fits after deletion.
+        let mut namebase = self.nfile.namebase().clone();
+        namebase.clear_frequencies();
+        let new_ids = match namebase.merged()? {
+            Some((merged, new_ids)) => {
+                namebase = merged;
+                Some(new_ids)
+            }
+            None => None,
         };
 
         let mut new = NewFiles::new(&self.path)?;
@@ -1381,10 +1443,9 @@ impl Database {
         }
         gfile.close()?;
 
-        namebase.clear_frequencies();
         namebase.clear_converted();
         for entry in index.entries() {
-            count_names(&mut namebase, entry, NameBase::increment_frequency);
+            count_names(&mut namebase, entry, NameBase::increment_reference)?;
         }
         write_names(&namebase, new.create("sn4")?)?;
         write_index(&index, new.create("si4")?)?;
@@ -1470,10 +1531,10 @@ impl Database {
                 if counted.get_name(name_type, id).is_none() {
                     return Err(in_game(game_num, Error::NameNotFound { name_type, id }));
                 }
-                counted.increment_frequency(name_type, id);
+                counted.increment_frequency(name_type, id)?;
             }
         }
-        let Some((namebase, new_ids)) = counted.without_unused() else {
+        let Some((namebase, new_ids)) = counted.without_unused()? else {
             if counted.converted_names().is_empty() {
                 return Ok(());
             }
@@ -1729,10 +1790,15 @@ fn in_game(game_num: u32, source: Error) -> Error {
 
 /// Calls `change` on the frequency of each of the five names `entry` refers
 /// to.
-fn count_names(nb: &mut NameBase, entry: &IndexEntry, change: fn(&mut NameBase, NameType, u32)) {
+fn count_names(
+    nb: &mut NameBase,
+    entry: &IndexEntry,
+    change: fn(&mut NameBase, NameType, u32) -> Result<()>,
+) -> Result<()> {
     for (name_type, id) in name_ids(entry) {
-        change(nb, name_type, id);
+        change(nb, name_type, id)?;
     }
+    Ok(())
 }
 
 /// Returns an index with no entries and the header of `index`, apart from
@@ -1845,6 +1911,149 @@ mod tests {
             "[White \"{white}\"]\n[Round \"{round}\"]\n\n1. e4 *\n"
         ))
         .unwrap()
+    }
+
+    #[test]
+    fn test_frequency_overflow_leaves_each_operation_unchanged() {
+        use crate::namebase::MAX_FREQUENCY;
+        let game = |name: &str| {
+            parse_single_game(&format!(
+            "[White \"{name}\"]\n[Black \"{name} black\"]\n[Event \"{name}\"]\n[Site \"{name}\"]\n[Round \"{name}\"]\n\n1. e4 *"
+        )).unwrap()
+        };
+        for kind in [
+            NameType::Player,
+            NameType::Event,
+            NameType::Site,
+            NameType::Round,
+        ] {
+            for operation in ["add", "copy", "update"] {
+                let temp = tempfile::TempDir::new().unwrap();
+                let path = temp.path().join("db");
+                let mut db = Database::create(&path).unwrap();
+                db.add_game(&game("A")).unwrap();
+                db.add_game(&game("B")).unwrap();
+                db.flush().unwrap();
+                fs::write(path.with_extension("stc"), "cache").unwrap();
+                let before = ["sg4", "si4", "sn4", "stc"]
+                    .map(|ext| fs::read(path.with_extension(ext)).unwrap());
+                // Model an already counted database at capacity, without a
+                // multi-million-game fixture. The first-write recount has run.
+                let nb = db.nfile.namebase_mut();
+                let id = nb.find_name(kind, "A").unwrap();
+                nb.set_frequency(kind, id, MAX_FREQUENCY);
+                let mut names_before = Vec::new();
+                nb.write_sn4(&mut names_before).unwrap();
+                let mut incoming = game("New");
+                match kind {
+                    NameType::Player => incoming.white = "A".into(),
+                    NameType::Event => incoming.event = "A".into(),
+                    NameType::Site => incoming.site = "A".into(),
+                    NameType::Round => incoming.round = "A".into(),
+                }
+                let mut source = Database::create(temp.path().join("source")).unwrap();
+                source.add_game(&incoming).unwrap();
+                let result = match operation {
+                    "add" => db.add_game(&incoming).map(|_| ()),
+                    "copy" => db.copy_game(&mut source, 0).map(|_| ()),
+                    _ => db.update_game(1, &incoming),
+                };
+                assert!(
+                    matches!(result, Err(Error::NameFrequencyOverflow { name_type }) if name_type == kind)
+                );
+                assert_eq!(db.num_games(), 2);
+                assert_eq!(db.get_game(1).unwrap().white, "B");
+                let mut names_after = Vec::new();
+                db.nfile.namebase().write_sn4(&mut names_after).unwrap();
+                assert_eq!(names_after, names_before, "{kind}, {operation}");
+                db.flush().unwrap();
+                assert_eq!(
+                    ["sg4", "si4", "sn4", "stc"]
+                        .map(|ext| fs::read(path.with_extension(ext)).unwrap()),
+                    before
+                );
+                // A failed operation does not poison the next valid update.
+                db.update_game(0, &game("A")).unwrap();
+                db.close().unwrap();
+                let mut read = Database::open(&path).unwrap();
+                assert_eq!(read.get_game(0).unwrap().white, "A");
+            }
+        }
+    }
+
+    #[test]
+    fn test_self_player_and_same_name_update_at_the_frequency_limit() {
+        use crate::namebase::MAX_FREQUENCY;
+        let temp = tempfile::TempDir::new().unwrap();
+        let path = temp.path().join("db");
+        let mut db = Database::create(&path).unwrap();
+        let mut same = game("A", "1");
+        same.black = "A".into();
+        db.add_game(&same).unwrap();
+        db.flush().unwrap();
+        let id = db.index.get_entry(0).unwrap().get_white();
+        db.nfile
+            .namebase_mut()
+            .set_frequency(NameType::Player, id, MAX_FREQUENCY - 1);
+        assert!(matches!(
+            db.add_game(&same),
+            Err(Error::NameFrequencyOverflow { .. })
+        ));
+        assert_eq!(frequency(&db, NameType::Player, "A"), MAX_FREQUENCY - 1);
+        db.update_game(0, &same).unwrap();
+        db.add_game(&game("A", "2")).unwrap();
+        assert_eq!(frequency(&db, NameType::Player, "A"), MAX_FREQUENCY);
+        db.flush().unwrap();
+        db.update_game(0, &same).unwrap();
+        db.close().unwrap();
+        let read = Database::open(&path).unwrap();
+        assert_eq!(frequency(&read, NameType::Player, "A"), MAX_FREQUENCY);
+    }
+
+    #[test]
+    fn test_update_can_reduce_an_over_limit_recount_to_the_limit() {
+        use crate::namebase::MAX_FREQUENCY;
+        let temp = tempfile::TempDir::new().unwrap();
+        let path = temp.path().join("db");
+        let mut db = Database::create(&path).unwrap();
+        let mut same = game("A", "1");
+        same.black = "A".into();
+        db.add_game(&same).unwrap();
+        db.flush().unwrap();
+        let id = db.index.get_entry(0).unwrap().get_white();
+        // Model a recounted normalized group above the format limit.
+        db.nfile
+            .namebase_mut()
+            .set_frequency(NameType::Player, id, MAX_FREQUENCY + 1);
+        assert!(matches!(
+            db.update_game(0, &same),
+            Err(Error::NameFrequencyOverflow { .. })
+        ));
+        same.black = "Other".into();
+        db.update_game(0, &same).unwrap();
+        db.close().unwrap();
+        let mut read = Database::open(&path).unwrap();
+        assert_eq!(frequency(&read, NameType::Player, "A"), MAX_FREQUENCY);
+        assert_eq!(read.get_game(0).unwrap().black, "Other");
+    }
+
+    #[test]
+    fn test_compaction_counts_retained_games_before_merging_frequencies() {
+        use crate::namebase::MAX_FREQUENCY;
+        let temp = tempfile::TempDir::new().unwrap();
+        let path = copy_of(temp.path(), "mixed");
+        let mut db = Database::open(&path).unwrap();
+        db.ensure_frequencies().unwrap();
+        let before = all_pgn(&mut db);
+        // This state is also possible with a valid on-disk database whose
+        // separate encoded aliases each fit but whose combined count does not.
+        let nb = db.nfile.namebase_mut();
+        let id = nb.find_name(NameType::Player, "Müller, Hans").unwrap();
+        nb.set_frequency(NameType::Player, id, MAX_FREQUENCY + 1);
+        db.compact_games().unwrap();
+        assert_eq!(all_pgn(&mut db), before);
+        assert_eq!(frequency(&db, NameType::Player, "Müller, Hans"), 3);
+        db.close().unwrap();
     }
 
     /// A new file that fails once `left` bytes have been written to it.

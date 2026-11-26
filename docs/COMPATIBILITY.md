@@ -68,6 +68,31 @@ Import, append, update, delete, and merge are each a [scenario](SCID_COMPAT.md#s
 - **Changed:** the game count, and the name file, which gains the new names.
 - **Matches SCID:** the appended entries and the names match the database `pgnscid` writes from both PGN files (`append` scenario).
 
+### Name frequencies and the storage limit
+
+Before the first record change, or when writing other changes, scidtopgn
+counts name references from the index, including logically deleted games.
+It does this once per open database and maintains the counts as games change.
+Reading or closing an unchanged database leaves its files alone. As with
+SCID's normal open, stale stored counts do not prevent appending to a small
+database (`test_cli_append_recounts_a_stale_frequency_at_the_limit`).
+
+The name file stores at most **16,777,215** references to a name. Exactly
+that count is valid. A player appearing as both White and Black contributes
+two references, and names that become identical when converted to UTF-8
+share a count. Adding, copying or updating a game that would exceed the limit
+returns `NameFrequencyOverflow` before changing names or records. Updates
+check the final count after removing the old game's references, so keeping
+the same names at the limit succeeds. The writer also checks frequencies
+and maxima before emitting any bytes; counts are never truncated to fit.
+
+A frequency overflow aborts a CLI import even with `--on-error skip` and
+discards the whole batch, leaving an existing database's files unchanged.
+Ordinary invalid PGN games still follow `--on-error`. Merge builds its output
+separately and replaces an existing database only on success. This does not
+repair databases already damaged by a truncated count, change the format,
+or extend the existing guarantees for I/O failures or process interruption.
+
 ### Update
 
 `Database::update_game`, which replaces a game and keeps its number. The CLI doesn't offer it.
@@ -80,8 +105,8 @@ Import, append, update, delete, and merge are each a [scenario](SCID_COMPAT.md#s
 
 `Database::delete_game` and `undelete_game`. The CLI doesn't offer them.
 
-- **Kept:** the game's record and number, and every name and its frequency, until the games are compacted (`test_delete_and_undelete_game`). Every other game's index entry stays byte-identical (`test_changes_keep_scids_other_entries`), and the name file keeps SCID's order (`test_delete_keeps_scids_name_order`).
-- **Changed:** only the game's delete flag.
+- **Kept:** the game's record and number, and every name and its true frequency, until the games are compacted (`test_delete_and_undelete_game`). Every other game's index entry stays byte-identical (`test_changes_keep_scids_other_entries`), and the name file keeps SCID's order (`test_delete_keeps_scids_name_order`).
+- **Changed:** the game's delete flag; any stale stored name counts are recounted when writing, as described above.
 - **Matches SCID:** deleting the first, middle, and last games gives files byte-identical to those SCID writes when it deletes the same games, and undeleting them gives back the original files (`delete` and `undelete` scenarios). SCID sets a description, base type, auto-load game, custom flag names, and flags on the first three games before the delete, and reads them back unchanged apart from the deleted games' delete flags.
 
 ### Merge
