@@ -1549,6 +1549,32 @@ fn test_stray_closing_brackets_give_warnings() {
 }
 
 #[test]
+fn test_stray_closing_brackets_before_first_move_give_warnings() {
+    // A `}` or `]` before the first move is skipped by the header loop,
+    // without the warning the same character gets after a move (#158).
+    for (movetext, expected) in [
+        ("} ] e4 e5 *", ["}", "]"].as_slice()),
+        ("]e4 e5 *", ["]"].as_slice()),
+        ("{Intro} ]e4 e5 *", ["]"].as_slice()),
+        ("! ]e4 e5 *", ["]"].as_slice()),
+    ] {
+        let game = parse_single_game(&pgn_game("", movetext)).unwrap();
+        assert_eq!(sans(&game), ["e4", "e5"], "{movetext}");
+        let unknown = |text: &str| PgnWarningKind::UnknownText {
+            text: text.to_string(),
+        };
+        assert_eq!(
+            warning_kinds(&game),
+            expected
+                .iter()
+                .map(|&text| unknown(text))
+                .collect::<Vec<_>>(),
+            "{movetext}"
+        );
+    }
+}
+
+#[test]
 fn test_line_comments_between_tags_are_skipped() {
     for comment in ["% escape {", "; comment {"] {
         let pgn = format!("[Event \"A\"]\n{comment}\n[Site \"S\"]\n\n1. e4 *\n");
