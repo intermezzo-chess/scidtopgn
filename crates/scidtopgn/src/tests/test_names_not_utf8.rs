@@ -175,11 +175,12 @@ fn test_appending_writes_the_names_as_utf8() {
     let after = all_pgn(&mut db);
     assert_eq!(after[..2], before);
     // The new game uses the name read from Latin-1, whose stored frequency
-    // is 0: the reference converter doesn't count names.
+    // is 0: the reference converter doesn't count names. The first change
+    // recounts the existing game too.
     let nb = db.nfile().namebase();
     assert_eq!(nb.count(NameType::Player), 5);
     let muller = nb.find_name(NameType::Player, "Müller, Hans").unwrap();
-    assert_eq!(nb.get_frequency(NameType::Player, muller), 1);
+    assert_eq!(nb.get_frequency(NameType::Player, muller), 2);
     assert_eq!(
         files_in(temp.path()),
         ["latin1.sg4", "latin1.si4", "latin1.sn4"]
@@ -258,11 +259,16 @@ fn test_a_merged_names_frequency_is_the_sum_of_theirs() {
     nb.read_sn4(&mut std::fs::File::open(&sn4).unwrap())
         .unwrap();
     for entry in Database::open_read_only(&path).unwrap().index().entries() {
-        nb.increment_frequency(NameType::Player, entry.get_white());
-        nb.increment_frequency(NameType::Player, entry.get_black());
-        nb.increment_frequency(NameType::Event, entry.get_event());
-        nb.increment_frequency(NameType::Site, entry.get_site());
-        nb.increment_frequency(NameType::Round, entry.get_round());
+        nb.increment_frequency(NameType::Player, entry.get_white())
+            .unwrap();
+        nb.increment_frequency(NameType::Player, entry.get_black())
+            .unwrap();
+        nb.increment_frequency(NameType::Event, entry.get_event())
+            .unwrap();
+        nb.increment_frequency(NameType::Site, entry.get_site())
+            .unwrap();
+        nb.increment_frequency(NameType::Round, entry.get_round())
+            .unwrap();
     }
     nb.write_sn4(&mut std::fs::File::create(&sn4).unwrap())
         .unwrap();
@@ -430,4 +436,53 @@ fn test_the_index_in_memory_matches_the_file_after_merging_names() {
     let after = all_pgn(&mut db);
     assert_eq!(after[..4], written);
     assert_eq!(after[4], written[3]);
+}
+
+#[test]
+fn test_writes_recount_stale_frequencies_before_merging_names() {
+    for operation in [
+        "append",
+        "update",
+        "compact names",
+        "compact games",
+        "delete",
+    ] {
+        let temp = TempDir::new().unwrap();
+        let path = copy_of(temp.path(), "mixed");
+        let sn4 = path.with_extension("sn4");
+        let mut nb = NameBase::new();
+        nb.read_sn4(&mut std::fs::File::open(&sn4).unwrap())
+            .unwrap();
+        // Each stored count fits, but merging the two spellings would not.
+        for kind in [
+            NameType::Player,
+            NameType::Event,
+            NameType::Site,
+            NameType::Round,
+        ] {
+            for (id, _, _) in nb.get_all_names(kind) {
+                nb.set_frequency(kind, id, 0xFF_FFFF);
+            }
+        }
+        nb.write_sn4(&mut std::fs::File::create(&sn4).unwrap())
+            .unwrap();
+        let mut db = Database::open(&path).unwrap();
+        let before = all_pgn(&mut db);
+        match operation {
+            "append" => {
+                db.add_game(&parse_single_game(NEW_GAME).unwrap()).unwrap();
+            }
+            "update" => {
+                let game = db.get_game(0).unwrap();
+                db.update_game(0, &game).unwrap();
+            }
+            "compact names" => db.compact_names().unwrap(),
+            "compact games" => db.compact_games().unwrap(),
+            _ => db.delete_game(0).unwrap(),
+        }
+        db.close().unwrap();
+        assert_frequencies_counted(&path);
+        let mut db = Database::open(&path).unwrap();
+        assert_eq!(all_pgn(&mut db)[..before.len()], before, "{operation}");
+    }
 }

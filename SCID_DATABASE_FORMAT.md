@@ -349,6 +349,13 @@ The name file stores all text strings using sophisticated compression algorithms
 | 30-32 | 3 bytes | `max_freq_sites` | BE uint24 | Maximum site frequency |
 | 33-35 | 3 bytes | `max_freq_rounds` | BE uint24 | Maximum round frequency |
 
+Frequencies and maxima fit in at most three bytes: 16,777,215 is valid,
+and 16,777,216 is not. scidtopgn recounts references from the index before
+changing records, then checks additions, replacements and merged names.
+It rejects an unrepresentable count instead of truncating it. See
+[Name frequencies and the storage limit](docs/COMPATIBILITY.md#name-frequencies-and-the-storage-limit)
+for the recount and failure policy.
+
 ### Name Storage Format
 
 #### Front-Coding Compression Algorithm
