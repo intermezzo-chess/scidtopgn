@@ -524,6 +524,35 @@ fn test_recovery_skips_line_comments() {
 }
 
 #[test]
+fn test_recovery_after_non_tag_line_keeps_next_game() {
+    // A line starting with `[` that isn't a tag ends the failed header:
+    // the next well-formed tag starts a new game (#157).
+    let pgn = "[Note: see below]\n[Event \"Actual\"]\n\n1. e4 *\n";
+    assert_eq!(events(pgn), ["error", "Actual"]);
+    // A malformed line followed by a blank line, which works already.
+    let pgn = "[Note: see below]\n\n[Event \"Actual\"]\n\n1. e4 *\n";
+    assert_eq!(events(pgn), ["error", "Actual"]);
+}
+
+#[test]
+fn test_game_without_result_ends_at_whitespace_indented_tags() {
+    // A tag line indented with whitespace other than spaces and tabs ends
+    // a game without a result, as text before a game allows any whitespace
+    // before `[` (#157).
+    for indent in ["\u{b}", "\u{c}", " \u{b} "] {
+        let pgn = format!("[Event \"E\"]\n\n1.e4\n{indent}[Event \"B\"]\n\n1.d4 *\n");
+        assert_eq!(events(&pgn), ["E", "B"], "{indent:?}");
+    }
+    // The first game reports its missing result.
+    let games = parse_pgn("[Event \"E\"]\n\n1.e4\n\u{b}[Event \"B\"]\n\n1.d4 *\n").unwrap();
+    assert_eq!(games.len(), 2);
+    assert_eq!(
+        warning_kinds(&games[0]),
+        [PgnWarningKind::MissingResult { tag: None }]
+    );
+}
+
+#[test]
 fn test_tag_pairs_may_span_lines() {
     for event in [
         "[Event\n \"Good\"]",
