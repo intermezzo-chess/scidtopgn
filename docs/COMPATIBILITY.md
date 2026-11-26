@@ -236,7 +236,7 @@ A game that fails to parse is reported by its error only, without its warnings.
 
 | Warning | When | Case |
 | --- | --- | --- |
-| `skipped unknown text "zz"` | Text in the moves that isn't a move, an annotation symbol, or a result, such as `zz`, `Diagram`, `B` on its own, or `nf3`. Also text after the annotation symbols attached to a move, as in `e4!x`, and each `}` or `]` outside a comment. | #12, #25, #60 |
+| `skipped unknown text "zz"` | Text in the moves that isn't a move, an annotation symbol, or a result, such as `zz`, `Diagram`, `B` on its own, or `nf3`. Also text after the annotation symbols attached to a move, as in `e4!x`, and each `}` or `]` outside a comment — before the first move as well as after one. Other characters skipped before the first move, such as `!` or `.`, stay silent: they are annotation symbols or move-number punctuation, not stray closers. | #12, #25, #60, #158 |
 | `skipped result "1-0" inside a variation` | A result inside a variation, at any depth. The game goes on. | #60 |
 | `"O-O" castles without the castling right` | Castling after the king or rook has moved and returned, or when the `FEN` gives no castling right. | #16 |
 | `read "O-O" as O-O-O because only queenside castling is legal` | `O-O` when only queenside castling is legal. | #20 |
@@ -465,7 +465,7 @@ In a comment, each run of whitespace, including line breaks, becomes one space, 
 
 **A result inside a variation that isn't closed.** *What changes:* the game is skipped and reported. *Why:* skipping the result leaves the variation open, so the game fails at the next game's tags as any unclosed variation does.
 
-**A move right after a `]`.** *What changes:* the move is played instead of dropped. *Why:* SCID reads the `]` and the text after it as one unknown symbol. `scidtopgn` reads a `]` on its own, as it reads a `}`, so the move after it is read either way.
+**A move right after a `]`.** *What changes:* the move is played instead of dropped. *Why:* SCID reads the `]` and the text after it as one unknown symbol. `scidtopgn` reads a `]` on its own, as it reads a `}`, so the move after it is read either way. Since #158, a `]` or `}` before the first move warns too, as one after a move does; other characters skipped before the first move, such as `!` or `.`, stay silent, because they are annotation symbols or move-number punctuation, not stray closers.
 
 ### Player names and ratings
 
