@@ -426,14 +426,15 @@ impl<'a> PgnParser<'a> {
         self.pos == 0 || self.input.chars()[self.pos - 1] == '\n'
     }
 
-    /// Whether the next character starts a tag line: a `[` with only spaces
-    /// or tabs before it on its line.
+    /// Whether the next character starts a tag line: a `[` with only
+    /// whitespace or a byte order mark before it on its line, as text
+    /// before a game allows.
     fn at_tag_line(&self) -> bool {
         self.peek() == Some('[')
             && self.input.chars()[..self.pos]
                 .iter()
                 .rev()
-                .find(|&&c| c != ' ' && c != '\t')
+                .find(|&&c| !(c == '\u{feff}' || (c.is_whitespace() && c != '\n')))
                 .is_none_or(|&c| c == '\n')
     }
 
@@ -454,10 +455,14 @@ impl<'a> PgnParser<'a> {
         }
     }
 
-    /// Skips spaces and tabs, but not line breaks.
+    /// Skips whitespace other than line breaks, and byte order marks.
     fn skip_line_whitespace(&mut self) {
-        while matches!(self.peek(), Some(' ' | '\t')) {
-            self.advance();
+        while let Some(c) = self.peek() {
+            if c == '\u{feff}' || (c.is_whitespace() && c != '\n') {
+                self.advance();
+            } else {
+                break;
+            }
         }
     }
 
@@ -538,11 +543,22 @@ impl<'a> PgnParser<'a> {
         Some(lines.join("\n"))
     }
 
+    /// Whether the line starting at the current `[` is a well-formed tag:
+    /// `read_tag` reads it. Only called with the parser at a `[`.
+    fn at_well_formed_tag_line(&mut self) -> bool {
+        let (pos, line) = (self.pos, self.line);
+        let well_formed = self.read_tag().is_ok();
+        self.rewind(pos, line);
+        well_formed
+    }
+
     /// Skips the rest of a game that failed to parse, up to the next tag
     /// line outside a comment. If the game failed in its tags, its remaining
     /// tag lines are skipped first; a failed tag leaves the parser just after
-    /// its `[`.
-    fn skip_to_next_game(&mut self) {
+    /// its `[`. If the failed header ended at its malformed line — the line
+    /// wasn't a tag at all — the first well-formed tag after it starts the
+    /// next game instead of being skipped with the failed one.
+    fn skip_to_next_game(&mut self, header_ended: bool) {
         if !self.in_movetext {
             if !self.at_line_start() {
                 self.skip_to_end_of_line();
@@ -550,6 +566,9 @@ impl<'a> PgnParser<'a> {
             loop {
                 self.skip_line_whitespace();
                 if self.peek() != Some('[') {
+                    break;
+                }
+                if header_ended && self.at_well_formed_tag_line() {
                     break;
                 }
                 self.skip_to_end_of_line();
@@ -1062,7 +1081,16 @@ impl PgnParser<'_> {
                 Some(Ok(game))
             }
             Err(source) => {
-                self.skip_to_next_game();
+                // A line starting with `[` that isn't a tag ends the failed
+                // header at that line: the next well-formed tag starts a new
+                // game. A broken tag doesn't end it: its remaining tag lines
+                // are the failed game's own, and are skipped with it.
+                // `read_string` reports a missing opening quote as
+                // "Expected '\"'", which is the only way a line fails to be
+                // a tag at all.
+                let header_ended =
+                    matches!(&source, Error::Parse { message, .. } if message == "Expected '\"'");
+                self.skip_to_next_game(header_ended);
                 Some(Err(Error::PgnGame {
                     number: self.games,
                     line,
