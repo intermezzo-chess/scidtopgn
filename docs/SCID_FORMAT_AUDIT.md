@@ -317,7 +317,7 @@ At `81d22d4`, a new reviewer audited `SG4_FORMAT.md` in full, and found nothing.
 | P9 | `A,,B` gets one space, after the second comma | [Player names and ratings](COMPATIBILITY.md#player-names-and-ratings) |
 | P10 | `scidtopgn` reads a `Result` tag of `½-½` | [Results](COMPATIBILITY.md#results-and-the-start-position) |
 
-It also qualified the date export bug, a claim about every PGN reader, and the example of export. Checking the corrections, it qualified three of them again: the warning for a `}` or `]` before the moves start, which tags the 40-tag limit drops, and the library functions that read a game without tags.
+It also qualified the date export bug, a claim about every PGN reader, and the example of export. Checking the corrections, it qualified three of them again: the warning for a `}` or `]` before the moves start, which tags the 40-tag limit drops, and the library functions that read a game without tags. A second full audit of the section found seven more, which were reproduced and corrected: a NUL in a comment, which shifts the comments after it when the game is read back; a player name that only tidying makes too long, which SCID keeps; tag names, which SCID doesn't convert; spaces at the start of text before a game, which are kept; two summaries that left out the exceptions of #157 and #158; and the probe's filter, which can hide a game's moves.
 
 ### Not verified
 
