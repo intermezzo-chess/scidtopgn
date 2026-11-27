@@ -153,7 +153,7 @@ SCID's error numbers are from `error.h`: 109 and 110 are versions, 152 is corrup
 | `zero` | Length 0 | Game corrupt (152) | Damaged |
 | `compactdate` | Event date with code 255 | Reads 2021.3.7 | No damage |
 | `spare` | Tag code 251 | Crashes | No damage |
-| `manytags` | 41 tags | Crashes | No damage |
+| `manytags` | 41 tags, each with its own name | Crashes | No damage |
 | `flags8` | Unused flag bits | Reads | No damage |
 | `e4`, `d4` | Nothing: 1. e4 and 1. d4 | Reads | No damage |
 | `knight15`, `queen` | Invalid value, invalid second byte | Error 406 | Damaged |
@@ -318,6 +318,8 @@ At `81d22d4`, a new reviewer audited `SG4_FORMAT.md` in full, and found nothing.
 | P10 | `scidtopgn` reads a `Result` tag of `½-½` | [Results](COMPATIBILITY.md#results-and-the-start-position) |
 
 It also qualified the date export bug, a claim about every PGN reader, and the example of export. Checking the corrections, it qualified three of them again: the warning for a `}` or `]` before the moves start, which tags the 40-tag limit drops, and the library functions that read a game without tags. A second full audit of the section found seven more, which were reproduced and corrected: a NUL in a comment, which shifts the comments after it when the game is read back; a player name that only tidying makes too long, which SCID keeps; tag names, which SCID doesn't convert; spaces at the start of text before a game, which are kept; two summaries that left out the exceptions of #157 and #158; and the probe's filter, which can hide a game's moves.
+
+A full audit of the rest of `COMPATIBILITY.md` found four more, which were reproduced and corrected: a failed swap whose file can't be moved back, which can leave a file missing; compaction, which replaces read-only and linked files; the 40-tag limit, which counts names, as SCID's does; and a test of links, which doesn't run on Windows.
 
 ### Not verified
 
