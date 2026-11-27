@@ -671,6 +671,7 @@ impl Game {
     /// Like SCID, a second comment is appended to the first, with a space
     /// between them unless the first is empty or ends in whitespace.
     pub(crate) fn append_comment(&mut self, comment: &str) {
+        let comment = comment_up_to_nul(comment);
         let Some(idx) = self.current_move else {
             return;
         };
@@ -966,6 +967,12 @@ impl Game {
             idx = node.next;
         }
     }
+}
+
+/// The comment up to its first NUL byte. A comment ends at a NUL, as in
+/// SCID, so text after one is never stored.
+pub(crate) fn comment_up_to_nul(comment: &str) -> &str {
+    comment.split('\0').next().unwrap_or("")
 }
 
 /// A tag pair on its own line, with `"` and `\` in the value escaped as the
