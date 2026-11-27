@@ -321,6 +321,8 @@ It also qualified the date export bug, a claim about every PGN reader, and the e
 
 A full audit of the rest of `COMPATIBILITY.md` found four more, which were reproduced and corrected: a failed swap whose file can't be moved back, which can leave a file missing; compaction, which replaces read-only and linked files; the 40-tag limit, which counts names, as SCID's does; and a test of links, which doesn't run on Windows.
 
+A full audit of `SCID_FORMAT.md` found six more, which were reproduced and corrected: a header search for another tag needs the record; derived fields can show a mismatched file; the 40-tag limit counts names; the probes' output and checks were overstated; an example's home pawns were ambiguous; and two date limits are the index's.
+
 ### Not verified
 
 Not verified by either:

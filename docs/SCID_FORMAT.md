@@ -59,9 +59,9 @@ These documents describe **index version 400 as SCID vs. PC 4.26 reads and write
 - **The index comes first.** It says how many games there are and where each record is. A game's number is its entry's position.
 - **Names** are found by ID. White and Black share the player section.
 - **Records** are found by offset and length. A record alone doesn't give the names, date, result, ratings, or ECO code of its game, and an entry alone doesn't give the moves.
-- **Finding games by their header** needs only the index and the names. Decoding moves needs the record from its start, because a move's meaning depends on the position.
+- **Finding games by their header** needs only the index and the names, for the fields those hold. Searching another tag, such as `Annotator`, needs the record too, which SCID's header search then reads ([`readGame`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/tkscid.cpp#l17680)). Decoding moves needs the record from its start, because a move's meaning depends on the position.
 
-Nothing ties the three files together but these references: there is no shared identifier or checksum, so a file restored from another copy can't be detected except by a reference that doesn't fit. The separate files don't make it safe for two programs to write to a database at once.
+Nothing ties the three files together but these references: there is no shared identifier or checksum, so a file restored from another copy can't be detected reliably. A reference that doesn't fit can show it, and so can [derived fields](#format-limits-and-validation-rules) that don't match the game, as when an index entry's home pawns don't match its record's moves. The separate files don't make it safe for two programs to write to a database at once.
 
 SCID can also keep a `.stc` file, a cache of its opening tree, which isn't needed to read a database. See [Tree cache](COMPATIBILITY.md#tree-cache).
 
@@ -76,9 +76,9 @@ SCID can also keep a `.stc` file, a cache of its opening tree, which isn't neede
 | Record offset | 4,294,967,295 | 4 bytes |
 | Tag name | 240 bytes | [Higher bytes are codes](SG4_FORMAT.md#tags) |
 | Tag value | 255 bytes | 1-byte length. SCID 4.26 [can't read 255 safely](SG4_FORMAT.md#tags) |
-| Tags of a game | 40 | SCID's limit: 4.26 [crashes above it](SG4_FORMAT.md#tags). The record can have more |
-| Year | 2047 | 11 bits |
-| Event date | 3 years from the game's year | [3 bits](SI4_FORMAT.md#dates-and-event-dates) |
+| Tag names of a game | 40 | Besides tags with fields of their own. SCID's limit: a later tag with one of those names replaces its value, and a 41st name overruns 4.26's array, which [crashed the builds tried](SG4_FORMAT.md#tags). The record can have more |
+| Year in the index | 2047 | 11 bits |
+| Event date in the index | 3 years from the game's year | [3 bits](SI4_FORMAT.md#dates-and-event-dates) |
 | Rating | 4,095 | 12 bits. SCID reads more than 4,000 as 4,000, and its PGN import stores at most that |
 | Half-moves | Stored modulo 1,024 | 10 bits. The record can have more |
 | Counts of variations, comments, and NAGs | 50 | [4-bit codes](SI4_FORMAT.md#result-and-counts). The record can have more |
@@ -116,7 +116,7 @@ offset  bytes                      field
 +25     98 ff cd 93                date 2022.12.19, event date 2022.12.15
 +29     09 44  09 73               Elo 2372 and 2419, type 0
 +33     9c  29 72 87               stored line 156; 2R 2B 1N 7P against 2R 2B 7P
-+37     25  09 b5 c1 d4 ae 70 00 00 00   37 half-moves; 9 home pawns left
++37     25  09 b5 c1 d4 ae 70 00 00 00   37 half-moves; 9 pawns have left their home squares
 ```
 
 B36f: 17,843 − 1 = 136 × 131 + 26, so `B36`, and 26 = 1 + 5 × 5, so `f`.
@@ -131,10 +131,10 @@ A capture that renumbers pieces and a game with variations and comments are work
 
 **Sources.** Links go to SCID vs. PC's source at Subversion revision 3570 on SourceForge. All 84 `.cpp` and `.h` files in its `src` directory are byte-identical to those of `scid_vs_pc-4.26.tgz`, whose SHA-256 is `386eda599c058c3da9fef64de2f5248d51204e00715b94babeb09976c36afa87`, the one [`compat/build-scidvspc`](../compat/build-scidvspc) builds. scidtopgn links name the function or type that implements the rule.
 
-**Evidence.** Two programs print everything in a database, and their output is compared:
+**Evidence.** Two programs print what they decode from a database, and their output is compared: each entry's fields, each name, and each game's tags, flags, moves, and comments. They don't print every bit: both leave out the unused [bit 6 of entry byte 6](SI4_FORMAT.md#record-length-and-custom-flags), and print a rating above 4,000 as 4,000. Where SCID keeps one of two tags with the same name, the second probe prints both.
 
 - [`format_probe.cpp`](../scid-cpp/tools/format_probe.cpp) reads it with SCID 4.26's own code.
-- [`format_probe.py`](../scid-cpp/tools/format_probe.py) reads it as these documents describe, without code from SCID or scidtopgn. It also works out each entry's derived fields, except the stored line, from its game, and checks the bounds above.
+- [`format_probe.py`](../scid-cpp/tools/format_probe.py) reads it as these documents describe, without code from SCID or scidtopgn. It also works out each entry's derived fields, except the stored line, from its game, and checks references, lengths, and record boundaries. It doesn't check every bound above: it accepts a FEN with more than 16 pieces of a side, which SCID refuses.
 
 [SCID_FORMAT_AUDIT.md](SCID_FORMAT_AUDIT.md#verification) gives the commands, the databases, and the results. The names in the **Evidence** columns, such as `dates`, are its databases. Tests that only write and read with scidtopgn aren't used as evidence.
 
