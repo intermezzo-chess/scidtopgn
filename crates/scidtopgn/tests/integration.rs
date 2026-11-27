@@ -305,6 +305,55 @@ fn test_import_keeps_control_characters_in_names_through_writes() {
 }
 
 #[test]
+fn test_nul_in_a_comment_does_not_shift_the_comments_after_it() {
+    // Issue #161: the issue's reproduction. Importing a game whose first
+    // comment holds a NUL used to store the NUL, so reading the game back
+    // ended that comment at the NUL and moved every later comment one
+    // place. The comment now ends at the NUL on import, and the comments
+    // after it read back where they were written.
+    let pgn = "[Event \"E\"]\n\n1.e4 {a\0b} e5 {c} *\n";
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let mut db = import(&temp.path().join("db"), pgn);
+    let game = db.get_game(0).expect("Failed to get game");
+    let comments: Vec<(&str, &str)> = game
+        .moves
+        .iter()
+        .filter_map(|node| Some((node.san.as_str(), node.comment.as_deref()?)))
+        .collect();
+    assert_eq!(comments, [("e4", "a"), ("e5", "c")]);
+}
+
+#[test]
+fn test_library_game_with_nul_in_a_comment_is_stored_truncated() {
+    // Issue #161: a comment set directly on a game, as the library allows,
+    // is stored without the NUL and the text after it, so it can't shift
+    // the comments after it either.
+    let pgn = "[Event \"E\"]\n\n1. e4 {a} e5 {c} *\n";
+    let mut game = scidtopgn::parse_single_game(pgn).expect("Failed to parse game");
+    let e4 = game
+        .moves
+        .iter_mut()
+        .find(|node| node.san == "e4")
+        .expect("e4");
+    e4.comment = Some("a\0b".to_string());
+    let temp = TempDir::new().expect("Failed to create temp dir");
+    let mut db =
+        scidtopgn::Database::create(&temp.path().join("db")).expect("Failed to create database");
+    db.add_game(&game).expect("Failed to add game");
+    db.flush().expect("Failed to flush");
+    drop(db);
+    let mut db =
+        scidtopgn::Database::open(&temp.path().join("db")).expect("Failed to reopen the database");
+    let game = db.get_game(0).expect("Failed to get game");
+    let comments: Vec<(&str, &str)> = game
+        .moves
+        .iter()
+        .filter_map(|node| Some((node.san.as_str(), node.comment.as_deref()?)))
+        .collect();
+    assert_eq!(comments, [("e4", "a"), ("e5", "c")]);
+}
+
+#[test]
 fn test_names_differing_only_by_control_characters_stay_separate_through_writes() {
     // Issue #142: two events that differ only by a control character are two
     // names, as in SCID, and no append, update, or delete merges them.
