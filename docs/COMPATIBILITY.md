@@ -454,8 +454,11 @@ These cases were added by [#60](https://github.com/intermezzo-chess/scidtopgn/is
 | A `}` outside a comment | `1. e4 } e5` | Skips it and logs `"}" seen outside a comment`, once per game | Skips it, with a warning for each | Same |
 | A `]` in the moves | `1. e4 ] e5` | Skips it and logs `Unexpected symbol: ]` | Skips it with a warning | Same |
 | A move right after a `]` | `]Bc5` | Drops the move and logs `Unexpected symbol: ]Bc5` | Skips the `]` with a warning, and plays `Bc5` | **Differs** |
+| A NUL byte in a comment | `1. e4 {a\0b} e5 {c} *` | Ends the comment at the NUL, so `e4` keeps `a` and `e5` keeps `c` | Ends the comment at the NUL, so `e4` keeps `a` and `e5` keeps `c`, with a warning | Same |
 
 In a comment, each run of whitespace, including line breaks, becomes one space, and whitespace at the ends is dropped, as in SCID. Whitespace means what C's `isspace` matches: space, tab, line feed, carriage return, vertical tab, and form feed. Other characters, such as a no-break space, are kept. A comment of only whitespace is empty, as `{}` is. This applies to comments in the moves and after the tags, not to [text before a game](#text-before-and-between-games), which keeps its line breaks. Before #60, `scidtopgn` kept a comment's whitespace as written.
+
+**A NUL byte in a comment.** *What changes:* the comment ends at the NUL, and the text after it is dropped, with a warning. *Why:* PGN doesn't allow a NUL, and the record ends each comment with a NUL, so keeping the text after it would move every later comment one place when the game is read back. SCID ends the comment at the NUL. The same applies to text before a game, and no write stores a comment with a NUL, whether the game comes from PGN or from the library. Before #161, `scidtopgn` kept the NUL, so `1. e4 {a\0b} e5 {c} *` read back as `1. e4 {a} 1... e5 {b}` and lost `c`.
 
 **`\"` and `\\` in a tag value.** *What changes:* `\"` is read as `"`, so the value doesn't end there, and `\\` is read as one backslash. *Why:* these are the PGN standard's escapes, and other PGN programs write them. SCID ends the value at its first `"`, so it cuts off `a "b" c` after `a \`. A `\` before any other character is kept, as in SCID, so a value such as `C:\games`, written without escapes, reads the same in both. Before #60, `scidtopgn` dropped that `\`.
 
@@ -529,6 +532,7 @@ The first rating tag with a rating sets the player's rating and its kind. Later 
 The cases above compare how a game is imported and stored. Exporting the stored game to PGN is a separate step, and it doesn't always give back what was imported. Variations, NAGs, and comments are exported where they were imported (#38). These are the losses:
 
 - **A NAG before the first move** of the game or of a variation is dropped on import, as in SCID. See [Where annotations attach](#general-differences).
+- **Text after a NUL byte in a comment** is dropped on import, as in SCID (#161). The comment is stored and exported up to the NUL, with a warning on import.
 - **A NAG after a move's first 7** is dropped on import, as in SCID (#57). In the library, a move's `nags` can be set directly to more than 7 NAGs, or to NAG 0. The game is then stored and exported with only the first 7 that aren't 0, the NAGs SCID can hold, and the index's NAG count counts only those, as SCID's encoder does. So SCID reads back each NAG `scidtopgn` stores.
 - **The en passant square** of a `FEN` is exported only when an en passant capture is legal (#31c).
 - **A rating tag kept as an ordinary tag** isn't exported when it has the same name as the player's rating tag, such as a second `WhiteElo`, or when the player has no rating (#43). See [Player names and ratings](#player-names-and-ratings).

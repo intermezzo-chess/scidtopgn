@@ -74,6 +74,47 @@ fn test_parse_with_comments() {
 }
 
 #[test]
+fn test_nul_in_a_move_comment_ends_the_comment() {
+    // Issue #161: the comment ends at the NUL, as in SCID, and the text
+    // after it is dropped, with a warning, instead of shifting the
+    // comments after it.
+    let game = parse_movetext("1. e4 {a\0b} e5 {c} *");
+    assert_eq!(node(&game, "e4").comment.as_deref(), Some("a"));
+    assert_eq!(node(&game, "e5").comment.as_deref(), Some("c"));
+    assert_eq!(warning_kinds(&game), [PgnWarningKind::NulInComment]);
+}
+
+#[test]
+fn test_nul_in_a_variation_comment_ends_the_comment() {
+    let game = parse_movetext("1. e4 e5 (1... c5 {a\0b}) 2. Nf3 {c} *");
+    assert_eq!(node(&game, "c5").comment.as_deref(), Some("a"));
+    assert_eq!(node(&game, "Nf3").comment.as_deref(), Some("c"));
+    assert_eq!(warning_kinds(&game), [PgnWarningKind::NulInComment]);
+}
+
+#[test]
+fn test_nul_in_a_comment_before_the_first_move_ends_the_comment() {
+    let game = parse_movetext("{a\0b} 1. e4 e5 {c} *");
+    let start = game.first_move.expect("a first move");
+    assert_eq!(game.moves[start].comment.as_deref(), Some("a"));
+    assert_eq!(node(&game, "e5").comment.as_deref(), Some("c"));
+    assert_eq!(warning_kinds(&game), [PgnWarningKind::NulInComment]);
+}
+
+#[test]
+fn test_nul_in_text_before_a_game_ends_the_comment() {
+    // Text before the tags is kept as the comment before the first move,
+    // and a NUL in it ends the comment the same way.
+    let pgn = "Notes\0more\n[Event \"Test\"]\n\n1. e4 e5 *\n";
+    let games = parse_pgn(pgn).expect("Failed to parse PGN");
+    assert_eq!(games.len(), 1);
+    let game = &games[0];
+    let start = game.first_move.expect("a first move");
+    assert_eq!(game.moves[start].comment.as_deref(), Some("Notes"));
+    assert_eq!(warning_kinds(game), [PgnWarningKind::NulInComment]);
+}
+
+#[test]
 fn test_parse_castling() {
     let pgn = r#"[Event "Test"]
 [Site "?"]

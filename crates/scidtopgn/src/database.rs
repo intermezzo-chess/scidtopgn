@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use crate::bytebuf::ByteBuffer;
 use crate::common::RatingType;
 use crate::error::{DatabaseFile, Error, Result};
-use crate::game::{Game, Marker, GAME_DECODE_ALL, MAX_TAG_VALUE_LEN};
+use crate::game::{comment_up_to_nul, Game, Marker, GAME_DECODE_ALL, MAX_TAG_VALUE_LEN};
 use crate::gfile::{FileMode, GFile};
 use crate::index::{
     material_sig, HomePawnList, Index, IndexEntry, IDX_MASK_PROMO, IDX_MASK_UPROMO,
@@ -1082,7 +1082,7 @@ impl Database {
             }
 
             if let Some(ref comment) = node.comment {
-                buf.put_terminated_string(comment);
+                buf.put_terminated_string(comment_up_to_nul(comment));
                 *count += 1;
             }
 

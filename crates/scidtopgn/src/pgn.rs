@@ -18,7 +18,9 @@ use shakmaty::{Bitboard, CastlingSide, Chess, Color, File, Move, Position, Rank,
 
 use crate::common::{GameResult, RatingType};
 use crate::error::{Error, Result};
-use crate::game::{AddedNag, Game, Marker, MoveNode, MAX_NAGS, MAX_TAG_VALUE_LEN};
+use crate::game::{
+    comment_up_to_nul, AddedNag, Game, Marker, MoveNode, MAX_NAGS, MAX_TAG_VALUE_LEN,
+};
 use crate::index::MAX_ELO;
 use crate::mov::GameMove;
 use crate::pgn_input::PgnInput;
@@ -139,6 +141,9 @@ pub enum PgnWarningKind {
         /// The NAG dropped.
         nag: u8,
     },
+    /// A NUL byte in a comment. The comment ends there, as in SCID, and
+    /// the text after it is dropped.
+    NulInComment,
 }
 
 /// Describes the problem in a phrase, such as `skipped unknown text "zz"`.
@@ -193,6 +198,10 @@ impl fmt::Display for PgnWarningKind {
                 f,
                 "dropped NAG ${nag} because a move keeps at most {}",
                 MAX_NAGS - 1
+            ),
+            Self::NulInComment => write!(
+                f,
+                "ended a comment at a NUL byte and dropped the text after it"
             ),
         }
     }
@@ -682,7 +691,7 @@ impl<'a> PgnParser<'a> {
                     // A comment after the tags comes before the first move.
                     // An unterminated one runs to the end of the input, so
                     // there is nothing after it to read.
-                    if let Ok(comment) = self.read_brace_comment() {
+                    if let Ok(comment) = self.read_brace_comment(&mut game) {
                         comments.push(comment);
                     }
                 }
@@ -728,7 +737,10 @@ impl<'a> PgnParser<'a> {
         game.first_move = Some(start_idx);
         game.current_move = Some(start_idx);
         if !pre_game_text.is_empty() {
-            game.append_comment(pre_game_text);
+            if pre_game_text.contains('\0') {
+                self.warn(&mut game, self.game_line, PgnWarningKind::NulInComment);
+            }
+            game.append_comment(comment_up_to_nul(pre_game_text));
         }
         for comment in &comments {
             game.append_comment(comment);
@@ -865,7 +877,7 @@ impl<'a> PgnParser<'a> {
                     });
                 }
                 '{' => {
-                    let comment = self.read_brace_comment()?;
+                    let comment = self.read_brace_comment(game)?;
                     game.append_comment(&comment);
                 }
                 '$' => {
@@ -980,7 +992,7 @@ impl<'a> PgnParser<'a> {
         }
     }
 
-    fn read_brace_comment(&mut self) -> Result<String> {
+    fn read_brace_comment(&mut self, game: &mut Game) -> Result<String> {
         if self.peek() != Some('{') {
             return Err(self.error("Expected '{'"));
         }
@@ -991,7 +1003,10 @@ impl<'a> PgnParser<'a> {
             if c == '}' {
                 // Like SCID, line breaks and indentation in a comment
                 // aren't kept.
-                return Ok(single_space(&comment));
+                if comment.contains('\0') {
+                    self.warn(game, self.line, PgnWarningKind::NulInComment);
+                }
+                return Ok(single_space(comment_up_to_nul(&comment)));
             }
             comment.push(c);
         }
