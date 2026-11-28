@@ -35,7 +35,7 @@ The errors that would have made a reader wrong:
 | A description is cut at trailing NULs | It ends at its first NUL; SCID leaves other data after that |
 | Base type: flags. Auto-load: the game's number. Timestamp: modification time | A number. The game's number plus 1. Unused |
 | Black in the test database is "Cheparinov, I" | "Murshed, N" |
-| `game.cpp` lines 59111–59348, `gfile.h` 250–270, `sc_game.cpp` | in 4.26, `game.cpp` has 5,150 lines, `gfile.h` 90; `sc_game.cpp` doesn't exist |
+| `game.cpp` lines 59111–59348, `gfile.h` 250–270, `sc_game.cpp` | In 4.26, `game.cpp` has 5,150 lines, `gfile.h` 90; `sc_game.cpp` doesn't exist |
 
 Removed as historical: progress reports, success rates, APIs and paths that no longer exist, advice on memory and I/O, and opening names. scidtopgn's own rules are in [COMPATIBILITY.md](COMPATIBILITY.md). The statements #143 corrected are kept.
 
@@ -43,7 +43,7 @@ Removed as historical: progress reports, success rates, APIs and paths that no l
 
 ### Source
 
-SourceForge's revision 3570 was compared with `scid_vs_pc-4.26.tgz`: all 84 `.cpp` and `.h` files in `src` (not its subdirectories) are byte-identical. Revisions 3580, 3585, 3590, 3600, and 3790 aren't. `scid-cpp/scid`, labeled revision 3585, differs from 4.26 in `bytebuf.cpp`, `game.cpp`, `game.h`, `myassert.cpp`, `naglatex.h`, `pgnparse.cpp`, `pgnparse.h`, and `stored.h`. Its `stored.h` is a stub, so the copy writes 0 as every entry's stored-line code: the `.si4` of the five fixtures it wrote differs from what 4.26 writes at that byte. The other differences don't change how the files are encoded, and this audit doesn't rely on that copy.
+SourceForge's revision 3570 was compared with `scid_vs_pc-4.26.tgz`: all 84 `.cpp` and `.h` files in `src` (not its subdirectories) are byte-identical. Revisions 3580, 3585, 3590, 3600, and 3790 aren't. `scid-cpp/scid`, labeled revision 3585, differs from 4.26 in `bytebuf.cpp`, `game.cpp`, `game.h`, `myassert.cpp`, `naglatex.h`, `pgnparse.cpp`, `pgnparse.h`, and `stored.h`. Two of the differences change what the copy writes. Its `stored.h` is a stub, so it writes 0 as every entry's stored-line code. And the headers its `pgnparse.cpp` includes replace SCID's character set detector and converter with stubs, so it stores a Latin-1 PGN file's text as it is, where 4.26 converts it to UTF-8: `latin1.sn4` stores `Müller` as `4d fc`, and 4.26 as `4d c3 bc`. The name files of the five fixtures the reference converter wrote also have every frequency 0, because its `main.cpp` doesn't count them. This audit doesn't rely on that copy.
 
 Each C++ link in the format documents was checked to name something on its line in 4.26, and each Rust link a function, constant, or type in its file.
 
@@ -329,7 +329,7 @@ A second full audit of `SI4_FORMAT.md` found two more, which were reproduced and
 
 A second full audit of `SN4_FORMAT.md` found one more, which was corrected: the record whose prefix ends inside a character is at 0x84, not 0x73.
 
-An audit of this record found nine more, which were corrected: the reference converter's copy writes stored-line code 0; two line counts were the copy's, not 4.26's; one inventory item was corrected, not confirmed, which changes the totals; the event dates SCID doesn't store; the list of databases both probes print the same; an error number's label; the 32,769 games' database; the number of sources rebuilt; and the build commands, which need `bash` or `sh`.
+An audit of this record found ten more, which were corrected: the reference converter's copy writes stored-line code 0; two line counts were the copy's, not 4.26's; one inventory item was corrected, not confirmed, which changes the totals; the event dates SCID doesn't store; the list of databases both probes print the same; an error number's label; the 32,769 games' database; the number of sources rebuilt; an old example's compile error; and the build commands, which need `bash` or `sh`. Checking the corrections, it found that the copy's parser stubs change its output too.
 
 ### Not verified
 
