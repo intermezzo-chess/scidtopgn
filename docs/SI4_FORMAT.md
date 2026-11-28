@@ -34,7 +34,7 @@ Game *n*, counted from 1, has its entry at offset 182 + 47 × (*n* − 1).
 | 128 | 54 | Custom flag names | Six of 9 bytes, for custom flags 1 to 6: at most 8 bytes and a NUL each |
 | **Total** | **182** | | |
 
-A text field ends at its first NUL, and the bytes after that have no meaning. SCID doesn't clear all of them: a new header's fields start with only their first byte set, setting a description clears all but the field's last byte, which it clears only if the description fills the other 107, and setting a custom flag's name clears its field. So they can hold unrelated data: in `tests/data/five.si4`, the description is empty but its last byte, at offset 127, is `65`, and the custom flag names hold pieces of a script. The format doesn't record a text encoding.
+A text field ends at its first NUL, and the bytes after that have no meaning. SCID doesn't clear all of them: a new header's fields start with only their first byte set, setting a description clears all but the field's last byte, which it clears only for a description of 107 bytes, and setting a custom flag's name clears its field. So they can hold unrelated data: in `tests/data/five.si4`, the description is empty but its last byte, at offset 127, is `65`, and the custom flag names hold pieces of a script. The format doesn't record a text encoding.
 
 `tests/data/one.si4`, offset 0:
 
