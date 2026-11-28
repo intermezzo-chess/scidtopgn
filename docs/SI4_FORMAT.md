@@ -34,7 +34,7 @@ Game *n*, counted from 1, has its entry at offset 182 + 47 × (*n* − 1).
 | 128 | 54 | Custom flag names | Six of 9 bytes, for custom flags 1 to 6: at most 8 bytes and a NUL each |
 | **Total** | **182** | | |
 
-A text field ends at its first NUL, and the bytes after that have no meaning. SCID doesn't clear all of them: a new header's fields start with only their first byte set, setting a description clears all but the field's last byte, and setting a custom flag's name clears its field. So they can hold unrelated data: in `tests/data/five.si4`, the description is empty but its last byte, at offset 127, is `65`, and the custom flag names hold pieces of a script. The format doesn't record a text encoding.
+A text field ends at its first NUL, and the bytes after that have no meaning. SCID doesn't clear all of them: a new header's fields start with only their first byte set, setting a description clears all but the field's last byte, which it clears only if the description fills the other 107, and setting a custom flag's name clears its field. So they can hold unrelated data: in `tests/data/five.si4`, the description is empty but its last byte, at offset 127, is `65`, and the custom flag names hold pieces of a script. The format doesn't record a text encoding.
 
 `tests/data/one.si4`, offset 0:
 
@@ -271,7 +271,7 @@ day            10011   = 19                        2022.12.19
 
 ## Search fields and derived game metadata
 
-SCID computes these fields from the main line when it stores a game, and its searches use them to skip games. Nothing in the game file depends on them.
+SCID computes these fields from the main line when it stores a game, and its searches use them to skip games. For a game with a starting position, it doesn't compute the promotion flags, final material, and half-moves again, but keeps the values it worked out as the moves were added ([`NonStandardStart`](https://sourceforge.net/p/scidvspc/code/3570/tree/src/game.cpp#l1388)). So they can be out of date: removing a game's moves with `sc_game truncate` and saving it left its index with the flags, material, and half-moves of the moves removed. Nothing in the game file depends on them.
 
 ### Final material and stored-line code
 
@@ -308,7 +308,7 @@ In `tests/data/one.si4`, offset 215, `9c 29 72 87` is stored line 156, and 2 roo
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Pawn | a2 | b2 | c2 | d2 | e2 | f2 | g2 | h2 | a7 | b7 | c7 | d7 | e7 | f7 | g7 | h7 |
 
-A game whose record has a starting position, even the standard one, lists none, and its promotion flags and half-moves are still set from its moves.
+A game whose record has a starting position, even the standard one, lists none, and its promotion flags and half-moves are still set from its moves, as they were added.
 
 In `tests/data/one.si4`, offset 219, `25 09 b5 c1 d4 ae 70` is 37 half-moves and 9 pawns: e2, c7, d2, g7, c2, d7, f2, b2, a7. In `tests/data/derived.si4`, offset 219, `2e 43` is 0x12E = 302 half-moves and 3 pawns.
 

@@ -323,6 +323,8 @@ A full audit of the rest of `COMPATIBILITY.md` found four more, which were repro
 
 A full audit of `SCID_FORMAT.md` found six more, which were reproduced and corrected: a header search for another tag needs the record; derived fields can show a mismatched file; the 40-tag limit counts names; the probes' output and checks were overstated; an example's home pawns were ambiguous; and two date limits are the index's.
 
+A second full audit of `SI4_FORMAT.md` found two more, which were reproduced and corrected: for a game with a starting position, SCID doesn't compute its promotion flags, material, and half-moves again when it saves it, so editing the moves can leave them out of date; and a description of 107 bytes clears the field's last byte.
+
 ### Not verified
 
 Not verified by either:
