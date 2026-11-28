@@ -45,8 +45,10 @@ reference the issue the PR addresses.
   `nfile.rs` and `namebase.rs` handle the `.sn4` name base, and `gfile.rs`
   handles the `.sg4` game file. Move and game decoding live in `game.rs`,
   `mov.rs`, and `position.rs`. `database.rs` ties the
-  three files together. See [SCID_DATABASE_FORMAT.md](SCID_DATABASE_FORMAT.md)
-  for the binary layout.
+  three files together. See [docs/SCID_FORMAT.md](docs/SCID_FORMAT.md)
+  for the binary layout. It describes the files as SCID vs. PC writes them;
+  scidtopgn's differences belong in
+  [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
 - **Chess rules come from [shakmaty](https://crates.io/crates/shakmaty).**
   Legality, SAN, check and mate, and FEN all use it. `position.rs` adds only
   SCID's piece numbering to a shakmaty position, and `mov.rs` only SCID's move
@@ -101,13 +103,16 @@ The flags are already set, and setting a flag again changes nothing, so
 running the script leaves the database unchanged.
 `tcscid` is built from `scidvspc/` like `pgnscid`, with `make tcscid`, on a
 platform whose `char` is signed, such as x86 or Apple arm64, as SCID's name hash
-depends on it. Built on macOS, it links the system's Tcl 8.5.9, while SCID vs.
-PC 4.27 for macOS bundles Tcl 8.6.13. The two differ in how a search pattern
-counts characters above U+FFFF, such as emoji, so `search.pgn` has none, and
-the header search follows Tcl 8.6, as `HeaderSearch` documents.
+depends on it. Built on macOS, it links the system's Tcl 8.5.9, which differs
+from Tcl 8.6.13 in how a search pattern counts characters above U+FFFF, such as
+emoji, so `search.pgn` has none, and the header search follows Tcl 8.6.13, as
+`HeaderSearch` documents.
 `stored` was written from `stored.pgn` by `pgnscid -f stored.pgn stored`. Each
 game is a case of the stored-line code, named by its `Site` tag, and
 importing `stored.pgn` gives files byte-identical to it.
+How `one` and `five` were written isn't recorded.
+[docs/SCID_FORMAT_AUDIT.md](docs/SCID_FORMAT_AUDIT.md#fixtures) compares each
+fixture with what SCID vs. PC 4.26 writes.
 `notation.pgn` has one game per case in
 [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md#pgn-import-compared-with-scid). `.gitignore` excludes `*.si4`, `*.sn4`, and `*.sg4` everywhere, so new
 fixtures must be added with `git add -f`.

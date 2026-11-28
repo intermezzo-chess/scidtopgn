@@ -920,7 +920,7 @@ fn test_comments_before_the_first_move() {
     assert_eq!(variation_comment(&game, "e4"), Some("Or"));
     assert_eq!(node(&game, "d4").comment, None);
 
-    // Like SCID, a comment between tags is ignored.
+    // Unlike SCID, a brace comment between tags is ignored.
     let game =
         parse_single_game("[Event \"x\"]\n{between}\n[Site \"y\"]\n\n{Intro} 1. e4 *\n").unwrap();
     assert_eq!(game.site, "y");
@@ -1089,7 +1089,7 @@ fn test_pre_game_text_whitespace() {
 
 #[test]
 fn test_pre_game_text_comes_before_the_first_comment() {
-    // Like SCID, a comment between tags is ignored, but the text is kept.
+    // Unlike SCID, a brace comment between tags is ignored. The text is kept.
     let pgn = "Notes\n\n[Event \"x\"]\n{between}\n[Site \"y\"]\n\n{Intro} 1. e4 *\n";
     assert_eq!(first_comments(pgn), [Some("Notes Intro".to_string())]);
 }

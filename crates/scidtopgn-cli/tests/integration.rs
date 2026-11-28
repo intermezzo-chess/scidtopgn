@@ -301,7 +301,7 @@ fn test_cli_pgn_roundtrip() {
     assert_eq!(reread.to_pgn(), source.to_pgn());
 }
 
-// The layout of a .si4 index file, as SCID_DATABASE_FORMAT.md describes
+// The layout of a .si4 index file, as docs/SI4_FORMAT.md describes
 // it. Numbers are big-endian.
 const INDEX_HEADER_SIZE: usize = 182;
 const INDEX_ENTRY_SIZE: usize = 47;

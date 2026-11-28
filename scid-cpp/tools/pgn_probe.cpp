@@ -1,6 +1,8 @@
-// Prints how SCID's PGN parser reads each game in a PGN file: the parse
-// result, the game as SCID would store it, and the messages SCID logged for
-// it. docs/COMPATIBILITY.md compares this output with scidtopgn's behavior.
+// Prints how SCID's PGN parser reads each game in a PGN file: whether the
+// parser reports an error for it, the game as the parser reads it, and the
+// messages it logs. The reference converter skips a game with an error. SCID
+// vs. PC's own importers don't look at it.
+// docs/COMPATIBILITY.md compares this output with scidtopgn's behavior.
 //
 // Build and run from the repository root:
 //
@@ -9,6 +11,11 @@
 //       -lz -o pgn_probe
 //   ./pgn_probe tests/data/notation.pgn
 
+// Define PROBE_TCL to build it with the sources of SCID vs. PC 4.26, whose
+// parser needs Tcl; docs/COMPATIBILITY.md has the command.
+#ifdef PROBE_TCL
+#include <tcl.h>
+#endif
 #include "game.h"
 #include "pgnparse.h"
 #include "textbuf.h"
@@ -20,6 +27,13 @@
 #include <string>
 
 int main(int argc, char ** argv) {
+#ifdef PROBE_TCL
+    Tcl_FindExecutable(argv[0]);
+    if (Tcl_Init(Tcl_CreateInterp()) != TCL_OK) {
+        std::fprintf(stderr, "cannot initialize Tcl\n");
+        return 1;
+    }
+#endif
     if (argc != 2) {
         std::fprintf(stderr, "usage: %s <pgn-file>\n", argv[0]);
         return 1;
@@ -57,7 +71,7 @@ int main(int argc, char ** argv) {
             out += (out.empty() ? "" : " ") + line;
         }
         std::printf("game %d: %s | %s\n", number,
-                    err == OK ? "OK" : "ERROR (SCID skips this game)", out.c_str());
+                    err == OK ? "OK" : "ERROR", out.c_str());
 
         const char * messages = parser.ErrorMessages();
         size_t length = std::strlen(messages);

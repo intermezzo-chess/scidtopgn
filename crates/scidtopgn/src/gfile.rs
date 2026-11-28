@@ -299,7 +299,7 @@ impl GFile {
         Ok(())
     }
 
-    /// Reads the `length` bytes of game data at `offset` into `buf`. Like
+    /// Reads the `length` bytes of game data at `offset` into `buf`. Unlike
     /// SCID, it reads a record that crosses a block boundary.
     ///
     /// # Errors

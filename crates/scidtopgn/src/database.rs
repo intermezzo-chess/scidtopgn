@@ -81,8 +81,8 @@ use shakmaty::{Board, Position, Role};
 ///
 /// # Names that aren't UTF-8
 ///
-/// Older versions of SCID store the player, event, site, and round names of
-/// a Latin-1 or Windows-1252 PGN file as they are, so a name file can hold
+/// A program can store the player, event, site, and round names of a
+/// Latin-1 or Windows-1252 PGN file as they are, so a name file can hold
 /// names that aren't valid UTF-8. When the name file is read, the bytes of
 /// such a name that aren't valid UTF-8 are read as Windows-1252, and
 /// [`converted_names`](Self::converted_names) lists the name. Games read
@@ -1553,8 +1553,8 @@ impl Database {
 
     /// Returns the kind and text of each name that wasn't valid UTF-8 in
     /// the name file and was read as Windows-1252, in the order the file
-    /// stores them. Older versions of SCID store the bytes of a Latin-1 or
-    /// Windows-1252 PGN file unchanged, so their name files can hold such
+    /// stores them. A program can store the bytes of a Latin-1 or
+    /// Windows-1252 PGN file unchanged, so a name file can hold such
     /// names.
     ///
     /// The list is empty once the database has written the names as UTF-8,

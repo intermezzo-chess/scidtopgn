@@ -175,8 +175,8 @@ impl NameBase {
     /// in the order the file stores them. A [`Database`](crate::Database)
     /// empties the list once it has written the names as UTF-8.
     ///
-    /// Older versions of SCID store the bytes of a Latin-1 or Windows-1252
-    /// PGN file unchanged, so their name files can hold such names.
+    /// A program can store the bytes of a Latin-1 or Windows-1252 PGN file
+    /// unchanged, so a name file can hold such names.
     pub(crate) fn converted_names(&self) -> &[(NameType, String)] {
         &self.converted
     }
@@ -500,8 +500,8 @@ fn compute_prefix(s1: &[u8], s2: &[u8]) -> u8 {
 impl NameBase {
     /// Reads a `.sn4` file into this name base, which should be empty.
     ///
-    /// A name that isn't valid UTF-8, as older versions of SCID store
-    /// Latin-1 or Windows-1252 names, is converted: the bytes that aren't
+    /// A name that isn't valid UTF-8, as one stored from a Latin-1 or
+    /// Windows-1252 PGN file unchanged, is converted: the bytes that aren't
     /// valid UTF-8 are read as Windows-1252, as
     /// [`PgnParser::from_bytes`](crate::PgnParser::from_bytes) reads them,
     /// and [`converted_names`](Self::converted_names) lists the name. As in
