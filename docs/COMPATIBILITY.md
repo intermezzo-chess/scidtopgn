@@ -710,7 +710,7 @@ c++ -std=c++17 -Wno-register -w -Iscid-cpp/scid \
 ./pgn_probe tests/data/notation.pgn
 ```
 
-To build it with the unmodified sources of 4.26 instead, on macOS, after `compat/build-scidvspc`:
+To build it with the unmodified sources of 4.26 instead, on macOS, after `compat/build-scidvspc`, in `bash` or `sh`, as `zsh` doesn't split `$objs` into words:
 
 ```sh
 V=$PWD/target/compat/scidvspc

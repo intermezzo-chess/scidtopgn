@@ -11,7 +11,7 @@ This records the audit of `SCID_DATABASE_FORMAT.md` for [#145](https://github.co
 
 ## Summary
 
-The old document has 184 items: 86 confirmed, 61 corrected, 26 historical, 11 qualified. None is unresolved; [Remaining uncertainties](#remaining-uncertainties) lists what the new documents leave open.
+The old document has 184 items: 85 confirmed, 62 corrected, 26 historical, 11 qualified. None is unresolved; [Remaining uncertainties](#remaining-uncertainties) lists what the new documents leave open.
 
 The errors that would have made a reader wrong:
 
@@ -35,7 +35,7 @@ The errors that would have made a reader wrong:
 | A description is cut at trailing NULs | It ends at its first NUL; SCID leaves other data after that |
 | Base type: flags. Auto-load: the game's number. Timestamp: modification time | A number. The game's number plus 1. Unused |
 | Black in the test database is "Cheparinov, I" | "Murshed, N" |
-| `game.cpp` lines 59111–59348, `gfile.h` 250–270, `sc_game.cpp` | `game.cpp` has 5,148 lines, `gfile.h` 88; `sc_game.cpp` doesn't exist |
+| `game.cpp` lines 59111–59348, `gfile.h` 250–270, `sc_game.cpp` | in 4.26, `game.cpp` has 5,150 lines, `gfile.h` 90; `sc_game.cpp` doesn't exist |
 
 Removed as historical: progress reports, success rates, APIs and paths that no longer exist, advice on memory and I/O, and opening names. scidtopgn's own rules are in [COMPATIBILITY.md](COMPATIBILITY.md). The statements #143 corrected are kept.
 
@@ -43,13 +43,15 @@ Removed as historical: progress reports, success rates, APIs and paths that no l
 
 ### Source
 
-SourceForge's revision 3570 was compared with `scid_vs_pc-4.26.tgz`: all 84 `.cpp` and `.h` files in `src` (not its subdirectories) are byte-identical. Revisions 3580, 3585, 3590, 3600, and 3790 aren't. `scid-cpp/scid`, labeled revision 3585, differs from 4.26 in `bytebuf.cpp`, `game.cpp`, `game.h`, `myassert.cpp`, `naglatex.h`, `pgnparse.cpp`, `pgnparse.h`, and `stored.h`. None of those differences changes how the files are encoded, and this audit doesn't rely on that copy.
+SourceForge's revision 3570 was compared with `scid_vs_pc-4.26.tgz`: all 84 `.cpp` and `.h` files in `src` (not its subdirectories) are byte-identical. Revisions 3580, 3585, 3590, 3600, and 3790 aren't. `scid-cpp/scid`, labeled revision 3585, differs from 4.26 in `bytebuf.cpp`, `game.cpp`, `game.h`, `myassert.cpp`, `naglatex.h`, `pgnparse.cpp`, `pgnparse.h`, and `stored.h`. Its `stored.h` is a stub, so the copy writes 0 as every entry's stored-line code: the `.si4` of the five fixtures it wrote differs from what 4.26 writes at that byte. The other differences don't change how the files are encoded, and this audit doesn't rely on that copy.
 
 Each C++ link in the format documents was checked to name something on its line in 4.26, and each Rust link a function, constant, or type in its file.
 
 ### Probes
 
 `format_probe.cpp` uses SCID 4.26's code, and `format_probe.py` only the rules in the format documents. From the repository root, after `compat/run` or `compat/build-scidvspc` has built SCID, on macOS:
+
+These commands are for `bash` or `sh`: `zsh` doesn't split `$objs` into words.
 
 ```sh
 V=$PWD/target/compat/scidvspc
@@ -82,7 +84,7 @@ foreach flag {D W B M E N P T K Q ! ? U 1 2 3 4 5 6} { sc_game flag $flag [incr 
 sc_base close $base
 ```
 
-`frequency` is a database of 8,388,607 games of player A against themselves, which [`format_probe_frequency.py`](../scid-cpp/tools/format_probe_frequency.py) writes. SCID opens it, and saves one more such game, with a frequency of 16,777,216. Opening the result then crashes SCID, with and without `-fast`. Importing `self.pgn` onto the first database with scidtopgn writes the same name file. Importing 32,769 copies of `self.pgn` instead, with `sc_base import` or scidtopgn, gives a database that both open, whose player has the frequency 65,536:
+`frequency` is a database of 8,388,607 games of player A against themselves, which [`format_probe_frequency.py`](../scid-cpp/tools/format_probe_frequency.py) writes. SCID opens it, and saves one more such game, with a frequency of 16,777,216. Opening the result then crashes SCID, with and without `-fast`. Importing `self.pgn` onto the first database with scidtopgn writes the same name file. Importing 32,769 copies of `self.pgn` onto the first database instead, with `sc_base import` or scidtopgn, gives a database that both open, whose player has the frequency 65,536:
 
 ```sh
 printf '[Event "E"]\n[Site "S"]\n[White "A"]\n[Black "A"]\n[Round "1"]\n\n1. e4 *\n' > self.pgn
@@ -134,7 +136,7 @@ In `blocks.sg4`, the padding after the records of blocks 0 to 3 is all zeros.
 
 ### Results: damaged files
 
-SCID's error numbers are from `error.h`: 109 and 110 are versions, 152 is corrupt, 402 and 406 are decoding errors, and 602 is reading past the end. "Reads" means that SCID decodes the game. The two programs print the same for `e4`, `d4`, `compactdate`, `flags8`, `emptyvar`, `nagfirst`, `nagafter`, and the three with comments that SCID reads, whose entries fit their games.
+SCID's error numbers are from `error.h`: 109 and 110 are versions, 152 is corrupt, 402 and 406 are decoding errors, and 602 is reading past the end. "Reads" means that SCID decodes the game. The two programs print the same for `elo4095`, `signed`, `maxfreq`, `e4`, `d4`, `compactdate`, `flags8`, `emptyvar`, `nagfirst`, `nagafter`, and the three with comments that SCID reads, whose entries fit their games.
 
 | Database | What is wrong | SCID 4.26 | scidtopgn `validate` |
 | --- | --- | --- | --- |
@@ -149,7 +151,7 @@ SCID's error numbers are from `error.h`: 109 and 110 are versions, 152 is corrup
 | `firstbyte` | Order of first bytes | Reads, with "namebase is denormalized" | No damage |
 | `maxfreq` | Maximum frequency 256, frequencies 1 in 2 bytes | Reads | No damage |
 | `cross` | Record crosses a block | Game corrupt (152) | No damage |
-| `truncated` | Record past the end of the file | Game corrupt (602) | Damaged |
+| `truncated` | Record past the end of the file | Error 602 | Damaged |
 | `zero` | Length 0 | Game corrupt (152) | Damaged |
 | `compactdate` | Event date with code 255 | Reads 2021.3.7 | No damage |
 | `spare` | Tag code 251 | Crashes | No damage |
@@ -175,7 +177,7 @@ SCID's error numbers are from `error.h`: 109 and 110 are versions, 152 is corrup
 | `noend` | No end | Error 602 | Damaged |
 | `after` | Bytes after the comments | Reads | No damage |
 
-For the builds with unsigned `char`, the 17 sources the probe needs were compiled with `-funsigned-char`. Such a build refuses `tests/data/accents` too.
+For the builds with unsigned `char`, the SCID sources the probe links were compiled with `-funsigned-char`. Such a build refuses `tests/data/accents` too.
 
 ### Fixtures
 
@@ -327,6 +329,8 @@ A second full audit of `SI4_FORMAT.md` found two more, which were reproduced and
 
 A second full audit of `SN4_FORMAT.md` found one more, which was corrected: the record whose prefix ends inside a character is at 0x84, not 0x73.
 
+An audit of this record found nine more, which were corrected: the reference converter's copy writes stored-line code 0; two line counts were the copy's, not 4.26's; one inventory item was corrected, not confirmed, which changes the totals; the event dates SCID doesn't store; the list of databases both probes print the same; an error number's label; the 32,769 games' database; the number of sources rebuilt; and the build commands, which need `bash` or `sh`.
+
 ### Not verified
 
 Not verified by either:
@@ -362,7 +366,7 @@ Not verified by either:
 | 85 | **SI4 Header Structure (182 bytes)** | Confirmed |  | S, `fixtures`, `meta` | [SI4_FORMAT](SI4_FORMAT.md#file-header-and-database-metadata) |
 | 87–95 | Table | Corrected | Base type is a number for a kind, not flags. Auto-load's value is the game number plus 1. No text encoding is recorded, and custom flag names are 8 bytes and a NUL. Byte order: confirmed | S, `fixtures`, `meta` | [SI4_FORMAT](SI4_FORMAT.md#file-header-and-database-metadata) |
 | 99 | **Example Header Parsing** | Corrected |  | S, `fixtures`, `meta` | [SI4_FORMAT](SI4_FORMAT.md#file-header-and-database-metadata) |
-| 101–118 | rust block | Corrected | The description was cut only at trailing NULs, so `five.si4` gives unrelated bytes; it ends at the first NUL. The code also borrows a temporary, and doesn't compile. Replaced by a byte dump | S, `fixtures`, `meta` | [SI4_FORMAT](SI4_FORMAT.md#file-header-and-database-metadata) |
+| 101–118 | rust block | Corrected | The description was cut only at trailing NULs, so `five.si4` gives unrelated bytes; it ends at the first NUL. The code doesn't compile. Replaced by a byte dump | S, `fixtures`, `meta` | [SI4_FORMAT](SI4_FORMAT.md#file-header-and-database-metadata) |
 | 120 | **Game Index Entry Structure (47 bytes)** | Confirmed |  | S, `counts`, `ratings`, `flags`, `names66000`, `blocks` | [SI4_FORMAT](SI4_FORMAT.md#game-entries-and-packed-fields) |
 | 124–144 | Table | Corrected | Byte 33 holds the stored-line code as well as the material. The rest is confirmed | S, `counts`, `ratings`, `flags`, `names66000`, `blocks` | [SI4_FORMAT](SI4_FORMAT.md#game-entries-and-packed-fields) |
 | 146 | **Critical Field Specifications** | Confirmed |  | S, `counts`, `ratings`, `flags`, `names66000`, `blocks` | [SI4_FORMAT](SI4_FORMAT.md#game-entries-and-packed-fields) |
@@ -385,7 +389,7 @@ Not verified by either:
 | 245–252 | rust block | Confirmed |  | S, `dates` | [SI4_FORMAT](SI4_FORMAT.md#dates-and-event-dates) |
 | 254 | **Event Date Encoding (12 bits, relative)** | Confirmed |  | S, `dates` | [SI4_FORMAT](SI4_FORMAT.md#dates-and-event-dates) |
 | 258–262 | text block | Corrected | The year's code is 1 to 7 for a date, and 0 for none | S, `dates` | [SI4_FORMAT](SI4_FORMAT.md#dates-and-event-dates) |
-| 265–273 | text block | Qualified | Right, but for game years 1 and 2 SCID stores no event date | S, `dates` | [SI4_FORMAT](SI4_FORMAT.md#dates-and-event-dates) |
+| 265–273 | text block | Qualified | Right, but for a game whose year is unknown, 1, or 2, SCID stores no event date | S, `dates` | [SI4_FORMAT](SI4_FORMAT.md#dates-and-event-dates) |
 | 276–279 | rust block | Confirmed | 0x90A | S, `dates` | [SI4_FORMAT](SI4_FORMAT.md#dates-and-event-dates) |
 | 281 | **Complete Date Field Parsing** | Confirmed |  | S, `dates` | [SI4_FORMAT](SI4_FORMAT.md#dates-and-event-dates) |
 | 283–313 | rust block | Confirmed | Duplicates the rules above; replaced by a worked value | S, `dates` | [SI4_FORMAT](SI4_FORMAT.md#dates-and-event-dates) |
@@ -415,7 +419,7 @@ Not verified by either:
 | 522–544 | text block | Corrected | The flags byte has no custom flags; moves take 1 or 2 bytes, not 1 to 3; the comments' text comes after the end marker, not among the moves; the FEN and the tags' end were missing | S, `tags`, `random` | [SG4_FORMAT](SG4_FORMAT.md#tags-and-starting-positions) |
 | 546 | **Multiple Games Per SG4 File** | Confirmed |  | S, `blocks`, `cross` | [SG4_FORMAT](SG4_FORMAT.md#blocks-offsets-and-record-boundaries) |
 | 550 | **Game Organization in SG4 File** | Corrected |  | S, `blocks`, `cross` | [SG4_FORMAT](SG4_FORMAT.md#blocks-offsets-and-record-boundaries) |
-| 553–560 | cpp block | Corrected | Not the source quoted: `gfile.h` has 88 lines, and the block check, the point of the function, was left out | S, `blocks`, `cross` | [SG4_FORMAT](SG4_FORMAT.md#blocks-offsets-and-record-boundaries) |
+| 553–560 | cpp block | Corrected | Not the source quoted: `gfile.h` has 90 lines, and the block check, the point of the function, was left out | S, `blocks`, `cross` | [SG4_FORMAT](SG4_FORMAT.md#blocks-offsets-and-record-boundaries) |
 | 563–574 | cpp block | Historical | `sc_game.cpp` doesn't exist in 4.26, and the loop isn't from its source | None needed | Removed |
 | 576 | **Game Boundary Detection** | Corrected | The comments were missing from the order of parts | S, `tags`, `random` | [SG4_FORMAT](SG4_FORMAT.md#tags-and-starting-positions) |
 | 585 | **SCID's Multi-Game Reading Strategy** | Historical |  | None needed | Removed |
@@ -448,7 +452,7 @@ Not verified by either:
 | 865 | **Game Data Elements** | Confirmed |  | S, `random` | [SG4_FORMAT](SG4_FORMAT.md#piece-specific-move-encoding) |
 | 867 | **Move Encoding (Piece-Specific Binary Format)** | Confirmed |  | S, `random` | [SG4_FORMAT](SG4_FORMAT.md#piece-specific-move-encoding) |
 | 872–875 | text block | Confirmed |  | S, `random` | [SG4_FORMAT](SG4_FORMAT.md#piece-specific-move-encoding) |
-| 882 | **Piece-Specific Move Values** | Corrected | Every cited line, 59111 to 59348, is past the end of `game.cpp`, which has 5,148 | S, `random` | [SG4_FORMAT](SG4_FORMAT.md#piece-specific-move-encoding) |
+| 882 | **Piece-Specific Move Values** | Corrected | Every cited line, 59111 to 59348, is past the end of `game.cpp`, which has 5,150 | S, `random` | [SG4_FORMAT](SG4_FORMAT.md#piece-specific-move-encoding) |
 | 888–899 | cpp block | Confirmed |  | S, `random` | [SG4_FORMAT](SG4_FORMAT.md#piece-specific-move-encoding) |
 | 902–915 | Table | Confirmed |  | S, `random` | [SG4_FORMAT](SG4_FORMAT.md#piece-specific-move-encoding) |
 | 924–931 | cpp block | Confirmed |  | S, `random` | [SG4_FORMAT](SG4_FORMAT.md#piece-specific-move-encoding) |
@@ -482,7 +486,7 @@ Not verified by either:
 | 1240 | **Critical Implementation Details** | Confirmed |  | S, `random` | [SG4_FORMAT](SG4_FORMAT.md#piece-numbering-and-position-tracking) |
 | 1242 | **Piece List Management - The Foundation of Move Decoding** | Confirmed |  | S, `random` | [SG4_FORMAT](SG4_FORMAT.md#piece-numbering-and-position-tracking) |
 | 1246 | **Core Data Structures (from SCID `position.h`)** | Confirmed |  | S, `random` | [SG4_FORMAT](SG4_FORMAT.md#piece-numbering-and-position-tracking) |
-| 1248–1253 | cpp block | Confirmed |  | S, `random` | [SG4_FORMAT](SG4_FORMAT.md#piece-numbering-and-position-tracking) |
+| 1248–1253 | cpp block | Corrected | `Count` is a `uint`, not a `byte` | S, `random` | [SG4_FORMAT](SG4_FORMAT.md#piece-numbering-and-position-tracking) |
 | 1259 | **Standard Starting Position Piece Numbers** | Confirmed |  | S, `random` | [SG4_FORMAT](SG4_FORMAT.md#piece-numbering-and-position-tracking) |
 | 1263–1280 | Table | Confirmed |  | S, `random` | [SG4_FORMAT](SG4_FORMAT.md#piece-numbering-and-position-tracking) |
 | 1282 | **FEN Position Initialization** | Corrected | Only the piece with number 0 moves when the king comes, to the king's number; the others keep theirs | S, `random` | [SG4_FORMAT](SG4_FORMAT.md#piece-numbering-and-position-tracking) |
