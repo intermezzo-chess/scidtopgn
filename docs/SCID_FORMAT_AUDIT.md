@@ -331,6 +331,8 @@ A second full audit of `SN4_FORMAT.md` found one more, which was corrected: the 
 
 An audit of this record found ten more, which were corrected: the reference converter's copy writes stored-line code 0; two line counts were the copy's, not 4.26's; one inventory item was corrected, not confirmed, which changes the totals; the event dates SCID doesn't store; the list of databases both probes print the same; an error number's label; the 32,769 games' database; the number of sources rebuilt; an old example's compile error; and the build commands, which need `bash` or `sh`. Checking the corrections, it found that the copy's parser stubs change its output too.
 
+A third full audit of the PGN section, by a new reviewer, found three more, which were reproduced and corrected: Unicode whitespace before the first tag line, which SCID doesn't read as whitespace; the event dates that the date export bug applies to; and the probe's filter, which can leave out only some of the moves.
+
 ### Not verified
 
 Not verified by either:
