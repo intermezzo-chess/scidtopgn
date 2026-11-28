@@ -325,6 +325,8 @@ A full audit of `SCID_FORMAT.md` found six more, which were reproduced and corre
 
 A second full audit of `SI4_FORMAT.md` found two more, which were reproduced and corrected: for a game with a starting position, SCID doesn't compute its promotion flags, material, and half-moves again when it saves it, so editing the moves can leave them out of date; and a description of 107 bytes clears the field's last byte.
 
+A second full audit of `SN4_FORMAT.md` found one more, which was corrected: the record whose prefix ends inside a character is at 0x84, not 0x73.
+
 ### Not verified
 
 Not verified by either:

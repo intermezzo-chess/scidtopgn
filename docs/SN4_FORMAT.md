@@ -120,7 +120,7 @@ for i in 0 .. number of names - 1:
 
 `read_uint` and `read_bytes` fail at the end of the file. SCID's reader doesn't check any of these bounds.
 
-`tests/data/accents.sn4`, offset 0x73, has a prefix that ends inside a character. `ü` is `c3 bc`, `Ä` is `c3 84`, and `É` is `c3 89`:
+In `tests/data/accents.sn4`, the record at offset 0x84 has a prefix that ends inside a character, after the record at 0x73. `ü` is `c3 bc`, `Ä` is `c3 84`, and `É` is `c3 89`:
 
 ```text
 offset  ID     freq len prefix suffix
